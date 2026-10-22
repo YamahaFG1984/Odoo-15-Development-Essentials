@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>附录 C · 术语表与概念地图 — Odoo 20 开发入门</title>
+<meta name="description" content="Odoo 开发中最常用的一百来个术语，每个都用一句话解释并链接到详细讲解的章节；再用三张概念地图把模块、模型、视图、动作、菜单、权限之间的关系串起来。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-chapter="22">
+<div id="app">
+<aside id="sidebar"></aside>
+<main>
+<span class="chapter-eyebrow">附录 C</span>
+<h1>术语表与概念地图</h1>
+<p class="lede">
+  Odoo 的概念不算多，但名字容易混：模型和模块差一个字，动作和视图总是一起出现，「继承」有四种……
+  这个附录先用三张概念地图把核心概念串起来，帮你建立整体印象；后半部分是按主题排列的术语表，每个词一句话解释，并注明在哪一章详细讲解。
+  读到一半忘了某个词是什么意思，就回到这里查一查。
+</p>
+
+<div id="chapter-toc"></div>
+
+<h2 id="map-module">概念地图一：一个模块里有什么</h2>
+
+<p>
+  Odoo 里所有功能都以<strong>模块</strong>为单位交付。一个模块就是一个目录，里面按约定放着不同种类的文件。
+  这张图把术语表里的大部分概念放到了它们在模块里的「位置」上：
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 470" role="img" aria-label="一个 Odoo 模块的组成：清单、模型、安全、数据、视图动作菜单、静态资源、报表、控制器、翻译、测试">
+  <rect class="bx-d" x="20" y="20" width="720" height="430" rx="14"/>
+  <text class="ttl mono" x="40" y="48">library_app/　一个模块</text>
+
+  <rect class="bx" x="40" y="62" width="680" height="54" rx="10"/>
+  <text class="lbl mono" x="56" y="86">__manifest__.py　清单</text>
+  <text class="sm" x="56" y="104">名字、版本、depends（依赖哪些模块）、data（加载哪些数据文件）、assets（前端资源）</text>
+
+  <text class="ttl on-b" x="40" y="146">数据与逻辑</text>
+  <rect class="bx-b" x="40" y="156" width="215" height="122" rx="10"/>
+  <text class="lbl mono on-b" x="56" y="180">models/</text>
+  <text class="sm" x="56" y="202">模型类（Python）</text>
+  <text class="sm" x="56" y="220">字段：存什么数据</text>
+  <text class="sm" x="56" y="238">方法：业务逻辑</text>
+  <text class="sm" x="56" y="256">计算字段、约束、onchange</text>
+  <rect class="bx-b" x="40" y="288" width="215" height="70" rx="10"/>
+  <text class="lbl mono on-b" x="56" y="312">security/</text>
+  <text class="sm" x="56" y="332">组、ir.access 访问规则</text>
+  <rect class="bx-b" x="40" y="368" width="215" height="70" rx="10"/>
+  <text class="lbl mono on-b" x="56" y="392">data/　demo/</text>
+  <text class="sm" x="56" y="412">初始数据、演示数据（XML ID）</text>
+
+  <text class="ttl on-g" x="272" y="146">后台界面</text>
+  <rect class="bx-g" x="272" y="156" width="215" height="122" rx="10"/>
+  <text class="lbl mono on-g" x="288" y="180">views/</text>
+  <text class="sm" x="288" y="202">视图：表单、列表、看板……</text>
+  <text class="sm" x="288" y="220">动作：打开哪个模型的哪些视图</text>
+  <text class="sm" x="288" y="238">菜单：用户点哪里触发动作</text>
+  <text class="sm" x="288" y="256">继承视图：修改别人的界面</text>
+  <rect class="bx-g" x="272" y="288" width="215" height="70" rx="10"/>
+  <text class="lbl mono on-g" x="288" y="312">static/src/</text>
+  <text class="sm" x="288" y="332">OWL 组件、JS、SCSS → 资源包</text>
+  <rect class="bx-g" x="272" y="368" width="215" height="70" rx="10"/>
+  <text class="lbl mono on-g" x="288" y="392">report/</text>
+  <text class="sm" x="288" y="412">报表动作 + QWeb 模板 → PDF</text>
+
+  <text class="ttl on-p" x="504" y="146">对外与周边</text>
+  <rect class="bx-p" x="504" y="156" width="216" height="70" rx="10"/>
+  <text class="lbl mono on-p" x="520" y="180">controllers/</text>
+  <text class="sm" x="520" y="200">路由：网站、门户页面</text>
+  <rect class="bx-p" x="504" y="236" width="216" height="62" rx="10"/>
+  <text class="lbl mono on-p" x="520" y="260">i18n/</text>
+  <text class="sm" x="520" y="280">.pot 模板、zh_CN.po 译文</text>
+  <rect class="bx-p" x="504" y="308" width="216" height="62" rx="10"/>
+  <text class="lbl mono on-p" x="520" y="332">tests/</text>
+  <text class="sm" x="520" y="352">自动化测试</text>
+  <rect class="bx-p" x="504" y="380" width="216" height="58" rx="10"/>
+  <text class="lbl mono on-p" x="520" y="404">migrations/</text>
+  <text class="sm" x="520" y="424">版本升级时的数据迁移脚本</text>
+</svg>
+<figcaption>图 C-1　模块的标准目录结构。除了清单，其他目录都是约定俗成的，但遵守约定能让别人（和未来的你）一眼找到东西</figcaption>
+</figure>
+
+<h2 id="map-click">概念地图二：点一下菜单，发生了什么</h2>
+
+<p>
+  模型、视图、动作、菜单是新手最容易搅在一起的四个概念。看看用户点击「图书」菜单后，它们是怎样接力的：
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 410" role="img" aria-label="点击菜单后的流程：菜单指向动作，动作指定模型和视图，Web 客户端加载视图并通过 RPC 调用 ORM，ORM 检查权限后生成 SQL 查询数据库">
+  <rect class="bx" x="20" y="20" width="140" height="70" rx="10"/>
+  <text class="ttl" x="90" y="46" text-anchor="middle">① 菜单</text>
+  <text class="sm mono" x="90" y="66" text-anchor="middle">ir.ui.menu</text>
+  <text class="sm" x="90" y="82" text-anchor="middle">「图书」</text>
+
+  <rect class="bx-a" x="200" y="20" width="250" height="70" rx="10"/>
+  <text class="ttl on-a" x="325" y="46" text-anchor="middle">② 窗口动作</text>
+  <text class="sm mono" x="325" y="66" text-anchor="middle">ir.actions.act_window</text>
+  <text class="sm mono" x="325" y="82" text-anchor="middle">res_model · view_mode · domain</text>
+
+  <rect class="bx-g" x="490" y="20" width="250" height="70" rx="10"/>
+  <text class="ttl on-g" x="615" y="46" text-anchor="middle">③ 视图</text>
+  <text class="sm mono" x="615" y="66" text-anchor="middle">ir.ui.view（list、form…）</text>
+  <text class="sm" x="615" y="82" text-anchor="middle">合并所有继承视图后的 arch</text>
+
+  <path class="ln" d="M162 55 H196" marker-end="url(#ar)"/>
+  <path class="ln" d="M452 55 H486" marker-end="url(#ar)"/>
+  <text class="sm" x="179" y="46" text-anchor="middle">action</text>
+
+  <rect class="bx-g" x="200" y="130" width="540" height="64" rx="10"/>
+  <text class="ttl on-g" x="470" y="156" text-anchor="middle">④ Web 客户端（浏览器里的 OWL 应用）</text>
+  <text class="sm" x="470" y="178" text-anchor="middle">按视图结构渲染界面；需要数据时发起 RPC：/web/dataset/call_kw → web_search_read</text>
+  <path class="ln" d="M325 92 V126" marker-end="url(#ar)"/>
+  <path class="ln" d="M615 92 V126" marker-end="url(#ar)"/>
+
+  <rect class="bx-b" x="200" y="234" width="540" height="84" rx="10"/>
+  <text class="ttl on-b" x="470" y="260" text-anchor="middle">⑤ 服务器：ORM</text>
+  <text class="sm" x="470" y="282" text-anchor="middle">在环境 env（谁、哪个公司、什么上下文）下，对模型 library.book 执行方法</text>
+  <text class="sm" x="470" y="302" text-anchor="middle">检查 ir.access 许可与限制 → 把域（domain）翻译成 SQL → 返回记录集的字段值</text>
+  <path class="ln-b" d="M470 196 V230" marker-end="url(#ar-b)"/>
+
+  <rect class="bx-p" x="200" y="350" width="540" height="44" rx="10"/>
+  <text class="lbl on-p" x="470" y="377" text-anchor="middle">⑥ PostgreSQL：表 library_book 里的行</text>
+  <path class="ln-p" d="M470 320 V346" marker-end="url(#ar-p)"/>
+
+  <rect class="bx-d" x="20" y="130" width="140" height="264" rx="10"/>
+  <text class="lbl" x="90" y="160" text-anchor="middle">谁定义它们？</text>
+  <text class="sm" x="90" y="190" text-anchor="middle">①②③ 都是模块</text>
+  <text class="sm" x="90" y="208" text-anchor="middle">XML 数据文件里的</text>
+  <text class="sm" x="90" y="226" text-anchor="middle">记录，靠 XML ID</text>
+  <text class="sm" x="90" y="244" text-anchor="middle">互相引用</text>
+  <text class="sm" x="90" y="282" text-anchor="middle">⑤ 的模型和字段</text>
+  <text class="sm" x="90" y="300" text-anchor="middle">由 Python 类定义</text>
+  <text class="sm" x="90" y="338" text-anchor="middle">⑥ 的表结构由 ORM</text>
+  <text class="sm" x="90" y="356" text-anchor="middle">根据模型自动创建</text>
+</svg>
+<figcaption>图 C-2　菜单只管「在哪儿点」，动作决定「打开什么」，视图决定「长什么样」，模型决定「有什么数据、能做什么」</figcaption>
+</figure>
+
+<div class="box key">
+  <div class="t">一句话区分</div>
+  <p>
+    <strong>模块</strong>（module）是交付单位，一个目录；<strong>模型</strong>（model）是数据结构，一个 Python 类、一张表。
+    一个模块可以定义很多个模型，也可以只修改别的模块的模型。
+  </p>
+</div>
+
+<h2 id="map-inherit">概念地图三：四种「继承」</h2>
+
+<p>「继承」在 Odoo 里有好几种含义，它们解决的问题不同（第 4 章）：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 290" role="img" aria-label="四种继承：类继承就地扩展模型，原型继承复制出新模型，委托继承用多对一关联，视图继承用 XPath 修改视图">
+  <rect class="bx-b" x="20" y="20" width="350" height="120" rx="12"/>
+  <text class="ttl on-b" x="36" y="46">类继承（最常用）</text>
+  <text class="sm mono" x="36" y="70">_inherit = "library.book"</text>
+  <text class="sm" x="36" y="94">就地扩展已有模型：加字段、改方法。</text>
+  <text class="sm" x="36" y="114">还是那个模型、那张表，所有人都看得到改动。</text>
+
+  <rect class="bx-g" x="390" y="20" width="350" height="120" rx="12"/>
+  <text class="ttl on-g" x="406" y="46">原型继承</text>
+  <text class="sm mono" x="406" y="70">_name = "x.new"; _inherit = "mail.thread"</text>
+  <text class="sm" x="406" y="94">以已有模型（通常是混入类）为模板，</text>
+  <text class="sm" x="406" y="114">创建一个新模型，新表。</text>
+
+  <rect class="bx-p" x="20" y="152" width="350" height="120" rx="12"/>
+  <text class="ttl on-p" x="36" y="178">委托继承</text>
+  <text class="sm mono" x="36" y="202">_inherits = {"res.partner": "partner_id"}</text>
+  <text class="sm" x="36" y="226">新模型「嵌入」一条父记录，父模型的字段</text>
+  <text class="sm" x="36" y="246">看起来像自己的。例：用户嵌入伙伴。</text>
+
+  <rect class="bx-a" x="390" y="152" width="350" height="120" rx="12"/>
+  <text class="ttl on-a" x="406" y="178">视图继承</text>
+  <text class="sm mono" x="406" y="202">inherit_id + &lt;xpath position="after"&gt;</text>
+  <text class="sm" x="406" y="226">不改原视图文件，用 XPath 定位节点，</text>
+  <text class="sm" x="406" y="246">在它前后插入、替换或修改属性。</text>
+</svg>
+<figcaption>图 C-3　前三种作用于模型，最后一种作用于视图。日常开发中九成的「继承」是类继承和视图继承</figcaption>
+</figure>
+
+<h2 id="g-platform">术语表：平台与运行</h2>
+
+<dl class="terms">
+  <dt id="t-odoo">社区版 / 企业版</dt><dd>社区版（Community）开源，LGPL-3 许可；企业版（Enterprise）在社区版之上增加了部分应用和功能，需要订阅。本教程的内容两者通用。<a href="ch01.html">第 1 章</a></dd>
+  <dt id="t-module">模块（module / addon）</dt><dd>功能的交付单位：一个包含清单文件的目录。安装、升级、卸载都以模块为单位。<a href="ch03.html">第 3 章</a></dd>
+  <dt id="t-app">应用（application）</dt><dd>清单里 <code>application: True</code> 的模块，会显示在应用列表的默认筛选里、出现在主菜单上。其余的模块是「技术模块」，提供功能但不单独成为一个应用。<a href="ch03.html">第 3 章</a></dd>
+  <dt id="t-manifest">清单（manifest）</dt><dd>模块目录里的 <code>__manifest__.py</code>，一个 Python 字典：名字、版本、依赖、数据文件、资源包、许可证。<a href="ch03.html">第 3 章</a></dd>
+  <dt id="t-depends">依赖（depends）</dt><dd>清单里列出的「本模块需要先装哪些模块」。决定了安装顺序，也决定了你能继承哪些模型和视图。<a href="ch04.html">第 4 章</a></dd>
+  <dt id="t-addons-path">插件路径（addons_path）</dt><dd>Odoo 查找模块的目录列表。每一项是「装着模块的目录」，而不是模块本身。<a href="ch02.html">第 2 章</a></dd>
+  <dt id="t-conf">配置文件</dt><dd>用 <code>-c</code> 指定的 ini 文件，<code>[options]</code> 段里写命令行选项的长期设置。<a href="ch02.html">第 2 章</a></dd>
+  <dt id="t-master">主密码（master password）</dt><dd>配置文件里的 <code>admin_passwd</code>，保护数据库管理器（建库、删库、备份）。和任何数据库里的用户密码无关。<a href="ch02.html">第 2 章</a></dd>
+  <dt id="t-debug">开发者模式（debug mode）</dt><dd>浏览器端的开关（网址加 <code>?debug=1</code>），显示技术菜单、字段名提示和调试菜单。<a href="ch01.html">第 1 章</a></dd>
+  <dt id="t-dev">开发选项（--dev）</dt><dd>服务器端的开关：<code>reload</code> 自动重启、<code>xml</code> 从文件读视图、<code>qweb</code>、<code>access</code> 打印更多调试信息。和开发者模式是两回事。<a href="ch02.html">第 2 章</a></dd>
+  <dt id="t-install">安装 / 升级（-i / -u）</dt><dd>安装：第一次加载模块的模型和数据；升级：按当前代码重新加载，更新表结构和数据记录。注意「升级模块」和「升级 Odoo 大版本」是两件事。<a href="ch03.html">第 3 章</a></dd>
+  <dt id="t-shell">odoo shell</dt><dd>带 Odoo 环境的 Python 交互命令行，<code>env</code> 已经准备好，可以直接操作数据。<a href="ch07.html">第 7 章</a></dd>
+  <dt id="t-registry">注册表（registry）</dt><dd>某个数据库的所有模型类的集合，服务器加载模块后在内存里建立。<code>env['library.book']</code> 就是从注册表里取出模型。<a href="ch07.html">第 7 章</a></dd>
+  <dt id="t-filestore">文件存储（filestore）</dt><dd>附件的实际文件存放在 <code>data_dir</code> 下的目录里，而不是数据库里。备份时数据库和文件存储都要备份。<a href="ch15.html">第 15 章</a></dd>
+  <dt id="t-worker">worker</dt><dd>生产环境的多进程模式里处理请求的子进程，数量由 <code>workers</code> 设置；为 0 时是开发用的多线程模式。<a href="ch15.html">第 15 章</a></dd>
+  <dt id="t-oca">OCA</dt><dd>Odoo Community Association，维护着上千个开源模块的社区组织，也制定了一套被广泛采用的编码规范。<a href="ch19.html">第 19 章</a></dd>
+  <dt id="t-odoo-sh">Odoo.sh</dt><dd>Odoo 官方的云托管平台，基于 Git 分支自动构建和部署。<a href="ch02.html">第 2 章</a></dd>
+</dl>
+
+<h2 id="g-orm">术语表：模型与 ORM</h2>
+
+<dl class="terms">
+  <dt id="t-orm">ORM</dt><dd>对象关系映射：用 Python 类和方法操作数据库，而不用手写 SQL。Odoo 的 ORM 还负责权限检查、计算字段、缓存和翻译。<a href="ch06.html">第 6 章</a></dd>
+  <dt id="t-model">模型（model）</dt><dd>一种业务数据的定义，例如 <code>library.book</code>。一个 Python 类，通常对应数据库里的一张表。<a href="ch06.html">第 6 章</a></dd>
+  <dt id="t-name">_name / _description</dt><dd>模型的技术名（带点号，如 <code>library.book</code>）和给人看的名称。表名由技术名把点换成下划线得到。<a href="ch06.html">第 6 章</a></dd>
+  <dt id="t-field">字段（field）</dt><dd>模型的一个属性，如 <code>fields.Char</code>、<code>fields.Date</code>。大部分字段对应表里的一列。<a href="ch06.html">第 6 章</a></dd>
+  <dt id="t-m2o">多对一（Many2one）</dt><dd>指向另一个模型的一条记录，例如图书的出版社。字段名按惯例以 <code>_id</code> 结尾。<a href="ch06.html">第 6 章</a></dd>
+  <dt id="t-o2m">一对多（One2many）</dt><dd>多对一的「反向」：列出指向自己的所有记录，例如借书单的明细行。不占表里的列。字段名以 <code>_ids</code> 结尾。<a href="ch06.html">第 6 章</a></dd>
+  <dt id="t-m2m">多对多（Many2many）</dt><dd>两边都可以有多条，例如图书和作者。由 ORM 自动建立中间表。<a href="ch06.html">第 6 章</a></dd>
+  <dt id="t-compute">计算字段（compute）</dt><dd>值由方法算出来的字段。用 <code>@api.depends</code> 声明依赖，依赖变了自动重算；加 <code>store=True</code> 就存进数据库，可以搜索和分组。<a href="ch06.html">第 6 章</a></dd>
+  <dt id="t-related">关联字段（related）</dt><dd>直接显示关联记录上的某个字段，例如 <code>related="partner_id.email"</code>。是计算字段的一种简写。<a href="ch06.html">第 6 章</a></dd>
+  <dt id="t-constraint">约束（constraint）</dt><dd>保证数据合法的规则。数据库级的用 <code>models.Constraint</code>，Python 级的用 <code>@api.constrains</code> 装饰的方法。<a href="ch06.html">第 6 章</a></dd>
+  <dt id="t-record">记录（record）</dt><dd>模型的一条数据，相当于表里的一行，用整数 <code>id</code> 标识。<a href="ch07.html">第 7 章</a></dd>
+  <dt id="t-recordset">记录集（recordset）</dt><dd>同一模型的零条、一条或多条记录的有序集合。模型方法里的 <code>self</code> 就是记录集，所以要用 <code>for</code> 循环逐条处理。<a href="ch07.html">第 7 章</a></dd>
+  <dt id="t-env">环境（env）</dt><dd>执行 ORM 操作的「身份」：数据库游标、当前用户、当前公司、上下文。<code>self.env</code> 随处可用。<a href="ch07.html">第 7 章</a></dd>
+  <dt id="t-context">上下文（context）</dt><dd>随请求传递的一个字典，携带语言、时区、默认值（<code>default_字段</code>）等信息。用 <code>with_context()</code> 修改。<a href="ch07.html">第 7 章</a></dd>
+  <dt id="t-domain">域（domain）</dt><dd>描述查询条件的表达式，如 <code>[("state", "=", "done")]</code>。用在搜索、动作、权限规则、视图过滤器里。Odoo 20 也可以用 <code>Domain</code> 对象组合条件。<a href="ch07.html">第 7 章</a></dd>
+  <dt id="t-sudo">sudo()</dt><dd>返回一个跳过权限检查的记录集副本。在需要「代表系统」做事时使用，要谨慎，别用来掩盖权限设计的问题。<a href="ch07.html">第 7 章</a></dd>
+  <dt id="t-command">Command</dt><dd>写 x2many 字段时用的指令：<code>Command.create()</code>、<code>Command.link()</code>、<code>Command.set()</code> 等，从 <code>odoo.fields</code> 导入。<a href="ch07.html">第 7 章</a></dd>
+  <dt id="t-transaction">事务（transaction）</dt><dd>一次请求里的所有数据库修改要么全部提交，要么在出错时全部回滚。所以报错时不会留下「改了一半」的数据。<a href="ch07.html">第 7 章</a></dd>
+  <dt id="t-transient">临时模型（TransientModel）</dt><dd>数据会被定期自动清理的模型，用来实现向导对话框。<a href="ch08.html">第 8 章</a></dd>
+  <dt id="t-abstract">抽象模型（AbstractModel）</dt><dd>没有数据表的模型，用来定义可复用的字段和方法（混入类），或者作为报表的数据提供者。<a href="ch06.html">第 6 章</a></dd>
+  <dt id="t-display-name">显示名（display_name）</dt><dd>记录在下拉框、面包屑里显示的名字，默认取 <code>name</code> 字段（或 <code>_rec_name</code> 指定的字段），可以重写 <code>_compute_display_name</code> 自定义。<a href="ch06.html">第 6 章</a></dd>
+</dl>
+
+<h2 id="g-inherit">术语表：继承与扩展</h2>
+
+<dl class="terms">
+  <dt id="t-inherit">类继承（_inherit）</dt><dd>只写 <code>_inherit</code>，就地扩展已有模型。最常用的扩展方式。<a href="ch04.html">第 4 章</a></dd>
+  <dt id="t-prototype">原型继承</dt><dd>同时写 <code>_name</code>（新名字）和 <code>_inherit</code>，以已有模型为模板创建新模型。<a href="ch04.html">第 4 章</a></dd>
+  <dt id="t-inherits">委托继承（_inherits）</dt><dd>新模型通过一个多对一字段嵌入父模型的记录，像拥有父模型的全部字段。<a href="ch04.html">第 4 章</a></dd>
+  <dt id="t-mixin">混入类（mixin）</dt><dd>提供通用能力的抽象模型，通过原型继承「混入」到自己的模型里，如 <code>mail.thread</code>（消息）、<code>mail.activity.mixin</code>（活动）。<a href="ch04.html">第 4 章</a></dd>
+  <dt id="t-super">super()</dt><dd>重写方法时调用原来的实现。几乎所有重写都应该调用它，否则原有的逻辑就丢了。<a href="ch04.html">第 4 章</a></dd>
+  <dt id="t-view-inherit">视图继承（inherit_id）</dt><dd>新建一个视图记录，用 <code>inherit_id</code> 指向要修改的视图，里面用 XPath 或字段定位修改内容。<a href="ch04.html">第 4 章</a></dd>
+  <dt id="t-xpath">XPath</dt><dd>在 XML 里定位节点的表达式，如 <code>//field[@name='isbn']</code>。配合 <code>position</code>（before / after / inside / replace / attributes）使用。<a href="ch04.html">第 4 章</a></dd>
+</dl>
+
+<h2 id="g-data">术语表：数据文件</h2>
+
+<dl class="terms">
+  <dt id="t-xmlid">外部标识符 / XML ID</dt><dd>记录的「代码名」，格式是 <code>模块名.标识符</code>，如 <code>library_app.action_library_book</code>。数据文件靠它互相引用，升级时靠它找到要更新的记录。开发者模式下可以在调试菜单的 Metadata 里查看。<a href="ch05.html">第 5 章</a></dd>
+  <dt id="t-datafile">数据文件</dt><dd>清单 <code>data</code> 里列出的 XML 或 CSV 文件，安装和升级时按顺序加载，用来创建视图、菜单、权限、初始数据等记录。<a href="ch05.html">第 5 章</a></dd>
+  <dt id="t-noupdate">noupdate</dt><dd><code>&lt;data noupdate="1"&gt;</code> 里的记录只在安装时创建，之后升级不再覆盖，用来保护用户可能修改的数据。<a href="ch05.html">第 5 章</a></dd>
+  <dt id="t-demo">演示数据（demo）</dt><dd>清单 <code>demo</code> 里的数据文件，只在建库时选择加载演示数据时才会加载。<a href="ch05.html">第 5 章</a></dd>
+</dl>
+
+<h2 id="g-ui">术语表：界面</h2>
+
+<dl class="terms">
+  <dt id="t-view">视图（view）</dt><dd>描述界面长什么样的 XML，存在 <code>ir.ui.view</code> 里。同一个模型通常有表单、列表、搜索等多个视图。<a href="ch10.html">第 10 章</a></dd>
+  <dt id="t-arch">arch</dt><dd>视图的 XML 结构本身。调试菜单的 Computed Arch 显示合并所有继承之后的最终结构。<a href="ch10.html">第 10 章</a></dd>
+  <dt id="t-form">表单 / 列表 / 搜索视图</dt><dd>最基本的三种：表单（form）编辑一条记录；列表（list，旧称 tree）显示多条；搜索（search）定义搜索框里的字段、过滤器和分组。<a href="ch10.html">第 10 章</a></dd>
+  <dt id="t-kanban">看板视图（kanban）</dt><dd>卡片式的视图，卡片内容用 QWeb 模板 <code>&lt;t t-name="card"&gt;</code> 描述，常按阶段分列显示。<a href="ch11.html">第 11 章</a></dd>
+  <dt id="t-action">动作（action）</dt><dd>「点了之后做什么」的记录。窗口动作打开某个模型的视图；服务器动作执行代码；报表动作生成 PDF；客户端动作打开一个前端组件。<a href="ch03.html">第 3 章</a></dd>
+  <dt id="t-menu">菜单（menu）</dt><dd><code>ir.ui.menu</code> 的记录，组成界面上的导航。叶子菜单指向一个动作。<a href="ch03.html">第 3 章</a></dd>
+  <dt id="t-widget">部件（widget）</dt><dd>字段在界面上的显示方式，如 <code>widget="many2many_tags"</code>、<code>widget="statusbar"</code>。同一个字段可以用不同部件显示。<a href="ch10.html">第 10 章</a></dd>
+  <dt id="t-button">按钮（type="object" / "action"）</dt><dd>表单上的按钮：<code>object</code> 调用模型方法，<code>action</code> 执行一个动作。<a href="ch10.html">第 10 章</a></dd>
+  <dt id="t-modifier">动态属性（invisible / readonly / required）</dt><dd>在视图里写成表达式，根据记录的值动态控制字段或按钮，如 <code>invisible="state == 'done'"</code>。取代了旧版的 <code>attrs</code>。<a href="ch10.html">第 10 章</a></dd>
+  <dt id="t-smart-button">智能按钮（smart button）</dt><dd>表单右上角显示统计数字的按钮，点击跳转到相关记录。<a href="ch10.html">第 10 章</a></dd>
+  <dt id="t-chatter">消息区（chatter）</dt><dd>表单旁边的消息、关注者和活动区域，由 <code>mail.thread</code> 混入类提供。<a href="ch04.html">第 4 章</a></dd>
+  <dt id="t-qweb">QWeb</dt><dd>Odoo 的模板语言，用 <code>t-if</code>、<code>t-foreach</code>、<code>t-field</code> 等属性。在服务器端渲染报表和网页，在浏览器端渲染 OWL 组件。<a href="ch11.html">第 11 章</a></dd>
+  <dt id="t-owl">OWL</dt><dd>Odoo 自己的前端组件框架，整个后台界面都是用它写的。<a href="ch11.html">第 11 章</a></dd>
+  <dt id="t-assets">资源包（assets bundle）</dt><dd>清单 <code>assets</code> 里声明的 JS、CSS、XML 文件，被合并打包后发给浏览器，如 <code>web.assets_backend</code>。<a href="ch11.html">第 11 章</a></dd>
+  <dt id="t-report">报表（report）</dt><dd>报表动作 + 服务器端 QWeb 模板，渲染成 HTML 再转换成 PDF。<a href="ch12.html">第 12 章</a></dd>
+</dl>
+
+<h2 id="g-security">术语表：用户与安全</h2>
+
+<dl class="terms">
+  <dt id="t-user">用户（res.users）</dt><dd>能登录的账号。分内部用户、门户用户、公共用户三类。每个用户都关联一个伙伴记录。<a href="ch14.html">第 14 章</a></dd>
+  <dt id="t-partner">伙伴（res.partner）</dt><dd>任何「人或组织」：客户、供应商、联系人、公司、用户本人。Odoo 里最常被关联的模型。<a href="ch14.html">第 14 章</a></dd>
+  <dt id="t-company">公司（res.company）与多公司</dt><dd>一个数据库可以管理多家公司，记录上的 <code>company_id</code> 决定它属于哪家，访问规则据此隔离数据。<a href="ch14.html">第 14 章</a></dd>
+  <dt id="t-group">组（res.groups）</dt><dd>权限的载体：用户属于若干组，访问规则、菜单、视图元素都可以限定给某些组。<a href="ch03.html">第 3 章</a></dd>
+  <dt id="t-privilege">作用域（res.groups.privilege）</dt><dd>Odoo 19 起把同一个应用的组（如「用户」「管理员」）归到一个作用域下，用户设置页面按作用域显示一个下拉框。<a href="ch03.html">第 3 章</a></dd>
+  <dt id="t-access">访问规则（ir.access）</dt><dd>Odoo 20 统一的权限记录：对某个模型、某个组，允许哪些操作（crud 的组合），以及可选的域。带组的是「许可」，多条之间是「或」；不带组的是「限制」，多条之间是「且」。<a href="ch03.html">第 3 章</a></dd>
+  <dt id="t-superuser">超级用户</dt><dd>跳过一切权限检查的身份（<code>sudo()</code>，或调试菜单的 Become Superuser）。注意 admin 账号并不是超级用户。<a href="ch07.html">第 7 章</a></dd>
+  <dt id="t-portal-user">门户用户 / 公共用户</dt><dd>门户用户是能登录前台「我的账户」的外部人员（如客户）；公共用户代表未登录的网站访客。<a href="ch13.html">第 13 章</a></dd>
+  <dt id="t-apikey">API 密钥（API key）</dt><dd>给外部程序用的凭证，代替密码。JSON-2 API 用 <code>Authorization: bearer</code> 请求头携带它。<a href="ch09.html">第 9 章</a></dd>
+</dl>
+
+<h2 id="g-logic">术语表：业务逻辑与集成</h2>
+
+<dl class="terms">
+  <dt id="t-decorators">方法装饰器</dt><dd><code>@api.depends</code>（计算依赖）、<code>@api.constrains</code>（约束）、<code>@api.onchange</code>（表单里的即时联动）、<code>@api.model</code>（不依赖具体记录）、<code>@api.model_create_multi</code>（批量创建）。<a href="ch08.html">第 8 章</a></dd>
+  <dt id="t-onchange">onchange</dt><dd>用户在表单里修改字段时立即触发的逻辑，只影响界面上的未保存数据。能用计算字段解决的，优先用计算字段。<a href="ch08.html">第 8 章</a></dd>
+  <dt id="t-exceptions">UserError / ValidationError</dt><dd>给用户看的错误。抛出后当前事务回滚，界面弹出消息。<a href="ch08.html">第 8 章</a></dd>
+  <dt id="t-wizard">向导（wizard）</dt><dd>基于临时模型的对话框，收集参数后执行一个操作，比如批量发消息。<a href="ch08.html">第 8 章</a></dd>
+  <dt id="t-cron">计划任务（ir.cron）</dt><dd>定时执行的服务器动作，例如每天凌晨清理数据。<a href="ch08.html">第 8 章</a></dd>
+  <dt id="t-automation">自动化规则（base.automation）</dt><dd>不写代码，在界面上配置「当……时，做……」的规则。<a href="ch08.html">第 8 章</a></dd>
+  <dt id="t-test">测试（TransactionCase）</dt><dd>自动化测试的基类，每个测试在独立的保存点里运行，结束后回滚。用 <code>--test-tags</code> 运行。<a href="ch08.html">第 8 章</a></dd>
+  <dt id="t-json2">JSON-2 API</dt><dd>Odoo 19 起推荐的外部接口：<code>POST /json/2/模型/方法</code>，用 API 密钥认证。取代旧的 XML-RPC / JSON-RPC。<a href="ch09.html">第 9 章</a></dd>
+  <dt id="t-controller">控制器（controller）与路由</dt><dd>处理网址请求的 Python 类，方法用 <code>@http.route</code> 装饰，可以返回网页或 JSON。<a href="ch13.html">第 13 章</a></dd>
+  <dt id="t-portal">门户（portal）</dt><dd>给外部用户（客户、供应商）用的前台「我的账户」页面，可以查看属于自己的单据。<a href="ch13.html">第 13 章</a></dd>
+  <dt id="t-i18n">翻译（i18n）</dt><dd>界面文字的多语言支持：代码里用 <code>self.env._()</code> 标记，模块的 <code>i18n/</code> 目录放 .pot 模板和各语言的 .po 文件。<a href="ch18.html">第 18 章</a></dd>
+</dl>
+
+<h2 id="g-deploy">术语表：部署与维护</h2>
+
+<dl class="terms">
+  <dt id="t-proxy">反向代理（reverse proxy）</dt><dd>位于 Odoo 前面的 Nginx 等服务器，负责 HTTPS、压缩、转发。Odoo 要开启 <code>proxy_mode</code> 才能正确识别客户端信息。<a href="ch15.html">第 15 章</a></dd>
+  <dt id="t-websocket">WebSocket / gevent</dt><dd>实时通知（新消息、在线状态）走 WebSocket 连接，多进程模式下由监听 <code>gevent_port</code>（8072）的 gevent 进程处理。<a href="ch15.html">第 15 章</a></dd>
+  <dt id="t-staging">预发布环境（staging）</dt><dd>生产数据库的一份副本，用来在上线前测试更新。<a href="ch15.html">第 15 章</a></dd>
+  <dt id="t-neutralize">中和（neutralize）</dt><dd>复制出来的数据库里关掉发邮件、计划任务等对外操作，避免预发布环境误发邮件给真实客户。<a href="ch15.html">第 15 章</a></dd>
+  <dt id="t-migration">迁移脚本（migrations/）</dt><dd>模块版本号升高时自动执行的 Python 脚本，用来转换旧数据。<a href="ch19.html">第 19 章</a></dd>
+  <dt id="t-upgrade-code">upgrade_code</dt><dd>Odoo 自带的命令，把旧版本写法的模块代码自动改写成新版本写法。<a href="ch16.html">附录 A</a></dd>
+  <dt id="t-docker">镜像 / 容器（Docker）</dt><dd>镜像是打包好的运行环境（如 <code>odoo:20</code>），容器是它运行起来的实例。<a href="ch17.html">第 17 章</a></dd>
+</dl>
+
+<h2 id="summary">小结</h2>
+
+<ul>
+  <li>模块是交付单位，模型是数据结构；一个模块可以定义、也可以扩展多个模型。</li>
+  <li>菜单 → 动作 → 视图 + 模型 → ORM → 数据库，是后台界面工作的主线。</li>
+  <li>菜单、动作、视图、权限、数据都是数据库里的记录，由模块的数据文件创建，靠 XML ID 互相引用。</li>
+  <li>「继承」有四种：类继承、原型继承、委托继承作用于模型，视图继承作用于界面。</li>
+</ul>
+
+<div class="exercise">
+  <h3>自测</h3>
+  <p>不看上面的解释，试着用一句话回答下面的问题。答不上来的，回到对应的章节复习：</p>
+  <ol>
+    <li>模块和模型有什么区别？一个模块里可以有几个模型？</li>
+    <li>用户点击一个菜单后，Odoo 是怎么知道要打开哪个模型、用哪个视图的？</li>
+    <li>记录和记录集有什么区别？为什么按钮方法里通常要写 <code>for record in self</code>？</li>
+    <li>类继承和原型继承在写法上差在哪里？结果有什么不同？</li>
+    <li>XML ID 有什么用？为什么升级模块时需要它？</li>
+    <li>ir.access 的「许可」和「限制」有什么区别？</li>
+    <li>开发者模式和 <code>--dev</code> 选项分别是什么？</li>
+  </ol>
+</div>
+<div id="pager"></div>
+</main>
+</div>
+<script src="assets/site.js"></script>
+</body>
+</html>

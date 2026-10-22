@@ -558,7 +558,7 @@ class LibraryCheckout(models.Model):
   <text class="ttl on-b" x="145" y="56" text-anchor="middle">super() 之前</text>
   <text class="sm" x="36" y="84">· 记录还没变（write 时 self 是旧值）</text>
   <text class="sm" x="36" y="106">· create 时新记录还不存在</text>
-  <text class="sm" x="36" y="128">· 可以读、可以<strong>修改 vals</strong></text>
+  <text class="sm" x="36" y="128">· 可以读、可以<tspan font-weight="700">修改 vals</tspan></text>
   <text class="sm" x="36" y="150">· 适合：补充 / 调整要写入的值</text>
   <text class="sm" x="36" y="172">· 改 vals 最安全，不会引起递归</text>
 
@@ -1472,7 +1472,7 @@ library.checkout(1,)
     <li>调试期间日志会不断插进来。用 <code>--log-handler=odoo.http.server:WARNING</code> 关掉请求日志，或 <code>--log-level=warn</code> 降低整体日志级别。</li>
     <li>退出调试器后终端如果「失灵」（输入不显示），盲打 <code>reset</code> 回车即可恢复。</li>
     <li>更好用的调试器：<code>pip install ipdb</code>（带补全和高亮）或 <code>pudb</code>（全屏的终端界面）。设置环境变量 <code>PYTHONBREAKPOINT=ipdb.set_trace</code> 后，<code>breakpoint()</code> 就会使用它。</li>
-    <li>VS Code、PyCharm 等编辑器也可以直接附加到 Odoo 进程做图形化调试：用编辑器的 Python 调试配置运行 <code>odoo-bin</code> 即可。</li>
+    <li>VS Code、PyCharm 等编辑器也可以直接附加到 Odoo 进程做图形化调试：用编辑器的 Python 调试配置运行 <code>odoo-bin</code> 即可，第 17 章有 VS Code 的完整配置。</li>
   </ul>
 </div>
 

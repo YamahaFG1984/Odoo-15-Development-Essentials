@@ -1,0 +1,657 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 19 章 · 编码规范与工具链 — Odoo 20 开发入门</title>
+<meta name="description" content="从「能跑」到「能交付」：Odoo 与 OCA 的模块结构、文件和 XML ID 命名、模型类内部顺序、清单版本号与迁移脚本，以及用 ruff、pylint-odoo、prettier 和 pre-commit 自动检查代码，Git 提交信息的写法。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-chapter="19">
+<div id="app">
+<aside id="sidebar"></aside>
+<main>
+<span class="chapter-eyebrow">第 19 章</span>
+<h1>编码规范与工具链</h1>
+<p class="lede">
+  到这里，你已经能写出可以运行的 Odoo 模块了。但「能跑」和「能交付」之间还隔着一段路：同事要能读懂，半年后的你要能改动，
+  客户的系统要能平稳升级，提交给 OCA 的代码要能通过审核。这一章介绍 Odoo 社区通用的<strong>编码规范</strong>，
+  以及一套能在每次提交前<strong>自动检查</strong>代码的工具链。规范大多是约定，没有对错之分，但遵守大家都在用的那一套，能省掉无数沟通成本。
+</p>
+
+<div class="goals">
+  <h4>本章目标</h4>
+  <ul>
+    <li>按约定组织模块目录，给文件、模型、XML ID、方法起名</li>
+    <li>按推荐的顺序排列模型类的内容，写出风格一致的 Python 和 XML</li>
+    <li>理解清单版本号的含义，用迁移脚本处理数据结构的变化</li>
+    <li>用 ruff、pylint-odoo、prettier 检查和格式化代码，用 pre-commit 在提交前自动运行</li>
+    <li>用 Odoo 约定的格式写 Git 提交信息，按 Odoo 版本组织分支</li>
+  </ul>
+</div>
+
+<div id="chapter-toc"></div>
+
+<h2 id="why">规范来自哪里</h2>
+
+<p>Odoo 世界里有两套被广泛参考的规范，它们大部分是一致的：</p>
+
+<div class="cards">
+  <div class="card"><span class="ic">&#128216;</span><h4>Odoo 官方编码规范</h4><p>Odoo 官方文档「Coding guidelines」一节，规定了官方模块的目录结构、命名和代码风格。Odoo 源码根目录下还有一个 <code>ruff.toml</code>，就是官方使用的检查规则。</p></div>
+  <div class="card"><span class="ic">&#129309;</span><h4>OCA 规范</h4><p>OCA 在官方规范的基础上增加了清单、版本号、README 等要求，并把它们做成了一套自动化工具（模板仓库 + pre-commit 配置），所有 OCA 仓库统一使用。</p></div>
+</div>
+
+<p>本章以官方规范为主线，在 OCA 有额外要求的地方单独说明。如果你的代码不打算开源，OCA 的额外要求可以按需采用，但工具链本身同样值得用起来。</p>
+
+<h2 id="layout">模块的目录与文件命名</h2>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 470" role="img" aria-label="推荐的模块目录结构和文件命名规则">
+  <rect class="bx" x="20" y="20" width="360" height="430" rx="10"/>
+  <text class="ttl mono" x="36" y="46">library_app/</text>
+  <text class="sm mono" x="48" y="72">├── __init__.py</text>
+  <text class="sm mono" x="48" y="92">├── __manifest__.py</text>
+  <text class="sm mono" x="48" y="112">├── models/</text>
+  <text class="sm mono" x="48" y="132">│   ├── library_book.py</text>
+  <text class="sm mono" x="48" y="152">│   └── res_partner.py</text>
+  <text class="sm mono" x="48" y="172">├── views/</text>
+  <text class="sm mono" x="48" y="192">│   ├── library_book_views.xml</text>
+  <text class="sm mono" x="48" y="212">│   ├── res_partner_views.xml</text>
+  <text class="sm mono" x="48" y="232">│   └── library_menus.xml</text>
+  <text class="sm mono" x="48" y="252">├── security/</text>
+  <text class="sm mono" x="48" y="272">│   ├── library_security.xml</text>
+  <text class="sm mono" x="48" y="292">│   └── ir.access.csv</text>
+  <text class="sm mono" x="48" y="312">├── data/  demo/  report/  wizard/</text>
+  <text class="sm mono" x="48" y="332">├── controllers/</text>
+  <text class="sm mono" x="48" y="352">├── static/description/icon.png</text>
+  <text class="sm mono" x="48" y="372">├── static/src/{js,xml,scss}/</text>
+  <text class="sm mono" x="48" y="392">├── i18n/</text>
+  <text class="sm mono" x="48" y="412">├── migrations/</text>
+  <text class="sm mono" x="48" y="432">└── tests/test_library_book.py</text>
+
+  <rect class="bx-b" x="410" y="104" width="330" height="58" rx="8"/>
+  <text class="lbl on-b" x="424" y="126">一个主模型一个文件，用模型名命名</text>
+  <text class="sm" x="424" y="146">library.book → library_book.py</text>
+  <rect class="bx-g" x="410" y="172" width="330" height="70" rx="8"/>
+  <text class="lbl on-g" x="424" y="194">视图按模型分文件：&lt;模型&gt;_views.xml</text>
+  <text class="sm" x="424" y="214">继承别人的模型也用对方的模型名命名；</text>
+  <text class="sm" x="424" y="232">菜单单独放在 &lt;模块&gt;_menus.xml</text>
+  <rect class="bx-p" x="410" y="252" width="330" height="54" rx="8"/>
+  <text class="lbl on-p" x="424" y="274">组定义放 &lt;模块&gt;_security.xml</text>
+  <text class="sm" x="424" y="294">访问规则放 ir.access.csv</text>
+  <rect class="bx-a" x="410" y="316" width="330" height="54" rx="8"/>
+  <text class="lbl on-a" x="424" y="338">模块图标，应用列表里显示</text>
+  <text class="sm" x="424" y="358">前端代码按类型分子目录</text>
+  <rect class="bx" x="410" y="380" width="330" height="70" rx="8"/>
+  <text class="lbl" x="424" y="402">测试文件以 test_ 开头，</text>
+  <text class="sm" x="424" y="422">并在 tests/__init__.py 里导入，</text>
+  <text class="sm" x="424" y="440">否则测试运行器找不到它们</text>
+  <path class="ln-b" d="M240 132 H406"/>
+  <path class="ln-g" d="M300 202 H406"/>
+  <path class="ln-p" d="M290 282 H406"/>
+  <path class="ln-a" d="M304 352 C 340 352, 360 344, 406 344"/>
+  <path class="ln-d" d="M300 432 H406"/>
+</svg>
+<figcaption>图 19-1　官方推荐的模块结构。看到文件名，就知道里面放的是什么</figcaption>
+</figure>
+
+<div class="tw"><table>
+  <tr><th>对象</th><th>约定</th><th>例子</th></tr>
+  <tr><td>模块名</td><td>小写加下划线；同一组模块用相同的前缀</td><td><code>library_app</code>、<code>library_member</code></td></tr>
+  <tr><td>模型名</td><td>小写，用点分隔，<strong>单数</strong>；以模块的业务领域开头</td><td><code>library.book</code>、<code>library.checkout.line</code></td></tr>
+  <tr><td>向导模型</td><td><code>&lt;相关模型&gt;.&lt;动作&gt;</code></td><td><code>library.checkout.massmessage</code></td></tr>
+  <tr><td>Python 类名</td><td>驼峰式，和模型名对应</td><td><code>LibraryBook</code></td></tr>
+  <tr><td>文件名</td><td>模型名的点换成下划线</td><td><code>library_book.py</code>、<code>library_book_views.xml</code></td></tr>
+</table></div>
+
+<h2 id="xmlid">XML ID 的命名</h2>
+
+<p>XML ID 一旦发布就不应该再改（别的模块可能引用了它），所以从一开始就按约定起名很重要。官方规范是<strong>以模型名开头</strong>：</p>
+
+<div class="tw"><table>
+  <tr><th>记录类型</th><th>格式</th><th>例子</th></tr>
+  <tr><td>视图</td><td><code>&lt;模型&gt;_view_&lt;类型&gt;</code></td><td><code>library_book_view_form</code>、<code>library_book_view_list</code></td></tr>
+  <tr><td>继承视图</td><td><code>&lt;被继承的视图&gt;_inherit_&lt;当前模块&gt;</code></td><td><code>view_partner_form_inherit_library_app</code></td></tr>
+  <tr><td>窗口动作</td><td><code>&lt;模型&gt;_action</code>，其他的加后缀</td><td><code>library_book_action</code>、<code>library_book_action_borrowed</code></td></tr>
+  <tr><td>菜单</td><td><code>&lt;模型&gt;_menu</code>；顶级菜单 <code>&lt;模块&gt;_menu_root</code></td><td><code>library_book_menu</code>、<code>library_app_menu_root</code></td></tr>
+  <tr><td>组</td><td><code>&lt;模块&gt;_group_&lt;名字&gt;</code></td><td><code>library_app_group_manager</code></td></tr>
+  <tr><td>访问规则</td><td><code>access_&lt;模型&gt;_&lt;组&gt;</code></td><td><code>access_library_book_manager</code></td></tr>
+</table></div>
+
+<div class="box note">
+  <div class="t">&#9432; 本教程的写法</div>
+  <p>
+    为了和原书保持一致，前面章节用的是 <code>view_form_book</code>、<code>action_library_book</code> 这样的名字。它们完全能用，只是不符合官方的推荐格式。
+    新项目建议直接采用上表的约定；已经上线的模块则不要为了改名而改名——改 XML ID 会让 Odoo 删掉旧记录、新建一条，引用旧 ID 的地方都会出错。
+  </p>
+</div>
+
+<h2 id="python">Python 的约定</h2>
+
+<h3>模型类内部的顺序</h3>
+
+<p>一个模型类往往有几十个字段、几十个方法。按固定的顺序排列，读代码的人就知道去哪里找：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 420" role="img" aria-label="模型类内部推荐的十个部分的排列顺序">
+  <rect class="bx-b" x="20" y="20" width="340" height="38" rx="8"/>
+  <text class="lbl on-b" x="36" y="44">① 私有属性：_name、_description、_inherit、_order</text>
+  <rect class="bx-b" x="20" y="64" width="340" height="38" rx="8"/>
+  <text class="lbl on-b" x="36" y="88">② 默认值方法：_default_&lt;字段&gt;</text>
+  <rect class="bx-g" x="20" y="108" width="340" height="38" rx="8"/>
+  <text class="lbl on-g" x="36" y="132">③ 字段声明</text>
+  <rect class="bx-g" x="20" y="152" width="340" height="38" rx="8"/>
+  <text class="lbl on-g" x="36" y="176">④ 约束与索引：models.Constraint</text>
+  <rect class="bx-g" x="20" y="196" width="340" height="38" rx="8"/>
+  <text class="lbl on-g" x="36" y="220">⑤ 计算、反写、搜索方法（按字段顺序）</text>
+  <rect class="bx-g" x="20" y="240" width="340" height="38" rx="8"/>
+  <text class="lbl on-g" x="36" y="264">⑥ 选择项方法：_selection_&lt;字段&gt;</text>
+  <rect class="bx-p" x="20" y="284" width="340" height="38" rx="8"/>
+  <text class="lbl on-p" x="36" y="308">⑦ @api.constrains 与 @api.onchange 方法</text>
+  <rect class="bx-p" x="20" y="328" width="340" height="38" rx="8"/>
+  <text class="lbl on-p" x="36" y="352">⑧ 重写的 ORM 方法：create、write、unlink</text>
+  <rect class="bx-a" x="20" y="372" width="165" height="38" rx="8"/>
+  <text class="lbl on-a" x="36" y="396">⑨ 动作方法</text>
+  <rect class="bx-a" x="195" y="372" width="165" height="38" rx="8"/>
+  <text class="lbl on-a" x="211" y="396">⑩ 其他业务方法</text>
+
+  <rect class="bx" x="400" y="20" width="340" height="390" rx="10"/>
+  <text class="sm mono" x="416" y="44">class LibraryBook(models.Model):</text>
+  <text class="sm mono" x="416" y="64">    _name = "library.book"</text>
+  <text class="sm mono" x="416" y="82">    _description = "Book"</text>
+  <text class="sm mono" x="416" y="108">    name = fields.Char(required=True)</text>
+  <text class="sm mono" x="416" y="126">    isbn = fields.Char()</text>
+  <text class="sm mono" x="416" y="144">    isbn_valid = fields.Boolean(</text>
+  <text class="sm mono" x="416" y="162">        compute="_compute_isbn_valid")</text>
+  <text class="sm mono" x="416" y="188">    _isbn_uniq = models.Constraint(...)</text>
+  <text class="sm mono" x="416" y="214">    @api.depends("isbn")</text>
+  <text class="sm mono" x="416" y="232">    def _compute_isbn_valid(self): ...</text>
+  <text class="sm mono" x="416" y="258">    @api.constrains("date_published")</text>
+  <text class="sm mono" x="416" y="276">    def _check_date_published(self): ...</text>
+  <text class="sm mono" x="416" y="302">    @api.model_create_multi</text>
+  <text class="sm mono" x="416" y="320">    def create(self, vals_list): ...</text>
+  <text class="sm mono" x="416" y="346">    def action_check_isbn(self): ...</text>
+  <text class="sm mono" x="416" y="372">    def _check_isbn(self): ...</text>
+</svg>
+<figcaption>图 19-2　从「是什么」（属性、字段）到「怎么算」（计算、约束）再到「做什么」（ORM 重写、动作、业务方法）</figcaption>
+</figure>
+
+<h3>命名</h3>
+
+<div class="tw"><table>
+  <tr><th>对象</th><th>约定</th></tr>
+  <tr><td>多对一字段</td><td>以 <code>_id</code> 结尾：<code>publisher_id</code></td></tr>
+  <tr><td>一对多、多对多字段</td><td>以 <code>_ids</code> 结尾：<code>author_ids</code>、<code>line_ids</code></td></tr>
+  <tr><td>计算 / 反写 / 搜索方法</td><td><code>_compute_&lt;字段&gt;</code>、<code>_inverse_&lt;字段&gt;</code>、<code>_search_&lt;字段&gt;</code></td></tr>
+  <tr><td>默认值 / 选择项方法</td><td><code>_default_&lt;字段&gt;</code>、<code>_selection_&lt;字段&gt;</code></td></tr>
+  <tr><td>onchange / 约束方法</td><td><code>_onchange_&lt;字段&gt;</code>、<code>_check_&lt;名字&gt;</code></td></tr>
+  <tr><td>按钮调用的方法</td><td><code>action_&lt;做什么&gt;</code>：<code>action_confirm</code>、<code>action_done</code>（原书用的 <code>button_</code> 前缀也能用，但官方模块统一用 <code>action_</code>）</td></tr>
+  <tr><td>只在内部使用的方法</td><td>以下划线开头：<code>_check_isbn</code>。下划线开头的方法不能通过外部 API 调用</td></tr>
+  <tr><td>变量</td><td>记录集按模型起名：<code>partner</code>、<code>partners</code>；只有存 ID 的变量才用 <code>_id</code> / <code>_ids</code> 结尾。别把一个伙伴记录存进叫 <code>partner_id</code> 的变量</td></tr>
+</table></div>
+
+<h3>几条重要的习惯</h3>
+
+<ul>
+  <li><strong>导入顺序</strong>：标准库 → 第三方库 → <code>odoo</code> → <code>odoo.addons</code> → 本模块的相对导入，每组之间空一行。工具会自动帮你排好。</li>
+  <li><strong>用日志代替 print</strong>：在文件顶部 <code>_logger = logging.getLogger(__name__)</code>，然后 <code>_logger.info("Checked %s books", count)</code>。参数用逗号传，不要用 f-string 先拼好——日志级别不够时，拼接的开销就白费了。</li>
+  <li><strong>不要自己 commit</strong>：<code>self.env.cr.commit()</code> 会打破 Odoo 的事务管理，出错时无法回滚。只有在极少数场合（比如需要分批提交的长任务）才这样做，并加注释说明原因。</li>
+  <li><strong>少写 SQL</strong>：优先用 ORM。必须写 SQL 时用 <code>odoo.tools.SQL</code> 组装，<strong>绝不</strong>用字符串拼接或 <code>%</code> 格式化把变量放进 SQL，那是 SQL 注入漏洞。</li>
+  <li><strong>谨慎使用 sudo()</strong>：只在确实需要越过权限的那一小段代码里用，并且尽量缩小它影响的范围。</li>
+  <li><strong>重写方法要调用 super()</strong>，并返回它的结果（附录 B）。</li>
+</ul>
+
+<h2 id="xml">XML 的约定</h2>
+
+<div class="code" data-lang="xml" data-file="library_app/views/library_book_views.xml">
+<pre>
+&lt;?xml version="1.0" encoding="utf-8"?&gt;
+&lt;odoo&gt;
+    &lt;record id="library_book_view_form" model="ir.ui.view"&gt;
+        &lt;field name="name"&gt;library.book.view.form&lt;/field&gt;
+        &lt;field name="model"&gt;library.book&lt;/field&gt;
+        &lt;field name="arch" type="xml"&gt;
+            &lt;form&gt;
+                ...
+            &lt;/form&gt;
+        &lt;/field&gt;
+    &lt;/record&gt;
+&lt;/odoo&gt;
+</pre>
+</div>
+
+<ul>
+  <li>用 4 个空格缩进；<code>&lt;record&gt;</code> 的属性先写 <code>id</code> 再写 <code>model</code>。</li>
+  <li>视图的 <code>name</code> 字段用模型名加视图类型，点号分隔：<code>library.book.view.form</code>。继承视图的 <code>name</code> 加上 <code>.inherit.&lt;模块&gt;</code>。</li>
+  <li>菜单可以用 <code>&lt;menuitem&gt;</code> 快捷标签，其他记录一律用 <code>&lt;record&gt;</code>。</li>
+  <li>继承视图时，能用 <code>&lt;field name="x" position="after"&gt;</code> 定位的就不用 XPath；必须用 XPath 时，尽量用 <code>name</code> 属性定位，而不是 <code>//group[2]</code> 这种依赖位置的写法——父视图一调整顺序，按位置定位就会出错。</li>
+  <li>不要用 <code>position="replace"</code> 删掉别人视图里的元素，改用 <code>position="attributes"</code> 设置 <code>invisible="1"</code>。删掉的元素可能正被别的模块的继承视图引用。</li>
+</ul>
+
+<h2 id="version">清单与版本号</h2>
+
+<div class="code" data-lang="py" data-file="library_app/__manifest__.py">
+<pre>
+{
+    "name": "Library Management",
+    "summary": "Manage library catalog and book lending.",
+    "version": "20.0.1.1.0",
+    "category": "Services/Library",
+    "author": "Your Company",
+    "website": "https://github.com/your-company/library",
+    "license": "LGPL-3",
+    "depends": ["base"],
+    "data": [
+        "security/library_security.xml",
+        "security/ir.access.csv",
+        "views/library_book_views.xml",
+        "views/library_menus.xml",
+    ],
+    "demo": ["demo/library_book_demo.xml"],
+    "application": True,
+    "installable": True,
+}
+</pre>
+</div>
+
+<p><code>data</code> 列表的顺序很重要（附录 B）：先安全（组要先于引用它的访问规则），再数据和视图，菜单放在最后（菜单要引用动作）。</p>
+
+<h3>版本号的五段含义</h3>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 210" role="img" aria-label="模块版本号 20.0.1.1.0 的五段含义：Odoo 大版本、主版本、次版本、修订号">
+  <rect class="bx-d" x="150" y="24" width="140" height="56" rx="10"/>
+  <text class="ttl mono" x="220" y="60" text-anchor="middle">20.0</text>
+  <rect class="bx-r" x="310" y="24" width="90" height="56" rx="10"/>
+  <text class="ttl mono on-r" x="355" y="60" text-anchor="middle">1</text>
+  <rect class="bx-a" x="420" y="24" width="90" height="56" rx="10"/>
+  <text class="ttl mono on-a" x="465" y="60" text-anchor="middle">1</text>
+  <rect class="bx-g" x="530" y="24" width="90" height="56" rx="10"/>
+  <text class="ttl mono on-g" x="575" y="60" text-anchor="middle">0</text>
+  <text class="ttl" x="300" y="62" text-anchor="middle">.</text>
+  <text class="ttl" x="410" y="62" text-anchor="middle">.</text>
+  <text class="ttl" x="520" y="62" text-anchor="middle">.</text>
+
+  <path class="ln-d" d="M220 82 V108"/>
+  <path class="ln-r" d="M355 82 V108"/>
+  <path class="ln-a" d="M465 82 V108"/>
+  <path class="ln-g" d="M575 82 V108"/>
+  <text class="lbl" x="220" y="128" text-anchor="middle">Odoo 大版本</text>
+  <text class="sm" x="220" y="148" text-anchor="middle">必须是 20.0</text>
+  <text class="lbl on-r" x="355" y="128" text-anchor="middle">主版本</text>
+  <text class="sm" x="355" y="148" text-anchor="middle">不兼容的变化</text>
+  <text class="sm" x="355" y="166" text-anchor="middle">需要迁移</text>
+  <text class="lbl on-a" x="465" y="128" text-anchor="middle">次版本</text>
+  <text class="sm" x="465" y="148" text-anchor="middle">新增功能</text>
+  <text class="sm" x="465" y="166" text-anchor="middle">向后兼容</text>
+  <text class="lbl on-g" x="575" y="128" text-anchor="middle">修订号</text>
+  <text class="sm" x="575" y="148" text-anchor="middle">修 bug</text>
+  <text class="sm" x="380" y="198" text-anchor="middle">后三段就是常见的「语义化版本」（x.y.z），前面加上 Odoo 的大版本号</text>
+</svg>
+<figcaption>图 19-3　OCA 采用的五段式版本号。Odoo 本身只要求以 20.0 开头（或者只写后几段，由 Odoo 自动补上）</figcaption>
+</figure>
+
+<p>
+  版本号不只是给人看的。升级模块时，Odoo 会比较<strong>数据库里记录的版本</strong>和<strong>清单里的新版本</strong>，
+  如果新版本更高，就运行模块 <code>migrations/</code> 目录里对应版本的迁移脚本。所以：<strong>每次发布都要递增版本号</strong>，尤其是改了数据结构的时候。
+</p>
+
+<h3>迁移脚本</h3>
+
+<p>
+  大部分改动 Odoo 都能自动处理：加字段就加列，改视图就更新视图。但有些改动 Odoo 无法猜到你的意图，比如<strong>字段改名</strong>——
+  ORM 只会看到「旧字段没了、多了个新字段」，于是新建一个空列，旧数据就丢了。这时需要迁移脚本：
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 220" role="img" aria-label="升级模块时迁移脚本的执行时机：pre 脚本在模块加载前，post 脚本在加载后，end 脚本在所有模块更新完之后">
+  <rect class="bx" x="20" y="30" width="120" height="60" rx="10"/>
+  <text class="lbl" x="80" y="56" text-anchor="middle">-u library_app</text>
+  <text class="sm" x="80" y="76" text-anchor="middle">1.0.0 → 1.1.0</text>
+  <rect class="bx-a" x="170" y="30" width="140" height="60" rx="10"/>
+  <text class="lbl on-a" x="240" y="56" text-anchor="middle">pre-*.py</text>
+  <text class="sm" x="240" y="76" text-anchor="middle">旧表结构还在</text>
+  <rect class="bx-b" x="340" y="30" width="140" height="60" rx="10"/>
+  <text class="lbl on-b" x="410" y="56" text-anchor="middle">加载模块</text>
+  <text class="sm" x="410" y="76" text-anchor="middle">更新表结构和数据</text>
+  <rect class="bx-g" x="510" y="30" width="110" height="60" rx="10"/>
+  <text class="lbl on-g" x="565" y="56" text-anchor="middle">post-*.py</text>
+  <text class="sm" x="565" y="76" text-anchor="middle">新结构已就绪</text>
+  <rect class="bx-p" x="640" y="30" width="100" height="60" rx="10"/>
+  <text class="lbl on-p" x="690" y="56" text-anchor="middle">end-*.py</text>
+  <text class="sm" x="690" y="76" text-anchor="middle">全部模块之后</text>
+  <path class="ln" d="M142 60 H166" marker-end="url(#ar)"/>
+  <path class="ln" d="M312 60 H336" marker-end="url(#ar)"/>
+  <path class="ln" d="M482 60 H506" marker-end="url(#ar)"/>
+  <path class="ln" d="M622 60 H636" marker-end="url(#ar)"/>
+  <text class="sm on-a" x="240" y="124" text-anchor="middle">适合：改列名、改表名、</text>
+  <text class="sm on-a" x="240" y="142" text-anchor="middle">在 ORM 动手前保存旧数据</text>
+  <text class="sm on-g" x="565" y="124" text-anchor="middle">适合：用 ORM 回填</text>
+  <text class="sm on-g" x="565" y="142" text-anchor="middle">新字段、修正数据</text>
+  <text class="sm" x="380" y="190" text-anchor="middle">脚本放在 migrations/&lt;新版本号&gt;/ 下，只在数据库里的版本低于这个版本时执行一次</text>
+</svg>
+<figcaption>图 19-4　迁移脚本的三个执行时机</figcaption>
+</figure>
+
+<p>假设 1.1.0 版把图书的 <code>date_published</code> 字段改名为 <code>published_on</code>，并且新增了一个由 ISBN 规范化而来的字段。目录结构：</p>
+
+<div class="code" data-lang="text">
+<pre>
+library_app/
+└── migrations/
+    └── 20.0.1.1.0/
+        ├── pre-migrate.py
+        └── post-migrate.py
+</pre>
+</div>
+
+<div class="code" data-lang="py" data-file="migrations/20.0.1.1.0/pre-migrate.py">
+<pre>
+from odoo.tools.sql import column_exists, rename_column
+
+
+def migrate(cr, version):
+    # 在 ORM 创建新列之前，把旧列改名，数据原样保留
+    if column_exists(cr, "library_book", "date_published"):
+        rename_column(cr, "library_book", "date_published", "published_on")
+</pre>
+</div>
+
+<div class="code" data-lang="py" data-file="migrations/20.0.1.1.0/post-migrate.py">
+<pre>
+from odoo import SUPERUSER_ID
+from odoo.api import Environment
+
+
+def migrate(cr, version):
+    env = Environment(cr, SUPERUSER_ID, {})
+    books = env["library.book"].search([("isbn", "!=", False)])
+    for book in books:
+        book.isbn_normalized = book.isbn.replace("-", "")
+</pre>
+</div>
+
+<ul>
+  <li>函数名必须是 <code>migrate</code>，参数是游标和<strong>升级前</strong>的版本号。全新安装时不会执行迁移脚本。</li>
+  <li>文件名必须以 <code>pre-</code>、<code>post-</code> 或 <code>end-</code> 开头，后面的部分随意。</li>
+  <li>pre 阶段只能用 SQL（模型还是旧的）；post 阶段可以像上面那样建一个环境，用 ORM 操作数据。</li>
+  <li>迁移脚本要能<strong>重复执行而不出错</strong>（比如先检查列是否存在），万一升级中途失败需要重跑。</li>
+</ul>
+
+<div class="box tip">
+  <div class="t">&#128161; 先在预发布环境演练</div>
+  <p>迁移脚本出错的代价是生产数据。上线前，一定用生产库的副本（第 15 章的 <code>odoo db duplicate --neutralize</code>）完整跑一遍升级。</p>
+</div>
+
+<h2 id="tools">工具链：让机器检查规范</h2>
+
+<p>规范靠人记是记不住的。下面这些工具能自动发现问题，大部分还能自动修复：</p>
+
+<div class="tw"><table>
+  <tr><th>工具</th><th>检查什么</th><th>例子</th></tr>
+  <tr><td><strong>ruff</strong></td><td>Python 代码风格和常见错误，并能自动格式化。速度极快，取代了 flake8、isort、black 等一堆老工具</td><td>未使用的导入、导入顺序、行太长、可疑的写法</td></tr>
+  <tr><td><strong>pylint-odoo</strong></td><td>Odoo 特有的问题，由 OCA 维护</td><td><code>sql-injection</code>、<code>print-used</code>、<code>method-required-super</code>、<code>manifest-version-format</code>、<code>translation-required</code></td></tr>
+  <tr><td><strong>prettier</strong>（含 XML 插件）</td><td>格式化 XML、JS、CSS、YAML 等</td><td>统一缩进、属性换行</td></tr>
+  <tr><td><strong>eslint</strong></td><td>JavaScript 的问题</td><td>未定义的变量、未使用的导入</td></tr>
+  <tr><td><strong>oca-checks-odoo-module</strong></td><td>模块级的检查</td><td>重复的 XML ID、XML 里已废弃的写法、清单问题</td></tr>
+</table></div>
+
+<h3>ruff：先用起来</h3>
+
+<div class="code" data-lang="bash">
+<pre>
+(env20) $ pip install ruff
+(env20) $ ruff check library_app/          # 检查
+(env20) $ ruff check --fix library_app/    # 检查并自动修复能修的
+(env20) $ ruff format library_app/         # 按统一风格重新排版
+</pre>
+</div>
+
+<p>在仓库根目录放一个配置文件，告诉 ruff 目标 Python 版本和导入分组（这是 OCA 模板的配置精简版）：</p>
+
+<div class="code" data-lang="ini" data-file="ruff.toml">
+<pre>
+target-version = "py312"
+fix = true
+
+[lint]
+extend-select = ["B", "C90", "E501", "I", "UP"]
+
+[lint.per-file-ignores]
+"__init__.py" = ["F401", "I001"]     # __init__.py 里的导入本来就「没被使用」
+"__manifest__.py" = ["B018"]         # 清单只是一个字典表达式
+
+[lint.isort]
+section-order = ["future", "standard-library", "third-party", "odoo", "odoo-addons", "first-party", "local-folder"]
+
+[lint.isort.sections]
+"odoo" = ["odoo"]
+"odoo-addons" = ["odoo.addons"]
+
+[lint.mccabe]
+max-complexity = 16
+</pre>
+</div>
+
+<div class="box tip">
+  <div class="t">&#128161; 编辑器里实时检查</div>
+  <p>VS Code 安装 Ruff 扩展后，问题会在你敲代码时就用波浪线标出来，保存时还能自动格式化。和第 17 章的调试配置一起，开发体验会好很多。</p>
+</div>
+
+<h3>pre-commit：每次提交前自动运行</h3>
+
+<p>
+  工具有了，还得记得运行。<strong>pre-commit</strong> 是一个 Git 钩子管理器：每次 <code>git commit</code> 时，它自动对<strong>这次要提交的文件</strong>运行配置好的检查，
+  有问题就拒绝提交。所有工具的版本都写在配置文件里，团队里每个人用的是完全相同的检查。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 250" role="img" aria-label="pre-commit 的工作流程：git commit 触发各项检查，全部通过才生成提交，否则修复后重新提交">
+  <rect class="bx" x="20" y="90" width="120" height="60" rx="10"/>
+  <text class="lbl mono" x="80" y="125" text-anchor="middle">git commit</text>
+  <rect class="bx-b" x="180" y="20" width="300" height="200" rx="12"/>
+  <text class="ttl on-b" x="330" y="46" text-anchor="middle">pre-commit 钩子</text>
+  <rect class="bx" x="200" y="60" width="125" height="34" rx="6"/><text class="sm" x="262" y="82" text-anchor="middle">ruff check</text>
+  <rect class="bx" x="335" y="60" width="125" height="34" rx="6"/><text class="sm" x="397" y="82" text-anchor="middle">ruff format</text>
+  <rect class="bx" x="200" y="102" width="125" height="34" rx="6"/><text class="sm" x="262" y="124" text-anchor="middle">pylint-odoo</text>
+  <rect class="bx" x="335" y="102" width="125" height="34" rx="6"/><text class="sm" x="397" y="124" text-anchor="middle">prettier</text>
+  <rect class="bx" x="200" y="144" width="125" height="34" rx="6"/><text class="sm" x="262" y="166" text-anchor="middle">XML 语法</text>
+  <rect class="bx" x="335" y="144" width="125" height="34" rx="6"/><text class="sm" x="397" y="166" text-anchor="middle">行尾空格……</text>
+  <text class="sm" x="330" y="204" text-anchor="middle">只检查本次提交涉及的文件</text>
+
+  <rect class="bx-g" x="540" y="30" width="200" height="60" rx="10"/>
+  <text class="lbl on-g" x="640" y="56" text-anchor="middle">全部通过</text>
+  <text class="sm" x="640" y="76" text-anchor="middle">提交成功</text>
+  <rect class="bx-r" x="540" y="150" width="200" height="70" rx="10"/>
+  <text class="lbl on-r" x="640" y="174" text-anchor="middle">有问题：提交被拒绝</text>
+  <text class="sm" x="640" y="194" text-anchor="middle">能自动修的已经改好了，</text>
+  <text class="sm" x="640" y="210" text-anchor="middle">检查后 git add 再提交</text>
+  <path class="ln" d="M142 120 H176" marker-end="url(#ar)"/>
+  <path class="ln-g" d="M482 80 L536 62" marker-end="url(#ar-g)"/>
+  <path class="ln-r" d="M482 160 L536 182" marker-end="url(#ar-r)"/>
+  <path class="ln-d" d="M540 215 C 300 248, 120 240, 80 152" marker-end="url(#ar)"/>
+</svg>
+<figcaption>图 19-5　pre-commit 把「记得检查」变成了「不检查就提交不了」</figcaption>
+</figure>
+
+<p>在仓库根目录新建 <code>.pre-commit-config.yaml</code>。下面是一个适合个人或小团队的精简配置，各工具的版本取自 OCA 模板中 Odoo 20 对应的版本：</p>
+
+<div class="code" data-lang="text" data-file=".pre-commit-config.yaml">
+<pre>
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-xml
+      - id: check-merge-conflict
+      - id: debug-statements        # 拦住忘了删的 breakpoint()
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.8
+    hooks:
+      - id: ruff-check
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+
+  - repo: https://github.com/OCA/pylint-odoo
+    rev: v10.0.11
+    hooks:
+      - id: pylint_odoo
+        args: [--rcfile=.pylintrc]
+</pre>
+</div>
+
+<div class="code" data-lang="ini" data-file=".pylintrc">
+<pre>
+[MASTER]
+load-plugins=pylint_odoo
+score=n
+
+[ODOOLINT]
+valid-odoo-versions=20.0
+manifest-required-keys=license
+
+[MESSAGES CONTROL]
+disable=all
+enable=sql-injection,
+    print-used,
+    method-required-super,
+    method-compute,
+    method-inverse,
+    method-search,
+    manifest-version-format,
+    manifest-required-key,
+    translation-required,
+    attribute-deprecated,
+    eval-used,
+    dangerous-default-value
+</pre>
+</div>
+
+<p>然后安装并启用：</p>
+
+<div class="code" data-lang="bash">
+<pre>
+(env20) $ pip install pre-commit
+(env20) $ pre-commit install            # 在当前仓库安装 Git 钩子（每个仓库做一次）
+(env20) $ pre-commit run --all-files    # 第一次对所有文件跑一遍
+</pre>
+</div>
+
+<p>第一次运行会下载各个工具，稍慢；以后每次 <code>git commit</code> 都会自动执行。</p>
+
+<div class="box note">
+  <div class="t">&#9432; 想要和 OCA 完全一致？</div>
+  <p>
+    OCA 用一个 copier 模板生成所有仓库的配置文件（pre-commit、ruff、pylint、prettier、eslint、GitHub Actions 等）。
+    你的项目也可以直接用它：<code>pip install copier</code>，然后 <code>copier copy https://github.com/OCA/oca-addons-repo-template.git 你的仓库目录</code>，按提示回答几个问题（Odoo 版本选 20.0）。
+    以后模板更新了，运行 <code>copier update</code> 就能同步。
+  </p>
+</div>
+
+<h2 id="git">Git：分支与提交信息</h2>
+
+<h3>仓库与分支</h3>
+
+<p>
+  Odoo 社区的惯例是：一个 Git 仓库放<strong>一组相关的模块</strong>（仓库本身就是一个 addons 目录，可以直接加进 <code>addons_path</code>），
+  并且<strong>每个 Odoo 大版本一个长期分支</strong>，分支名就是版本号：
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 210" role="img" aria-label="按 Odoo 版本组织的长期分支，功能分支从版本分支创建并合并回去">
+  <text class="lbl mono" x="20" y="54">19.0</text>
+  <path class="ln-d" d="M70 50 H740"/>
+  <circle cx="120" cy="50" r="7" class="bx"/><circle cx="220" cy="50" r="7" class="bx"/><circle cx="330" cy="50" r="7" class="bx"/>
+  <text class="sm" x="420" y="40">只修 bug，维护老客户</text>
+
+  <text class="lbl mono" x="20" y="134">20.0</text>
+  <path class="ln-a" d="M70 130 H740"/>
+  <circle cx="300" cy="130" r="7" class="bx-a"/><circle cx="470" cy="130" r="7" class="bx-a"/><circle cx="640" cy="130" r="7" class="bx-a"/>
+  <path class="ln-d" d="M330 57 C 330 100, 290 100, 300 122" marker-end="url(#ar)"/>
+  <text class="sm" x="210" y="98">迁移到 20.0</text>
+
+  <path class="ln-b" d="M470 130 C 490 170, 520 180, 560 180 H600 C 620 180, 630 160, 640 138" marker-end="url(#ar-b)"/>
+  <circle cx="560" cy="180" r="6" class="bx-b"/><circle cx="600" cy="180" r="6" class="bx-b"/>
+  <text class="sm mono on-b" x="440" y="202">20.0-add-library-report</text>
+  <text class="sm" x="660" y="120">合并</text>
+</svg>
+<figcaption>图 19-6　版本分支 + 短期功能分支。功能分支的名字通常以目标版本开头</figcaption>
+</figure>
+
+<h3>提交信息</h3>
+
+<p>Odoo 和 OCA 用同一种格式：第一行是 <code>[标签] 模块名: 简短描述</code>，空一行后写详细说明（为什么改、怎么改的）。</p>
+
+<div class="code" data-lang="text">
+<pre>
+[ADD] library_app: book catalog PDF report
+
+Librarians need a printable list of the books on a shelf.
+The report groups books by publisher and shows the authors.
+</pre>
+</div>
+
+<div class="tw"><table>
+  <tr><th>标签</th><th>含义</th><th>标签</th><th>含义</th></tr>
+  <tr><td><code>[ADD]</code></td><td>新增模块或功能</td><td><code>[FIX]</code></td><td>修复 bug</td></tr>
+  <tr><td><code>[IMP]</code></td><td>改进已有功能</td><td><code>[REF]</code></td><td>重构，功能不变</td></tr>
+  <tr><td><code>[REM]</code></td><td>删除功能或代码</td><td><code>[MOV]</code></td><td>移动文件或代码</td></tr>
+  <tr><td><code>[I18N]</code></td><td>翻译相关</td><td><code>[PERF]</code></td><td>性能优化</td></tr>
+  <tr><td><code>[CLN]</code></td><td>清理代码</td><td><code>[LINT]</code></td><td>修正代码检查问题</td></tr>
+  <tr><td><code>[REV]</code></td><td>撤销之前的提交</td><td><code>[MIG]</code></td><td>把模块迁移到新的 Odoo 版本（OCA 常用）</td></tr>
+</table></div>
+
+<ul>
+  <li>第一行尽量不超过 50 个字符，用英文写，描述「做了什么」，而不是「改了哪个文件」。</li>
+  <li>一个提交只做一件事。修 bug 和重构混在一个提交里，回头查问题时会很痛苦。</li>
+  <li>这样的历史记录可以直接用 <code>git log --oneline</code> 当作更新日志来读。</li>
+</ul>
+
+<h3>.gitignore</h3>
+
+<div class="code" data-lang="text" data-file=".gitignore">
+<pre>
+__pycache__/
+*.py[co]
+.venv/
+env20/
+*.log
+# 编辑器
+.idea/
+.vscode/*
+!.vscode/launch.json
+</pre>
+</div>
+
+<p>数据库备份、文件存储（filestore）、包含密码的配置文件，都不要放进 Git。</p>
+
+<h2 id="summary">小结</h2>
+
+<ul>
+  <li>参照 Odoo 官方编码规范和 OCA 规范；它们大体一致，OCA 多了清单、版本号和工具链的要求。</li>
+  <li>文件按模型命名：<code>library_book.py</code>、<code>library_book_views.xml</code>；XML ID 以模型名开头：<code>library_book_view_form</code>、<code>library_book_action</code>。</li>
+  <li>模型类按「属性 → 字段 → 计算与约束 → ORM 重写 → 动作 → 业务方法」的顺序排列；多对一以 <code>_id</code>、多对多以 <code>_ids</code> 结尾；按钮方法用 <code>action_</code> 前缀。</li>
+  <li>版本号 <code>20.0.主.次.修订</code>，每次发布都要递增；字段改名等 ORM 猜不到的变化，用 <code>migrations/</code> 里的 pre / post 脚本处理。</li>
+  <li>ruff 管 Python 风格，pylint-odoo 管 Odoo 特有问题，prettier 管 XML 和 JS 格式；pre-commit 让它们在每次提交前自动运行。</li>
+  <li>提交信息格式 <code>[TAG] module: summary</code>；每个 Odoo 大版本一个长期分支。</li>
+</ul>
+
+<div class="exercise">
+  <h3>动手练习</h3>
+  <ol>
+    <li>对前面章节写的 <code>library_app</code> 运行 <code>ruff check</code> 和 <code>ruff format --diff</code>，看看有哪些地方不符合规范。</li>
+    <li>按本章的配置给你的模块仓库装上 pre-commit，然后故意在代码里写一行 <code>print("debug")</code>，尝试提交，看看会发生什么。</li>
+    <li>把 <code>library_app</code> 的按钮方法 <code>button_check_isbn</code> 改名为 <code>action_check_isbn</code>，别忘了同时修改视图里的按钮。这需要迁移脚本吗？为什么？</li>
+    <li>给 <code>library.book</code> 的某个字段改名，写一个 pre-migrate 脚本保留旧数据，递增版本号后升级，确认数据还在。</li>
+    <li>把你的模块仓库整理成「每个 Odoo 版本一个分支」的结构，并用 <code>[ADD]</code>、<code>[IMP]</code> 等标签重写最近几次提交的信息（在还没推送的分支上练习）。</li>
+  </ol>
+</div>
+<div id="pager"></div>
+</main>
+</div>
+<script src="assets/site.js"></script>
+</body>
+</html>

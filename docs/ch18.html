@@ -1,0 +1,574 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 18 章 · 多语言与翻译 — Odoo 20 开发入门</title>
+<meta name="description" content="让自己的 Odoo 模块支持简体中文：可翻译文本从哪里来、模型术语与代码术语的两种存储方式、用 odoo i18n 命令导出 .pot 模板和 .po 译文、加载与覆盖翻译，以及 Python、JS、QWeb 里的正确写法。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-chapter="18">
+<div id="app">
+<aside id="sidebar"></aside>
+<main>
+<span class="chapter-eyebrow">第 18 章</span>
+<h1>多语言与翻译</h1>
+<p class="lede">
+  Odoo 的源码和模块一律用英文书写，界面上的中文全部来自<strong>翻译文件</strong>。前面章节写的图书馆模块，切换成中文界面后依然满屏英文——因为我们还没给它做翻译。
+  这一章就来补上：搞清楚 Odoo 的翻译机制，把图书馆模块翻译成简体中文，并学会在代码里正确地标记可翻译文本。
+  即使你的用户只说中文，也值得这样做：代码保持英文，才能和 Odoo 生态里的其他模块、其他开发者顺畅协作。
+</p>
+
+<div class="goals">
+  <h4>本章目标</h4>
+  <ul>
+    <li>为数据库启用简体中文，理解用户语言是怎么决定的</li>
+    <li>知道哪些文本会被翻译，以及「模型术语」和「代码术语」两种机制的区别</li>
+    <li>用 <code>odoo i18n export</code> 导出 <code>.pot</code> 模板，生成并翻译 <code>zh_CN.po</code></li>
+    <li>加载、覆盖、导入翻译，以及改了译文后需要做什么</li>
+    <li>在 Python、JavaScript、QWeb 里正确标记可翻译文本，避开常见的坑</li>
+    <li>让业务数据本身（比如书名）支持多语言</li>
+  </ul>
+</div>
+
+<div id="chapter-toc"></div>
+
+<h2 id="lang">启用中文</h2>
+
+<p>
+  一个数据库可以同时启用多种语言，<strong>每个用户</strong>在自己的偏好设置里选择界面语言。新建的数据库默认只有英语，启用其他语言有三种方式：
+</p>
+
+<div class="tw"><table>
+  <tr><th>方式</th><th>做法</th></tr>
+  <tr><td>建库时指定</td><td><code>odoo db init library --language zh_CN</code>，或者在数据库管理页面建库时选择语言</td></tr>
+  <tr><td>界面上</td><td>「设置 → 语言」区域点「添加语言」，选择「Chinese (Simplified) / 简体中文」</td></tr>
+  <tr><td>命令行</td><td><code>odoo i18n loadlang -c library.conf -d library -l zh_CN</code></td></tr>
+</table></div>
+
+<p>
+  启用一种语言时，Odoo 会为<strong>所有已安装的模块</strong>加载这种语言的翻译。之后再安装新模块，也会自动加载已启用语言的翻译。
+  然后到右上角的头像菜单 → 「我的偏好」，把语言改成简体中文，界面就切换过来了——除了我们自己写的模块。
+</p>
+
+<div class="box note">
+  <div class="t">&#9432; 语言代码 zh_CN</div>
+  <p>
+    Odoo 用 POSIX 格式的语言代码：<code>zh_CN</code>（简体中文）、<code>zh_TW</code>（繁体中文，台湾）、<code>zh_HK</code>（繁体中文，香港）、<code>en_US</code>、<code>fr_FR</code>……
+    翻译文件就以它命名，比如 <code>zh_CN.po</code>。在开发者模式下打开「设置 → 翻译 → 语言」可以查看所有可用语言的代码。
+  </p>
+</div>
+
+<h2 id="what">哪些文字会被翻译</h2>
+
+<p>
+  好消息是：大部分文字<strong>不用你做任何事</strong>就是「可翻译的」，Odoo 在导出翻译时会自动把它们收集起来。需要你手动标记的，只有写在 Python 和 JavaScript 代码里的字符串：
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 380" role="img" aria-label="可翻译文本的来源：模型定义、视图、数据记录会被自动收集；Python 和 JS 代码中的字符串需要用 _() 或 _t() 标记">
+  <text class="ttl on-g" x="20" y="28">自动收集（不用标记）</text>
+  <rect class="bx-g" x="20" y="40" width="350" height="56" rx="10"/>
+  <text class="lbl" x="36" y="62">模型和字段的定义</text>
+  <text class="sm" x="36" y="82">_description、字段的 string、help、选择项的标签</text>
+  <rect class="bx-g" x="20" y="104" width="350" height="56" rx="10"/>
+  <text class="lbl" x="36" y="126">视图、QWeb 模板（报表、网页）</text>
+  <text class="sm" x="36" y="146">标签之间的文字、string、placeholder、title 等属性</text>
+  <rect class="bx-g" x="20" y="168" width="350" height="56" rx="10"/>
+  <text class="lbl" x="36" y="190">数据文件里的记录</text>
+  <text class="sm" x="36" y="210">菜单名、动作名、组名，以及 translate=True 的字段</text>
+  <rect class="bx-g" x="20" y="232" width="350" height="56" rx="10"/>
+  <text class="lbl" x="36" y="254">static/ 里的 OWL 模板（.xml）</text>
+  <text class="sm" x="36" y="274">模板里的文字和常见的文字属性</text>
+
+  <text class="ttl on-a" x="20" y="316">需要手动标记</text>
+  <rect class="bx-a" x="20" y="326" width="170" height="44" rx="10"/>
+  <text class="sm mono" x="105" y="353" text-anchor="middle">self.env._("...")</text>
+  <rect class="bx-a" x="200" y="326" width="170" height="44" rx="10"/>
+  <text class="sm mono" x="285" y="353" text-anchor="middle">_t("...")（JS）</text>
+
+  <rect class="bx-b" x="440" y="150" width="300" height="90" rx="12"/>
+  <text class="ttl on-b" x="590" y="178" text-anchor="middle">odoo i18n export</text>
+  <text class="sm" x="590" y="202" text-anchor="middle">扫描已安装模块的数据和源码，</text>
+  <text class="sm" x="590" y="220" text-anchor="middle">收集所有可翻译的英文原文</text>
+  <path class="ln" d="M372 68 C 410 68, 410 180, 436 186" marker-end="url(#ar)"/>
+  <path class="ln" d="M372 132 C 400 132, 410 190, 436 192" marker-end="url(#ar)"/>
+  <path class="ln" d="M372 196 H436" marker-end="url(#ar)"/>
+  <path class="ln" d="M372 260 C 400 260, 410 206, 436 204" marker-end="url(#ar)"/>
+  <path class="ln-a" d="M372 348 C 420 348, 420 222, 436 214" marker-end="url(#ar-a)"/>
+  <rect class="bx-p" x="490" y="280" width="200" height="56" rx="10"/>
+  <text class="lbl mono on-p" x="590" y="304" text-anchor="middle">i18n/library_app.pot</text>
+  <text class="sm" x="590" y="324" text-anchor="middle">翻译模板</text>
+  <path class="ln-p" d="M590 242 V276" marker-end="url(#ar-p)"/>
+</svg>
+<figcaption>图 18-1　绿色的部分 Odoo 认识它们的结构，能自动找到要翻译的文字；代码里的字符串必须由你标记出来</figcaption>
+</figure>
+
+<h3>两种翻译，两种存放方式</h3>
+
+<p>
+  这些文字被翻译后，存放的位置却不一样。理解这一点，才能明白「为什么改了译文有时要升级、有时要重启」：
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 290" role="img" aria-label="模型术语在安装或升级时从 po 文件写入数据库；代码术语在运行时直接从 po 文件读取">
+  <rect class="bx-p" x="20" y="110" width="150" height="70" rx="10"/>
+  <text class="ttl on-p" x="95" y="140" text-anchor="middle">zh_CN.po</text>
+  <text class="sm" x="95" y="162" text-anchor="middle">模块的 i18n/ 目录</text>
+
+  <rect class="bx-g" x="250" y="20" width="490" height="110" rx="12"/>
+  <text class="ttl on-g" x="266" y="46">模型术语（model / model_terms）</text>
+  <text class="sm" x="266" y="70">字段标签、视图文字、菜单名、translate=True 字段的值……</text>
+  <text class="sm" x="266" y="90">安装、升级模块或启用语言时，从 .po 文件<tspan font-weight="700">写进数据库</tspan>，</text>
+  <text class="sm" x="266" y="110">每种语言一个键，存在同一列的 JSONB 里：{"en_US": "Books", "zh_CN": "图书"}</text>
+
+  <rect class="bx-a" x="250" y="160" width="490" height="110" rx="12"/>
+  <text class="ttl on-a" x="266" y="186">代码术语（code）</text>
+  <text class="sm" x="266" y="210">Python 里 self.env._() 和 JS 里 _t() 标记的字符串</text>
+  <text class="sm" x="266" y="230">不进数据库。服务器在运行时<tspan font-weight="700">直接读 .po 文件</tspan>并缓存在内存里，</text>
+  <text class="sm" x="266" y="250">JS 的译文由浏览器向服务器请求</text>
+
+  <path class="ln-g" d="M172 132 C 210 132, 210 76, 246 76" marker-end="url(#ar-g)"/>
+  <path class="ln-a" d="M172 158 C 210 158, 210 214, 246 214" marker-end="url(#ar-a)"/>
+  <text class="sm on-g" x="208" y="98" text-anchor="middle">升级</text>
+  <text class="sm on-a" x="208" y="200" text-anchor="middle">重启</text>
+</svg>
+<figcaption>图 18-2　模型术语改了要升级模块，代码术语改了要重启服务器（让内存里的缓存失效）</figcaption>
+</figure>
+
+<div class="box ver">
+  <div class="t">&#8682; ir.translation 已经不存在了</div>
+  <p>
+    书中介绍的 Odoo 15 把所有译文存在一张 <code>ir_translation</code> 表里。Odoo 16 起这张表被取消：模型术语改成直接存在各自字段的 JSONB 列中，
+    代码术语改为运行时读取 <code>.po</code> 文件。网上提到 <code>ir.translation</code> 的老代码，在 Odoo 20 上都不能用了。
+  </p>
+</div>
+
+<h2 id="export">导出翻译模板</h2>
+
+<p>
+  翻译的起点是一个 <strong>.pot</strong> 文件（PO Template）：它列出了模块里所有需要翻译的英文原文，但译文都是空的。
+  Odoo 20 提供了 <code>odoo i18n</code> 命令来生成它。模块必须<strong>已经安装</strong>在指定的数据库里：
+</p>
+
+<div class="code" data-lang="bash">
+<pre>
+(env20) $ odoo i18n export -c ~/work20/library.conf -d library library_app
+</pre>
+</div>
+
+<p>
+  命令会直接把文件写进模块目录：<code>library_app/i18n/library_app.pot</code>（<code>i18n</code> 目录不存在时会自动创建）。
+  再用 <code>-l</code> 指定语言，生成中文的 <code>.po</code> 文件：
+</p>
+
+<div class="code" data-lang="bash">
+<pre>
+(env20) $ odoo i18n export -c ~/work20/library.conf -d library library_app -l zh_CN
+# 生成 library_app/i18n/zh_CN.po
+
+(env20) $ odoo i18n export -c ~/work20/library.conf -d library library_app library_member -l pot zh_CN
+# 一次导出两个模块的模板和中文译文，各自写进自己的 i18n 目录
+</pre>
+</div>
+
+<div class="box warn">
+  <div class="t">模块名要写在 -l 前面</div>
+  <p>
+    <code>-l</code> 后面可以跟多个语言代码，它会把后面所有不带 <code>-</code> 的词都当成语言。写成 <code>-l zh_CN library_app</code>，
+    <code>library_app</code> 就被当成了一种语言，命令随即报错说缺少模块参数。所以把模块名放在前面，<code>-l</code> 放在最后。
+  </p>
+</div>
+
+<p>
+  导出某种语言时，这种语言必须已经启用；文件里已经有的译文（数据库里的、或者原来 <code>.po</code> 文件里的）会一并带出来，新出现的原文则是空的。
+  所以以后代码有了新的文字，<strong>重新导出一次</strong>，再把空着的补上就行了。
+</p>
+
+<div class="box tip">
+  <div class="t">&#128161; 也可以在界面上导出</div>
+  <p>
+    开发者模式下，「设置 → 翻译 → 导入 / 导出 → 导出翻译」会打开一个向导：选择语言、文件格式（PO、CSV 等）和模块，然后下载文件。
+    对应的「导入翻译」可以把 <code>.po</code> 文件上传回来。适合没有服务器命令行权限的场合。
+  </p>
+</div>
+
+<h2 id="po">读懂 .po 文件</h2>
+
+<p><code>.po</code> 是 GNU gettext 的标准格式，纯文本，由一个个条目组成。打开导出的 <code>zh_CN.po</code>：</p>
+
+<div class="code" data-lang="text" data-file="library_app/i18n/zh_CN.po（节选）">
+<pre>
+# Translation of Odoo Server.
+# This file contains the translation of the following modules:
+# 	* library_app
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Odoo Server 20.0\n"
+"POT-Creation-Date: 2026-10-22 14:57+0000\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+...
+
+#. module: library_app
+#: model:ir.model,name:library_app.model_library_book
+msgid "Book"
+msgstr "图书"
+
+#. module: library_app
+#: model:ir.model.fields,field_description:library_app.field_library_book__name
+msgid "Title"
+msgstr "书名"
+
+#. module: library_app
+#: model_terms:ir.ui.view,arch_db:library_app.view_form_book
+msgid "Check ISBN"
+msgstr "检查 ISBN"
+
+#. module: library_app
+#. odoo-python
+#: code:addons/library_app/models/library_book.py:0
+msgid "Please provide an ISBN for %s"
+msgstr "请为《%s》填写 ISBN"
+</pre>
+</div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 250" role="img" aria-label="一个 po 条目的结构：模块注释、来源引用、原文 msgid、译文 msgstr">
+  <rect class="bx" x="20" y="20" width="420" height="210" rx="10"/>
+  <rect class="bx-d" x="32" y="34" width="396" height="26" rx="4"/>
+  <text class="sm mono" x="42" y="52">#. module: library_app</text>
+  <rect class="bx-b" x="32" y="66" width="396" height="48" rx="4"/>
+  <text class="sm mono on-b" x="42" y="86">#: model:ir.model.fields,field_description:</text>
+  <text class="sm mono on-b" x="42" y="104">   library_app.field_library_book__name</text>
+  <rect class="bx-g" x="32" y="122" width="396" height="40" rx="4"/>
+  <text class="sm mono on-g" x="42" y="147">msgid "Title"</text>
+  <rect class="bx-a" x="32" y="170" width="396" height="40" rx="4"/>
+  <text class="sm mono on-a" x="42" y="195">msgstr "书名"</text>
+
+  <path class="ln-d" d="M430 47 H470"/>
+  <path class="ln-b" d="M430 90 H470"/>
+  <path class="ln-g" d="M430 142 H470"/>
+  <path class="ln-a" d="M430 190 H470"/>
+  <text class="lbl" x="476" y="51">属于哪个模块</text>
+  <text class="lbl on-b" x="476" y="86">出处：类型:模型,字段:XML ID</text>
+  <text class="sm" x="476" y="104">告诉翻译者这段文字用在哪儿</text>
+  <text class="lbl on-g" x="476" y="146">英文原文，不要改</text>
+  <text class="lbl on-a" x="476" y="194">译文，只改这里；留空表示未翻译</text>
+</svg>
+<figcaption>图 18-3　每个条目只需要关心最后一行 <code>msgstr</code></figcaption>
+</figure>
+
+<p>出处（<code>#:</code> 行）的前缀表明了这是哪一类术语，正好对应图 18-2 的两种机制：</p>
+
+<div class="tw"><table>
+  <tr><th>前缀</th><th>含义</th><th>改了之后</th></tr>
+  <tr><td><code>model:</code></td><td>某条记录的某个字段的整个值，比如模型名、字段标签、菜单名</td><td>升级模块</td></tr>
+  <tr><td><code>model_terms:</code></td><td>某个大字段里的一段文字，最常见的是视图的 <code>arch_db</code></td><td>升级模块</td></tr>
+  <tr><td><code>code:</code></td><td>Python（<code>#. odoo-python</code>）或 JS（<code>#. odoo-javascript</code>）代码里标记的字符串</td><td>重启服务器</td></tr>
+</table></div>
+
+<h3>翻译时的注意事项</h3>
+
+<ul>
+  <li><strong>占位符原样保留</strong>：<code>%s</code>、<code>%(name)s</code>、<code>%d</code> 一个都不能少，名字也不能改。顺序可以按中文习惯调整——这正是推荐用命名占位符 <code>%(name)s</code> 的原因。</li>
+  <li><strong>HTML 和 QWeb 标签保留</strong>：视图里的一段文字如果夹着 <code>&lt;strong&gt;</code> 之类的标签，原文里会带着它们，译文里也要保留。</li>
+  <li><strong>同一个原文只翻译一次</strong>：多处用到的相同原文会合并成一个条目，出处有多行。</li>
+  <li>可以用文本编辑器直接改，也可以用 <strong>Poedit</strong> 这类专门的翻译工具，它会检查占位符是否一致。</li>
+</ul>
+
+<h2 id="load">加载翻译</h2>
+
+<p>
+  <code>.po</code> 文件放在模块的 <code>i18n/</code> 目录里，就会被 Odoo 自动使用，<strong>不需要</strong>写进清单。具体在什么时候生效：
+</p>
+
+<div class="tw"><table>
+  <tr><th>情况</th><th>会发生什么</th></tr>
+  <tr><td>安装模块</td><td>为所有已启用的语言加载模型术语</td></tr>
+  <tr><td>启用一种新语言</td><td>为所有已安装的模块加载这种语言的模型术语</td></tr>
+  <tr><td>升级模块（<code>-u</code>）</td><td>加载模型术语，但<strong>不覆盖</strong>数据库里已经有的译文</td></tr>
+  <tr><td>升级时加 <code>--i18n-overwrite</code></td><td>用 <code>.po</code> 文件里的译文覆盖已有的译文</td></tr>
+  <tr><td>重启服务器</td><td>代码术语从 <code>.po</code> 文件重新读取</td></tr>
+</table></div>
+
+<p>所以，修改了 <code>zh_CN.po</code> 里<strong>已有</strong>的译文之后，要这样让它生效：</p>
+
+<div class="code" data-lang="bash">
+<pre>
+(env20) $ odoo -c ~/work20/library.conf -d library -u library_app --i18n-overwrite
+</pre>
+</div>
+
+<p>
+  <code>-u</code> 会顺带重启服务器，所以代码术语也一起更新了。如果只是想把一个 <code>.po</code> 文件（不一定在模块目录里）导入数据库，可以用 <code>i18n import</code>：
+</p>
+
+<div class="code" data-lang="bash">
+<pre>
+(env20) $ odoo i18n import -c ~/work20/library.conf -d library -l zh_CN -w library_app/i18n/zh_CN.po
+# -w 表示覆盖已有的译文
+</pre>
+</div>
+
+<div class="box warn">
+  <div class="t">为什么默认不覆盖</div>
+  <p>
+    用户可能已经在界面上把某个译文改成了更符合自己公司习惯的说法。如果每次升级都覆盖，这些修改就会丢失。
+    所以只有你明确要求（<code>--i18n-overwrite</code> 或 <code>-w</code>）时，Odoo 才会用文件里的译文覆盖数据库。
+  </p>
+</div>
+
+<h3>语言的回退顺序</h3>
+
+<p>
+  Odoo 为一种语言加载翻译时，会先加载它的「基础语言」文件，再加载具体地区的文件，后者覆盖前者。这让地区变体只需要翻译和基础语言不同的部分：
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 170" role="img" aria-label="语言回退：zh_CN 先加载 zh.po 再加载 zh_CN.po；zh_HK 依次加载 zh.po、zh_TW.po、zh_HK.po">
+  <text class="lbl" x="20" y="44">用户语言 zh_CN</text>
+  <rect class="bx" x="170" y="22" width="130" height="36" rx="8"/><text class="sm mono" x="235" y="45" text-anchor="middle">zh.po</text>
+  <rect class="bx-a" x="340" y="22" width="130" height="36" rx="8"/><text class="sm mono on-a" x="405" y="45" text-anchor="middle">zh_CN.po</text>
+  <path class="ln" d="M302 40 H336" marker-end="url(#ar)"/>
+
+  <text class="lbl" x="20" y="104">用户语言 zh_HK</text>
+  <rect class="bx" x="170" y="82" width="130" height="36" rx="8"/><text class="sm mono" x="235" y="105" text-anchor="middle">zh.po</text>
+  <rect class="bx" x="340" y="82" width="130" height="36" rx="8"/><text class="sm mono" x="405" y="105" text-anchor="middle">zh_TW.po</text>
+  <rect class="bx-a" x="510" y="82" width="130" height="36" rx="8"/><text class="sm mono on-a" x="575" y="105" text-anchor="middle">zh_HK.po</text>
+  <path class="ln" d="M302 100 H336" marker-end="url(#ar)"/>
+  <path class="ln" d="M472 100 H506" marker-end="url(#ar)"/>
+  <text class="sm" x="20" y="154">文件不存在就跳过；同一个原文以最后加载的为准。i18n_extra/ 目录里的同名文件也会被加载</text>
+</svg>
+<figcaption>图 18-4　从左到右依次加载，越具体的文件优先级越高</figcaption>
+</figure>
+
+<h2 id="python">在 Python 里标记文本</h2>
+
+<p>给用户看的字符串（报错消息、通知、默认值……）都要用 <code>self.env._()</code> 包起来：</p>
+
+<div class="code" data-lang="py" data-file="library_app/models/library_book.py">
+<pre>
+    def button_check_isbn(self):
+        for book in self:
+            if not book.isbn:
+                raise ValidationError(
+                    self.env._("Please provide an ISBN for %s", book.name))
+            if not book._check_isbn():
+                raise ValidationError(
+                    self.env._("%s ISBN is invalid", book.isbn))
+        return True
+</pre>
+</div>
+
+<p>
+  <code>self.env._()</code> 用的是当前环境的语言（也就是当前用户的语言）。第一个参数是英文原文，后面的参数会被填进占位符——<strong>先翻译、后填值</strong>，顺序很重要：
+</p>
+
+<div class="vs">
+  <div class="old">
+    <div class="h">&#10007; 错误：先拼好再翻译</div>
+    <div class="code" data-lang="py">
+<pre>
+self.env._(f"Please provide an ISBN for {book.name}")
+self.env._("Please provide an ISBN for %s" % book.name)
+self.env._("Please provide ") + self.env._("an ISBN")
+</pre>
+    </div>
+  </div>
+  <div class="new">
+    <div class="h">&#10003; 正确：原文固定，参数另传</div>
+    <div class="code" data-lang="py">
+<pre>
+self.env._("Please provide an ISBN for %s", book.name)
+self.env._("%(title)s by %(author)s",
+           title=book.name, author=author.name)
+self.env._("Please provide an ISBN")
+</pre>
+    </div>
+  </div>
+</div>
+
+<p>
+  左边前两种写法，传给 <code>_()</code> 的已经是「Please provide an ISBN for Odoo Development」这样带着书名的字符串，
+  <code>.po</code> 文件里不可能有这么一条原文，所以永远找不到译文，而且导出工具也认不出它。第三种把一句话拆成碎片，译者无法按中文语序组织句子。
+</p>
+
+<h3>模块级的常量：用延迟翻译</h3>
+
+<p>
+  <code>self.env._()</code> 需要知道「当前用户的语言」，所以只能在方法里调用。如果要在模块顶层定义一些可翻译的常量（比如选择项之外的提示文字表），
+  要用<strong>延迟翻译</strong>：定义时只记下原文，真正用到时才按当时的语言翻译：
+</p>
+
+<div class="code" data-lang="py">
+<pre>
+from odoo.tools import LazyTranslate
+
+_lt = LazyTranslate(__name__)
+
+STATE_HINTS = {
+    "new": _lt("Waiting for approval"),
+    "done": _lt("Returned to the library"),
+}
+</pre>
+</div>
+
+<div class="box note">
+  <div class="t">&#9432; 字段标签不需要标记</div>
+  <p>
+    <code>fields.Char("Title")</code>、<code>help="..."</code>、<code>selection=[("new", "New")]</code> 里的文字会被自动收集，不要再包一层 <code>_()</code>。
+    选择项只翻译<strong>标签</strong>（<code>"New"</code>），键（<code>"new"</code>）是存进数据库的技术值，永远不翻译。
+  </p>
+</div>
+
+<div class="box ver">
+  <div class="t">&#8682; _() 和 self.env._()</div>
+  <p>
+    书中使用 <code>from odoo import _</code>，然后写 <code>_("...")</code>。这个函数要通过检查调用栈去「猜」当前的语言和模块，既慢又不总是可靠。
+    Odoo 18 起推荐写 <code>self.env._("...")</code>，直接从环境里拿语言。<code>_</code> 仍然可以用，但新代码请用 <code>self.env._</code>。
+  </p>
+</div>
+
+<h2 id="js">在 JavaScript 和模板里</h2>
+
+<p>前端代码里用 <code>_t</code>，用法和 Python 一样：</p>
+
+<div class="code" data-lang="js" data-file="library_app/static/src/…/some_component.js">
+<pre>
+import { _t } from "@web/core/l10n/translation";
+
+this.notification.add(_t("The book %s has been returned.", book.name), {
+    type: "success",
+});
+</pre>
+</div>
+
+<p>
+  OWL 模板、视图、报表和网页的 QWeb 模板里的文字<strong>自动可翻译</strong>，什么都不用做。反过来，如果某段文字<strong>不应该</strong>被翻译（比如示例代码、品牌名），
+  在元素上加 <code>t-translation="off"</code>，比如一个固定的英文书名：
+</p>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;p t-translation="off"&gt;Odoo Development Essentials, 5th Edition&lt;/p&gt;
+</pre>
+</div>
+
+<h2 id="data">让业务数据也支持多语言</h2>
+
+<p>
+  上面说的都是界面文字。如果<strong>数据本身</strong>也需要多语言——比如面向多国读者的图书馆，书的简介要有中英文两个版本——在字段上加 <code>translate=True</code>（第 6 章）。比如给图书加一个简介字段：
+</p>
+
+<div class="code" data-lang="py">
+<pre>
+    description = fields.Html("Description", translate=True)
+</pre>
+</div>
+
+<p>
+  升级模块后，表单里这个字段的输入框右侧会出现一个显示语言代码的小按钮，点开就能分别填写每种语言的内容。用户看到的是自己语言的版本，没有译文时退回英文。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 200" role="img" aria-label="translate=True 的字段在数据库里用 JSONB 存储每种语言的值，用户按自己的语言读取">
+  <rect class="bx-b" x="20" y="40" width="330" height="120" rx="12"/>
+  <text class="ttl on-b" x="36" y="66">数据库：library_book.description</text>
+  <text class="sm mono" x="36" y="96">{</text>
+  <text class="sm mono" x="52" y="114">"en_US": "&lt;p&gt;A practical guide...",</text>
+  <text class="sm mono" x="52" y="132">"zh_CN": "&lt;p&gt;一本实用指南……"</text>
+  <text class="sm mono" x="36" y="150">}</text>
+
+  <rect class="bx" x="440" y="30" width="300" height="56" rx="10"/>
+  <text class="lbl" x="456" y="54">英文用户读取</text>
+  <text class="sm" x="456" y="74">→ A practical guide...</text>
+  <rect class="bx-a" x="440" y="114" width="300" height="56" rx="10"/>
+  <text class="lbl on-a" x="456" y="138">中文用户读取</text>
+  <text class="sm" x="456" y="158">→ 一本实用指南……</text>
+  <path class="ln" d="M352 80 C 400 80, 400 58, 436 58" marker-end="url(#ar)"/>
+  <path class="ln-a" d="M352 120 C 400 120, 400 142, 436 142" marker-end="url(#ar-a)"/>
+</svg>
+<figcaption>图 18-5　可翻译字段在同一列里保存所有语言的值，ORM 按环境的语言取出对应的那一个</figcaption>
+</figure>
+
+<div class="box warn">
+  <div class="t">不要给编号、代码类字段开翻译</div>
+  <p>
+    ISBN、内部编码、邮箱这类字段在所有语言里都一样，开了翻译只会让数据混乱。<code>translate=True</code> 只用于真正需要按语言区分的描述性文字。
+  </p>
+</div>
+
+<h2 id="workflow">翻译工作流</h2>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 230" role="img" aria-label="翻译工作流：标记文本、安装或升级模块、导出 po、翻译、升级并覆盖、检查，代码变化后重新导出">
+  <rect class="bx-a" x="20" y="40" width="120" height="64" rx="10"/>
+  <text class="lbl on-a" x="80" y="68" text-anchor="middle">① 写代码</text>
+  <text class="sm" x="80" y="88" text-anchor="middle">英文 + _() 标记</text>
+  <rect class="bx" x="170" y="40" width="120" height="64" rx="10"/>
+  <text class="lbl" x="230" y="68" text-anchor="middle">② 升级模块</text>
+  <text class="sm" x="230" y="88" text-anchor="middle">让数据库是最新的</text>
+  <rect class="bx-b" x="320" y="40" width="120" height="64" rx="10"/>
+  <text class="lbl on-b" x="380" y="68" text-anchor="middle">③ 导出</text>
+  <text class="sm mono" x="380" y="88" text-anchor="middle">i18n export</text>
+  <rect class="bx-p" x="470" y="40" width="120" height="64" rx="10"/>
+  <text class="lbl on-p" x="530" y="68" text-anchor="middle">④ 翻译</text>
+  <text class="sm" x="530" y="88" text-anchor="middle">填写空的 msgstr</text>
+  <rect class="bx-g" x="620" y="40" width="120" height="64" rx="10"/>
+  <text class="lbl on-g" x="680" y="68" text-anchor="middle">⑤ 加载、检查</text>
+  <text class="sm mono" x="680" y="88" text-anchor="middle">--i18n-overwrite</text>
+  <path class="ln" d="M142 72 H166" marker-end="url(#ar)"/>
+  <path class="ln" d="M292 72 H316" marker-end="url(#ar)"/>
+  <path class="ln" d="M442 72 H466" marker-end="url(#ar)"/>
+  <path class="ln" d="M592 72 H616" marker-end="url(#ar)"/>
+  <path class="ln-d" d="M680 106 V150 H80 V108" marker-end="url(#ar)"/>
+  <text class="sm" x="380" y="170" text-anchor="middle">代码里加了新文字？回到 ①，重新导出时已有的译文会保留，只需补上新的</text>
+  <text class="sm" x="380" y="200" text-anchor="middle">把 i18n/ 目录和代码一起提交到 Git，翻译就成了模块的一部分</text>
+</svg>
+<figcaption>图 18-6　翻译是一个循环：每次发布前重新导出一次，补齐新出现的原文</figcaption>
+</figure>
+
+<div class="box note">
+  <div class="t">&#9432; 官方和社区的翻译平台</div>
+  <p>
+    Odoo 官方模块的翻译由社区在 Odoo 的 Weblate 翻译平台上协作完成，<code>base</code> 模块 <code>zh_CN.po</code> 的文件头里就能看到翻译者的名字。
+    OCA 的模块也有自己的翻译平台，翻译会被自动提交回各个仓库。如果你发现官方中文译文有不妥之处，可以去这些平台上提交修改。
+  </p>
+</div>
+
+<div class="box warn">
+  <div class="t">不要提交 en.po</div>
+  <p>
+    英语是原文语言，不需要翻译文件。OCA 的代码检查甚至会拒绝包含 <code>i18n/en.po</code> 的提交（第 19 章）。
+  </p>
+</div>
+
+<h2 id="summary">小结</h2>
+
+<ul>
+  <li>代码一律写英文；界面文字通过 <code>i18n/</code> 目录里的 <code>.po</code> 文件翻译，文件以语言代码命名，如 <code>zh_CN.po</code>。</li>
+  <li>字段定义、视图、QWeb 模板、数据记录里的文字自动可翻译；Python 用 <code>self.env._()</code>、JS 用 <code>_t()</code> 手动标记。</li>
+  <li>模型术语在安装 / 升级时写进数据库（JSONB），代码术语在运行时从 <code>.po</code> 读取：前者改了要升级，后者改了要重启。</li>
+  <li><code>odoo i18n export</code> 导出 <code>.pot</code> 和 <code>.po</code>；<code>odoo i18n import</code> 导入；<code>odoo i18n loadlang</code> 启用语言。</li>
+  <li>升级默认不覆盖已有译文，需要时加 <code>--i18n-overwrite</code>。</li>
+  <li>先翻译后填值：原文里用占位符，参数另外传，不要用 f-string 或字符串拼接。</li>
+  <li>业务数据需要多语言时用 <code>translate=True</code>，编号类字段不要开。</li>
+</ul>
+
+<div class="exercise">
+  <h3>动手练习</h3>
+  <ol>
+    <li>为你的数据库启用简体中文，把自己的界面语言切换过去，看看图书馆模块现在是什么样子。</li>
+    <li>导出 <code>library_app</code> 的 <code>zh_CN.po</code>，翻译所有条目，用 <code>-u library_app --i18n-overwrite</code> 加载，再检查界面。</li>
+    <li>点「Check ISBN」按钮触发报错，确认报错消息也变成了中文。如果没有，想想是不是忘了重启。</li>
+    <li>在按钮方法里故意写一个 f-string 版本的 <code>_()</code>，重新导出，观察 <code>.po</code> 文件里出现了什么（或者没出现什么）。</li>
+    <li>给 <code>library_member</code> 模块也做一份中文翻译，并把两个模块的 <code>i18n/</code> 目录提交到 Git。</li>
+  </ol>
+</div>
+<div id="pager"></div>
+</main>
+</div>
+<script src="assets/site.js"></script>
+</body>
+</html>

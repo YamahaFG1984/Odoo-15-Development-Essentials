@@ -255,7 +255,7 @@ class LibraryBook(models.Model):
 
 <p>文本类字段还有几个专用属性：</p>
 <ul>
-  <li><code>translate=True</code>：内容可翻译，每种语言存一个值（Odoo 16 起以 JSONB 形式存在同一列里）。</li>
+  <li><code>translate=True</code>：内容可翻译，每种语言存一个值（Odoo 16 起以 JSONB 形式存在同一列里）。翻译的完整机制见第 18 章。</li>
   <li><code>trim</code>：默认为 <code>True</code>，Web 客户端会自动去掉首尾空白；设为 <code>False</code> 保留。</li>
 </ul>
 

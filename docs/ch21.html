@@ -1,0 +1,713 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>附录 B · 常见报错与排错手册 — Odoo 20 开发入门</title>
+<meta name="description" content="Odoo 20 初学者最常遇到的报错：模块找不到、XML 解析失败、字段不存在、XPath 定位失败、AccessError、Expected singleton、改了不生效……按「症状 → 原因 → 解决」整理，附「改了什么要做什么」决策图。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-chapter="21">
+<div id="app">
+<aside id="sidebar"></aside>
+<main>
+<span class="chapter-eyebrow">附录 B</span>
+<h1>常见报错与排错手册</h1>
+<p class="lede">
+  学 Odoo 时最让人沮丧的，往往不是概念难懂，而是<strong>一个看不懂的报错卡住一下午</strong>。
+  好消息是：初学者遇到的报错高度集中，翻来覆去就那二三十种。这个附录先教你<strong>怎么读报错</strong>，再按「症状 → 原因 → 解决」把最常见的情况整理成一本手册。
+  遇到问题时，先用浏览器的查找功能（Ctrl+F）搜报错里的关键词。
+</p>
+
+<div class="goals">
+  <h4>本附录内容</h4>
+  <ul>
+    <li>报错会出现在哪里，怎样从一大段 Traceback 里找到关键信息</li>
+    <li>「我改了什么 → 要重启、升级还是刷新」决策图</li>
+    <li>模块安装、XML 数据、视图、权限、ORM、前端、运行环境七类常见报错</li>
+    <li>从旧教程抄来的代码在 Odoo 20 上会怎样报错</li>
+    <li>排错工具箱，以及怎样提一个能得到回答的问题</li>
+  </ul>
+</div>
+
+<div id="chapter-toc"></div>
+
+<h2 id="where">报错出现在哪里</h2>
+
+<p>
+  Odoo 是一个「浏览器 + 服务器 + 数据库」的三层系统，同一个问题可能在不同的地方露头。新手最常犯的错误是<strong>只盯着浏览器里的弹窗</strong>，
+  而真正有用的信息在服务器终端里。先认识这四个地方：
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 290" role="img" aria-label="报错可能出现的四个地方：浏览器弹窗、服务器日志、浏览器控制台、启动和升级日志">
+  <rect class="bx-a" x="20" y="20" width="170" height="250" rx="10"/>
+  <text class="ttl on-a" x="105" y="46" text-anchor="middle">① 浏览器弹窗</text>
+  <rect class="bx" x="34" y="62" width="142" height="62" rx="6"/>
+  <text class="sm" x="105" y="84" text-anchor="middle">UserError</text>
+  <text class="sm" x="105" y="100" text-anchor="middle">ValidationError</text>
+  <text class="sm" x="105" y="116" text-anchor="middle">AccessError</text>
+  <text class="sm" x="105" y="148" text-anchor="middle">业务规则、权限</text>
+  <text class="sm" x="105" y="166" text-anchor="middle">等「预期内」的错误</text>
+  <text class="sm" x="105" y="200" text-anchor="middle">「服务器错误」弹窗</text>
+  <text class="sm" x="105" y="218" text-anchor="middle">里能展开完整调用栈</text>
+  <text class="sm" x="105" y="248" text-anchor="middle">用户能看到</text>
+
+  <rect class="bx-b" x="205" y="20" width="170" height="250" rx="10"/>
+  <text class="ttl on-b" x="290" y="46" text-anchor="middle">② 服务器日志</text>
+  <rect class="bx" x="219" y="62" width="142" height="62" rx="6"/>
+  <text class="sm mono" x="290" y="84" text-anchor="middle">ERROR ... </text>
+  <text class="sm mono" x="290" y="100" text-anchor="middle">Traceback (most</text>
+  <text class="sm mono" x="290" y="116" text-anchor="middle">recent call last)</text>
+  <text class="sm" x="290" y="148" text-anchor="middle">运行 odoo 的终端，</text>
+  <text class="sm" x="290" y="166" text-anchor="middle">或 logfile 指定的文件</text>
+  <text class="sm" x="290" y="200" text-anchor="middle">信息最全，</text>
+  <text class="sm" x="290" y="218" text-anchor="middle">排错首先看这里</text>
+  <text class="sm" x="290" y="248" text-anchor="middle">开发者看</text>
+
+  <rect class="bx-g" x="390" y="20" width="170" height="250" rx="10"/>
+  <text class="ttl on-g" x="475" y="46" text-anchor="middle">③ 浏览器控制台</text>
+  <rect class="bx" x="404" y="62" width="142" height="62" rx="6"/>
+  <text class="sm mono" x="475" y="84" text-anchor="middle">OwlError</text>
+  <text class="sm mono" x="475" y="100" text-anchor="middle">TypeError</text>
+  <text class="sm mono" x="475" y="116" text-anchor="middle">404 /web/assets/...</text>
+  <text class="sm" x="475" y="148" text-anchor="middle">按 F12 打开</text>
+  <text class="sm" x="475" y="166" text-anchor="middle">「控制台」面板</text>
+  <text class="sm" x="475" y="200" text-anchor="middle">页面白屏、按钮没反应</text>
+  <text class="sm" x="475" y="218" text-anchor="middle">多半在这里有线索</text>
+  <text class="sm" x="475" y="248" text-anchor="middle">前端问题</text>
+
+  <rect class="bx-p" x="575" y="20" width="165" height="250" rx="10"/>
+  <text class="ttl on-p" x="657" y="46" text-anchor="middle">④ 安装 / 升级日志</text>
+  <rect class="bx" x="589" y="62" width="137" height="62" rx="6"/>
+  <text class="sm mono" x="657" y="84" text-anchor="middle">ParseError</text>
+  <text class="sm mono" x="657" y="100" text-anchor="middle">while parsing</text>
+  <text class="sm mono" x="657" y="116" text-anchor="middle">.../views.xml:12</text>
+  <text class="sm" x="657" y="148" text-anchor="middle">-i / -u 时打印在</text>
+  <text class="sm" x="657" y="166" text-anchor="middle">服务器终端里</text>
+  <text class="sm" x="657" y="200" text-anchor="middle">安装失败会整体回滚，</text>
+  <text class="sm" x="657" y="218" text-anchor="middle">数据库保持原样</text>
+  <text class="sm" x="657" y="248" text-anchor="middle">数据文件问题</text>
+</svg>
+<figcaption>图 B-1　四个地方各有分工。不管在哪儿看到报错，都回到服务器日志里找完整的 Traceback</figcaption>
+</figure>
+
+<div class="box tip">
+  <div class="t">&#128161; 先把日志开到合适的详细程度</div>
+  <p>
+    默认的 <code>info</code> 级别通常够用。想看更多细节时：<code>--log-level=debug</code> 打开全部调试日志；
+    <code>--log-sql</code> 打印每条 SQL；<code>--dev=access</code> 让访问错误也打印完整的调用栈（第 2 章）。
+    排错完记得关掉，调试日志很多，会把真正的错误淹没。
+  </p>
+</div>
+
+<h2 id="traceback">读懂 Traceback</h2>
+
+<p>
+  Python 的报错叫 <strong>Traceback</strong>（回溯）。它从最外层的调用一路列到出错的那一行，在 Odoo 里经常有几十行长，
+  其中绝大部分是框架内部的调用。读它有固定的顺序：<strong>先看最后一行，再往上找自己的文件</strong>。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 330" role="img" aria-label="一段 Traceback 的结构：框架调用、你自己的代码、最后一行的异常类型和消息">
+  <rect class="bx" x="20" y="20" width="470" height="290" rx="10"/>
+  <text class="sm mono" x="36" y="46">Traceback (most recent call last):</text>
+  <rect class="bx-d" x="30" y="56" width="450" height="112" rx="6"/>
+  <text class="sm mono" x="40" y="76">File ".../odoo/http/router.py", line 210, in ...</text>
+  <text class="sm mono" x="40" y="94">File ".../odoo/service/model.py", line 98, in ...</text>
+  <text class="sm mono" x="40" y="112">File ".../odoo/api/__init__.py", line 520, in ...</text>
+  <text class="sm mono" x="40" y="130">File ".../odoo/orm/models.py", line 4410, in ...</text>
+  <text class="sm mono" x="40" y="148">　……（还有十几行）</text>
+  <rect class="bx-b" x="30" y="178" width="450" height="58" rx="6"/>
+  <text class="sm mono on-b" x="40" y="200">File ".../library_app/models/library_book.py",</text>
+  <text class="sm mono on-b" x="40" y="218">     line 42, in button_check_isbn</text>
+  <rect class="bx-r" x="30" y="248" width="450" height="50" rx="6"/>
+  <text class="sm mono on-r" x="40" y="270">ValueError: Expected singleton:</text>
+  <text class="sm mono on-r" x="40" y="288">     library.book(1, 2)</text>
+
+  <path class="ln-d" d="M484 112 H530"/>
+  <path class="ln-b" d="M484 206 H530"/>
+  <path class="ln-r" d="M484 272 H530"/>
+  <rect class="bx" x="534" y="72" width="206" height="82" rx="8"/>
+  <text class="lbl" x="548" y="96">③ 框架内部的调用</text>
+  <text class="sm" x="548" y="118">路由、RPC、ORM……</text>
+  <text class="sm" x="548" y="138">大多数时候直接跳过</text>
+  <rect class="bx-b" x="534" y="170" width="206" height="72" rx="8"/>
+  <text class="lbl on-b" x="548" y="194">② 往上找你自己的文件</text>
+  <text class="sm" x="548" y="216">路径里有你的模块名，</text>
+  <text class="sm" x="548" y="232">它告诉你是哪一行出的事</text>
+  <rect class="bx-r" x="534" y="250" width="206" height="60" rx="8"/>
+  <text class="lbl on-r" x="548" y="274">① 先看最后一行</text>
+  <text class="sm" x="548" y="294">异常类型 + 消息，是什么错</text>
+</svg>
+<figcaption>图 B-2　Traceback 的阅读顺序：① 最后一行说明「是什么错」，② 你自己的文件说明「错在哪」，③ 中间的框架调用一般不用看</figcaption>
+</figure>
+
+<p>最后一行的<strong>异常类型</strong>本身就是一条重要线索：</p>
+
+<div class="tw"><table>
+  <tr><th>异常类型</th><th>通常意味着</th></tr>
+  <tr><td><code>UserError</code> / <code>ValidationError</code></td><td>代码<strong>主动</strong>拒绝了这个操作（业务规则、约束）。读消息内容即可，往往不是 bug。</td></tr>
+  <tr><td><code>AccessError</code></td><td>权限不够：缺少 <code>ir.access</code> 规则，或者记录不满足规则的域。</td></tr>
+  <tr><td><code>MissingError</code></td><td>要访问的记录已经被删除了（常见于浏览器还开着旧页面）。</td></tr>
+  <tr><td><code>ParseError</code></td><td>安装或升级时，某个 XML / CSV 数据文件有问题。消息里有文件名和行号。</td></tr>
+  <tr><td><code>ValueError</code> / <code>KeyError</code> / <code>AttributeError</code></td><td>通常是代码 bug：字段名写错、记录集里有多条记录、调用了不存在的方法。</td></tr>
+  <tr><td><code>psycopg2.errors.*</code></td><td>数据库层面的错误：列不存在（没升级模块）、违反唯一约束、并发冲突。</td></tr>
+</table></div>
+
+<h2 id="decide">改了什么，需要做什么</h2>
+
+<p>
+  「代码改了但没生效」是初学者问得最多的问题，原因几乎总是同一个：<strong>没有做对应的那一步</strong>。
+  Odoo 的代码分三种，生效方式各不相同：Python 代码在服务器<strong>启动时</strong>加载；XML / CSV 数据在<strong>安装或升级模块时</strong>写进数据库；
+  静态文件（JS、CSS、OWL 模板）由浏览器下载。第 3 章介绍过基本规则，这里给出完整版：
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 476" role="img" aria-label="决策表：不同类型的修改分别需要刷新浏览器、重启服务器还是升级模块">
+  <rect class="bx" x="20" y="16" width="720" height="40" rx="8"/>
+  <text class="ttl" x="36" y="41">你改了什么</text>
+  <text class="ttl on-g" x="430" y="41" text-anchor="middle">刷新浏览器</text>
+  <text class="ttl on-b" x="530" y="41" text-anchor="middle">重启服务器</text>
+  <text class="ttl on-a" x="640" y="41" text-anchor="middle">升级模块 -u</text>
+
+  <text class="lbl" x="36" y="88">Python 方法里的逻辑</text>
+  <text class="sm" x="36" y="104">--dev=reload 会自动重启</text>
+  <circle cx="430" cy="92" r="8" class="bx-g"/><circle cx="530" cy="92" r="8" class="bx-b"/>
+
+  <text class="lbl" x="36" y="134">新增 / 修改字段，新增模型</text>
+  <text class="sm" x="36" y="150">数据库要加列、建表</text>
+  <circle cx="430" cy="138" r="8" class="bx-g"/><circle cx="530" cy="138" r="8" class="bx-b"/><circle cx="640" cy="138" r="8" class="bx-a"/>
+
+  <text class="lbl" x="36" y="180">新增 .py 文件</text>
+  <text class="sm" x="36" y="196">先在 __init__.py 里 import 它</text>
+  <circle cx="430" cy="184" r="8" class="bx-g"/><circle cx="530" cy="184" r="8" class="bx-b"/><circle cx="640" cy="184" r="8" class="bx-d"/>
+
+  <text class="lbl" x="36" y="226">视图 XML、报表模板</text>
+  <text class="sm" x="36" y="242">开了 --dev=xml 时只需刷新</text>
+  <circle cx="430" cy="230" r="8" class="bx-g"/><circle cx="640" cy="230" r="8" class="bx-a"/>
+
+  <text class="lbl" x="36" y="272">菜单、动作、ir.access.csv、数据记录</text>
+  <text class="sm" x="36" y="288">noupdate="1" 的记录升级时不会被覆盖</text>
+  <circle cx="430" cy="276" r="8" class="bx-g"/><circle cx="640" cy="276" r="8" class="bx-a"/>
+
+  <text class="lbl" x="36" y="318">清单的 data 列表里加了新文件</text>
+  <text class="sm" x="36" y="334">没写进清单的文件根本不会被加载</text>
+  <circle cx="430" cy="322" r="8" class="bx-g"/><circle cx="640" cy="322" r="8" class="bx-a"/>
+
+  <text class="lbl" x="36" y="364">static/ 下的 JS、CSS、OWL 模板</text>
+  <text class="sm" x="36" y="380">用 Ctrl+Shift+R 强制刷新，绕过缓存</text>
+  <circle cx="430" cy="368" r="8" class="bx-g"/>
+
+  <text class="lbl" x="36" y="410">清单里的 depends、assets</text>
+  <text class="sm" x="36" y="426">清单只在启动时读取</text>
+  <circle cx="430" cy="414" r="8" class="bx-g"/><circle cx="530" cy="414" r="8" class="bx-b"/><circle cx="640" cy="414" r="8" class="bx-a"/>
+
+  <text class="lbl" x="36" y="456">全新的模块</text>
+  <circle cx="430" cy="452" r="8" class="bx-g"/><circle cx="530" cy="452" r="8" class="bx-b"/>
+  <text class="sm on-a" x="640" y="456" text-anchor="middle">改为安装 -i</text>
+
+  <path class="ln-d" d="M20 116 H740 M20 162 H740 M20 208 H740 M20 254 H740 M20 300 H740 M20 346 H740 M20 392 H740 M20 434 H740"/>
+</svg>
+<figcaption>图 B-3　每一行从右往左做：先升级（或重启），最后刷新浏览器。虚线圆圈表示「如果新文件里定义了字段或模型，就也要升级」</figcaption>
+</figure>
+
+<div class="box key">
+  <div class="t">拿不准时的万能做法</div>
+  <p>
+    停掉服务器，用 <code>odoo -c 配置文件 -d 库名 -u 你的模块</code> 重新启动，然后在浏览器里按 Ctrl+Shift+R。
+    这一套下来，上表里除了「全新模块」以外的所有情况都能覆盖。慢一点，但不会错。
+  </p>
+</div>
+
+<h2 id="module">模块安装类问题</h2>
+
+<h3>在「应用」里搜不到我的模块</h3>
+
+<p>这是第一天最常见的问题。按下面的顺序排查，十有八九在前三步就能找到原因：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 360" role="img" aria-label="模块找不到时的排查流程">
+  <rect class="bx-b" x="20" y="20" width="300" height="56" rx="10"/>
+  <text class="lbl on-b" x="170" y="44" text-anchor="middle">① 启动日志的 addons paths 里</text>
+  <text class="lbl on-b" x="170" y="62" text-anchor="middle">有没有你的目录？</text>
+  <rect class="bx-b" x="20" y="104" width="300" height="56" rx="10"/>
+  <text class="lbl on-b" x="170" y="128" text-anchor="middle">② 路径指向的是「装模块的目录」，</text>
+  <text class="lbl on-b" x="170" y="146" text-anchor="middle">而不是模块本身吗？</text>
+  <rect class="bx-b" x="20" y="188" width="300" height="56" rx="10"/>
+  <text class="lbl on-b" x="170" y="212" text-anchor="middle">③ 点过「更新应用列表」，</text>
+  <text class="lbl on-b" x="170" y="230" text-anchor="middle">并去掉了「应用」筛选吗？</text>
+  <rect class="bx-b" x="20" y="272" width="300" height="56" rx="10"/>
+  <text class="lbl on-b" x="170" y="296" text-anchor="middle">④ 日志里有没有关于</text>
+  <text class="lbl on-b" x="170" y="314" text-anchor="middle">这个模块的 WARNING？</text>
+  <path class="ln" d="M170 78 V100" marker-end="url(#ar)"/>
+  <path class="ln" d="M170 162 V184" marker-end="url(#ar)"/>
+  <path class="ln" d="M170 246 V268" marker-end="url(#ar)"/>
+  <text class="sm" x="182" y="94">是</text>
+  <text class="sm" x="182" y="178">是</text>
+  <text class="sm" x="182" y="262">是</text>
+
+  <path class="ln-r" d="M322 48 H376" marker-end="url(#ar-r)"/>
+  <path class="ln-r" d="M322 132 H376" marker-end="url(#ar-r)"/>
+  <path class="ln-r" d="M322 216 H376" marker-end="url(#ar-r)"/>
+  <path class="ln-r" d="M322 300 H376" marker-end="url(#ar-r)"/>
+  <text class="sm on-r" x="336" y="42">否</text>
+  <text class="sm on-r" x="336" y="126">否</text>
+  <text class="sm on-r" x="336" y="210">否</text>
+  <text class="sm on-r" x="336" y="294">有</text>
+
+  <rect class="bx" x="380" y="20" width="360" height="56" rx="10"/>
+  <text class="lbl" x="394" y="44">检查配置文件的 addons_path、-c 指向的</text>
+  <text class="lbl" x="394" y="62">文件对不对；改完要重启服务器</text>
+  <rect class="bx" x="380" y="104" width="360" height="56" rx="10"/>
+  <text class="lbl" x="394" y="128">写 ~/work20/library，不要写</text>
+  <text class="lbl" x="394" y="146">~/work20/library/library_app</text>
+  <rect class="bx" x="380" y="188" width="360" height="56" rx="10"/>
+  <text class="lbl" x="394" y="212">开发者模式下「应用」菜单里才有「更新应用列表」；</text>
+  <text class="lbl" x="394" y="230">搜索框里默认的「应用」筛选会隐藏非应用模块</text>
+  <rect class="bx" x="380" y="272" width="360" height="72" rx="10"/>
+  <text class="lbl" x="394" y="296">「incompatible version」：清单版本号不是 20.0.x</text>
+  <text class="lbl" x="394" y="314">「invalid manifest」：清单有语法错误</text>
+  <text class="lbl" x="394" y="332">「not installable」：installable 为 False</text>
+</svg>
+<figcaption>图 B-4　模块找不到时的排查顺序</figcaption>
+</figure>
+
+<p>第 ① 步要看的是服务器启动后最开始的几行日志：</p>
+
+<div class="code" data-lang="text">
+<pre>
+INFO ? odoo: Odoo version 20.0
+INFO ? odoo: Using configuration file at /home/you/work20/library.conf
+INFO ? odoo: addons paths: _NamespacePath(['/home/you/work20/odoo/odoo/addons', '/home/you/work20/library', ...])
+</pre>
+</div>
+
+<p>第 ④ 步里最容易踩的是<strong>从旧教程抄来的版本号</strong>：</p>
+
+<div class="code" data-lang="text">
+<pre>
+WARNING ? odoo.modules.module: The module library_app has an incompatible version, setting installable=False
+</pre>
+</div>
+
+<dl class="terms">
+  <dt>原因</dt><dd>清单里写的是 <code>"version": "15.0.1.0.0"</code>。Odoo 只接受 <code>x.y</code>、<code>x.y.z</code>、<code>20.0.x.y</code> 或 <code>20.0.x.y.z</code> 这几种格式，以别的大版本号开头的模块会被直接标记为不可安装。</dd>
+  <dt>解决</dt><dd>改成 <code>"20.0.1.0.0"</code>（推荐，见第 19 章），或者干脆写 <code>"1.0.0"</code>，Odoo 会自动补上 <code>20.0.</code> 前缀。</dd>
+</dl>
+
+<h3>依赖的模块找不到</h3>
+
+<div class="code" data-lang="text">
+<pre>
+ERROR ? odoo.modules.loading: Some modules are not loaded, some dependencies or manifest may be missing: ['library_member']
+</pre>
+</div>
+
+<dl class="terms">
+  <dt>原因</dt><dd>清单的 <code>depends</code> 里列了一个 Odoo 找不到的模块：名字拼错了，或者那个模块（比如从 OCA 下载的）所在的目录没有加进 <code>addons_path</code>。</dd>
+  <dt>解决</dt><dd>核对 <code>depends</code> 里的每个名字；第三方模块要把它的仓库目录加进 <code>addons_path</code> 并重启。在界面上升级时，同样的问题会显示为「…depends on the module: xxx. But this module is not available in your system.」</dd>
+</dl>
+
+<h3>缺少 Python 库</h3>
+
+<div class="code" data-lang="text">
+<pre>
+Unable to install module "library_app" because an external dependency is not met: ...
+ModuleNotFoundError: No module named 'isbnlib'
+</pre>
+</div>
+
+<dl class="terms">
+  <dt>原因</dt><dd>代码 <code>import</code> 了一个没装的第三方库。第一种消息来自清单里的 <code>external_dependencies</code> 检查，第二种是 Python 在导入时直接报错。</dd>
+  <dt>解决</dt><dd>在<strong>运行 Odoo 的那个虚拟环境</strong>里 <code>pip install</code> 它（先确认提示符前有 <code>(env20)</code>）。用 Docker 的话要装进镜像里（第 17 章）。别忘了在清单的 <code>external_dependencies</code> 里声明，让别人安装时得到清楚的提示。</dd>
+</dl>
+
+<h2 id="data">XML / CSV 数据文件</h2>
+
+<p>安装或升级时，Odoo 按清单 <code>data</code> 列表的顺序逐个加载数据文件。任何一个出错，整个安装就会回滚，并打印 <code>ParseError</code>：</p>
+
+<div class="code" data-lang="text">
+<pre>
+odoo.tools.convert.ParseError: while parsing /home/you/work20/library/library_app/views/library_menu.xml:12, somewhere inside
+&amp;lt;menuitem id="menu_library_book" name="Books" parent="menu_library" action="action_library_book"/&amp;gt;
+</pre>
+</div>
+
+<p>先看「while parsing」后面的<strong>文件和行号</strong>，再往上翻真正的原因。最常见的三种：</p>
+
+<div class="tw"><table>
+  <tr><th>原因信息</th><th>说明与解决</th></tr>
+  <tr>
+    <td><code>External ID not found in the system: library_app.action_library_book</code></td>
+    <td>引用了一个还不存在的 XML ID。要么拼错了；要么<strong>定义它的地方排在引用它的地方后面</strong>——数据是从上到下依次加载的，同一个文件里菜单要写在动作后面，不同文件则要调整清单里 <code>data</code> 的顺序；要么引用别的模块的记录时忘了写模块名前缀，或者那个模块不在 <code>depends</code> 里。</td>
+  </tr>
+  <tr>
+    <td><code>Opening and ending tag mismatch</code>、<code>XMLSyntaxError</code></td>
+    <td>XML 本身写坏了：标签没闭合、属性值里直接写了 <code>&lt;</code> 或 <code>&amp;</code>（要写成 <code>&amp;lt;</code>、<code>&amp;amp;</code>）。编辑器的 XML 插件能当场标红。</td>
+  </tr>
+  <tr>
+    <td><code>The XML file '…' does not fit the required schema!</code></td>
+    <td>结构不符合 Odoo 数据文件的规范（RNG 校验）：标签名写错、标签放错了位置。它下面的 WARNING 行会给出具体位置；按提示 <code>pip install jingtrang</code> 后消息会更精确。</td>
+  </tr>
+</table></div>
+
+<div class="box warn">
+  <div class="t">CSV 文件的列名就是字段名</div>
+  <p>
+    <code>ir.access.csv</code> 的表头必须是 <code>id,name,model_id,group_id/id,operation,domain</code>，而且<strong>文件名决定了导入到哪个模型</strong>：
+    文件叫 <code>ir.access.csv</code>，就导入 <code>ir.access</code>。从旧教程抄来的 <code>ir.model.access.csv</code> 在 Odoo 20 里已经没有对应的模型了（第 3 章），
+    可以用 <code>odoo upgrade_code</code> 自动转换（附录 A）。
+  </p>
+</div>
+
+<h2 id="views">视图问题</h2>
+
+<h3>字段在模型里不存在</h3>
+
+<div class="code" data-lang="text">
+<pre>
+Field "isbn" does not exist in model "library.book"
+</pre>
+</div>
+
+<dl class="terms">
+  <dt>原因</dt><dd>视图里用了一个模型上没有的字段。最常见的是<strong>刚在 Python 里加了字段，却只升级、没重启</strong>（Python 没重新加载，Odoo 根本不知道这个新字段），或者字段名有拼写错误。还有一种：字段定义在另一个模块里，而那个模块不在 <code>depends</code> 中。</dd>
+  <dt>解决</dt><dd>确认拼写，停掉服务器再带 <code>-u</code> 启动（同时完成「重启 + 升级」）。</dd>
+</dl>
+
+<h3>继承视图时 XPath 定位失败</h3>
+
+<div class="code" data-lang="text">
+<pre>
+Element '&amp;lt;xpath expr="//field[@name='isbn']"&amp;gt;' cannot be located in parent view
+</pre>
+</div>
+
+<dl class="terms">
+  <dt>原因</dt><dd>继承视图（第 4 章）里的 <code>expr</code> 或 <code>&lt;field name="..." position="..."&gt;</code> 在父视图里找不到对应的节点。常见情况：字段名、<code>name</code> 属性写错；<code>inherit_id</code> 指向了另一个视图；父视图在新版本里改了结构（比如 <code>tree</code> 改叫 <code>list</code>、某个 <code>group</code> 换了名字）。</dd>
+  <dt>解决</dt><dd>打开开发者模式，在要修改的界面点调试菜单（小虫子）→ <strong>Computed Arch</strong>，看到的是所有继承合并之后的最终结构，直接在里面找你要定位的节点；或者点 <strong>View: 表单名</strong> 打开父视图本身，核对节点和属性。</dd>
+</dl>
+
+<h3>旧教程里的视图写法</h3>
+
+<p>网上大量教程基于 Odoo 16 以前的版本。把这些视图代码装进 Odoo 20，会碰到下面这些报错：</p>
+
+<div class="tw"><table>
+  <tr><th>报错 / 现象</th><th>旧写法</th><th>Odoo 20 写法</th></tr>
+  <tr><td><code>Since 17.0, the "attrs" and "states" attributes are no longer used.</code></td><td><code>attrs="{'invisible': [('state', '!=', 'done')]}"</code></td><td><code>invisible="state != 'done'"</code>（直接写 Python 风格的表达式）</td></tr>
+  <tr><td><code>Invalid view type: 'tree'</code></td><td><code>&lt;tree&gt;</code>、<code>view_mode="tree,form"</code></td><td><code>&lt;list&gt;</code>、<code>view_mode="list,form"</code></td></tr>
+  <tr><td>看板卡片一片空白</td><td><code>&lt;t t-name="kanban-box"&gt;</code></td><td><code>&lt;t t-name="card"&gt;</code>（第 11 章）</td></tr>
+  <tr><td>图标不显示</td><td><code>fa fa-check</code> 等 Font Awesome 类名</td><td>Material Symbols 图标，例如 <code>icon="edit_square"</code>（附录 A）</td></tr>
+</table></div>
+
+<h3>改了视图，界面上没变化</h3>
+
+<dl class="terms">
+  <dt>原因</dt><dd>① 没升级模块（视图存在数据库里，改文件不会自动生效）；② 这个界面实际用的是另一个视图（比如动作通过 <code>view_id</code> 指定了别的视图，或者有优先级更高的视图）；③ 另一个模块的继承视图把你的改动又盖掉了。</dd>
+  <dt>解决</dt><dd>先升级 + 强制刷新。还不行，就用调试菜单的 <strong>Computed Arch</strong> 看最终结构里有没有你的修改，再用 <strong>View: …</strong> 确认当前用的是哪一个视图。</dd>
+</dl>
+
+<h2 id="access">权限问题</h2>
+
+<p>访问报错有两种，长得完全不一样，原因也不同。先弄清 Odoo 的检查分两层（第 3 章）：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 270" role="img" aria-label="访问检查的两层：模型级许可和记录级域，分别对应两种不同的报错">
+  <rect class="bx" x="20" y="100" width="120" height="64" rx="10"/>
+  <text class="lbl" x="80" y="128" text-anchor="middle">用户要读 /</text>
+  <text class="lbl" x="80" y="146" text-anchor="middle">写某些记录</text>
+  <rect class="bx-b" x="180" y="90" width="210" height="84" rx="10"/>
+  <text class="ttl on-b" x="285" y="116" text-anchor="middle">第 1 层：模型级</text>
+  <text class="sm" x="285" y="138" text-anchor="middle">用户所在的组里，有没有任何</text>
+  <text class="sm" x="285" y="156" text-anchor="middle">一条许可覆盖这个操作？</text>
+  <rect class="bx-b" x="430" y="90" width="210" height="84" rx="10"/>
+  <text class="ttl on-b" x="535" y="116" text-anchor="middle">第 2 层：记录级</text>
+  <text class="sm" x="535" y="138" text-anchor="middle">这些记录满足许可的域，</text>
+  <text class="sm" x="535" y="156" text-anchor="middle">并满足全部限制吗？</text>
+  <rect class="bx-g" x="676" y="106" width="64" height="52" rx="10"/>
+  <text class="lbl on-g" x="708" y="137" text-anchor="middle">通过</text>
+  <path class="ln" d="M142 132 H176" marker-end="url(#ar)"/>
+  <path class="ln-g" d="M392 132 H426" marker-end="url(#ar-g)"/>
+  <path class="ln-g" d="M642 132 H672" marker-end="url(#ar-g)"/>
+  <text class="sm on-g" x="409" y="124" text-anchor="middle">有</text>
+  <text class="sm on-g" x="657" y="124" text-anchor="middle">是</text>
+
+  <path class="ln-r" d="M285 176 V206" marker-end="url(#ar-r)"/>
+  <path class="ln-r" d="M535 176 V206" marker-end="url(#ar-r)"/>
+  <rect class="bx-r" x="150" y="210" width="270" height="48" rx="8"/>
+  <text class="sm mono on-r" x="285" y="230" text-anchor="middle">You are not allowed to access</text>
+  <text class="sm mono on-r" x="285" y="247" text-anchor="middle">'Book' (library.book) records.</text>
+  <rect class="bx-r" x="430" y="210" width="310" height="48" rx="8"/>
+  <text class="sm mono on-r" x="585" y="230" text-anchor="middle">Uh-oh! Looks like you have stumbled</text>
+  <text class="sm mono on-r" x="585" y="247" text-anchor="middle">upon some top-secret records.</text>
+  <text class="sm" x="380" y="50" text-anchor="middle">报错的第一句话就告诉你是哪一层没通过</text>
+  <text class="sm on-r" x="297" y="196">没有</text>
+  <text class="sm on-r" x="547" y="196">否</text>
+</svg>
+<figcaption>图 B-5　两种访问错误分别对应两层检查</figcaption>
+</figure>
+
+<h3>第一种：模型级（You are not allowed to …）</h3>
+
+<div class="code" data-lang="text">
+<pre>
+You are not allowed to access 'Book' (library.book) records.
+
+No group currently allows this operation.
+
+Contact your administrator to request access if necessary.
+</pre>
+</div>
+
+<dl class="terms">
+  <dt>原因</dt><dd>
+    第二段告诉你答案：「No group currently allows this operation」表示<strong>根本没有任何规则</strong>允许这个操作——新建的模型忘了写 <code>ir.access.csv</code>，或者写了却没加进清单的 <code>data</code>。
+    如果第二段列出了一些组（This operation is allowed for the following groups），说明规则是有的，只是当前用户不在这些组里。
+  </dd>
+  <dt>解决</dt><dd>补上规则并升级模块；或者到「设置 → 用户」把用户加进相应的组。</dd>
+</dl>
+
+<div class="box note">
+  <div class="t">&#9432; 管理员也会遇到权限错误</div>
+  <p>
+    很多人以为管理员账号（admin）可以无视权限。其实不是：admin 只是属于很多组的普通用户，新模型如果没有给它所在的组写规则，admin 一样会报错。
+    真正跳过所有权限检查的只有<strong>超级用户</strong>模式（开发者模式下调试菜单里的 <strong>Become Superuser</strong>，以及代码里的 <code>sudo()</code>）。
+    排错时可以用它确认「是不是权限问题」，但别用它掩盖问题。
+  </p>
+</div>
+
+<h3>第二种：记录级（top-secret records）</h3>
+
+<div class="code" data-lang="text">
+<pre>
+Uh-oh! Looks like you have stumbled upon some top-secret records.
+
+Sorry, Ana (id=6) doesn't have 'write' access to:
+- Book, Odoo Development Essentials (library.book: 3)
+
+Blame the following accesses:
+- Book: user
+</pre>
+</div>
+
+<dl class="terms">
+  <dt>原因</dt><dd>用户对这个模型有许可，但这几条具体的记录不满足许可的 <code>domain</code>，或者被某条「限制」（没有组的 <code>ir.access</code>，最典型的是多公司隔离）挡住了。</dd>
+  <dt>解决</dt><dd>
+    开着开发者模式时，消息里会列出<strong>具体是哪些记录、哪几条规则</strong>（Blame the following accesses）——普通模式下只显示模型名。
+    对照这些规则的域看看记录为什么不满足；如果消息里提到 multi-company，切换右上角的当前公司往往就能解决。
+  </dd>
+</dl>
+
+<h3>菜单不见了</h3>
+
+<dl class="terms">
+  <dt>原因</dt><dd>菜单本身设置了 <code>groups</code> 而用户不在组里；或者菜单指向的动作所属的模型，用户连「读」的权限都没有——Odoo 会自动隐藏这样的菜单，<strong>不报任何错</strong>。</dd>
+  <dt>解决</dt><dd>先给用户补上读权限，再检查菜单和它的上级菜单的 <code>groups</code>。</dd>
+</dl>
+
+<h2 id="orm">ORM 与 Python 代码</h2>
+
+<h3>Expected singleton</h3>
+
+<div class="code" data-lang="text">
+<pre>
+ValueError: Expected singleton: library.book(1, 2)
+</pre>
+</div>
+
+<dl class="terms">
+  <dt>原因</dt><dd>对一个包含<strong>多条记录</strong>的记录集读取了字段值（比如 <code>self.name</code>），而 Odoo 不知道你要哪一条。按钮方法、计算方法的 <code>self</code> 都可能包含多条记录（第 7 章）。</dd>
+  <dt>解决</dt><dd>用 <code>for record in self:</code> 逐条处理；如果确实只应该有一条，在方法开头写 <code>self.ensure_one()</code>，让错误更早、更明确地暴露出来。</dd>
+</dl>
+
+<h3>数据库里没有这一列</h3>
+
+<div class="code" data-lang="text">
+<pre>
+psycopg2.errors.UndefinedColumn: column library_book.isbn does not exist
+</pre>
+</div>
+
+<dl class="terms">
+  <dt>原因</dt><dd>Python 里新增了存储字段，服务器也重启了，但<strong>没有升级模块</strong>，所以数据库表里还没有这一列。</dd>
+  <dt>解决</dt><dd><code>-u 模块名</code> 升级。</dd>
+</dl>
+
+<h3>写入时字段名不对</h3>
+
+<div class="code" data-lang="text">
+<pre>
+ValueError: Invalid field 'author' on model 'library.book'
+</pre>
+</div>
+
+<dl class="terms">
+  <dt>原因</dt><dd>传给 <code>create()</code> / <code>write()</code> 的字典里有模型上不存在的字段。本例中正确的字段是 <code>author_ids</code>：多对多字段按惯例以 <code>_ids</code> 结尾，多对一字段以 <code>_id</code> 结尾（第 19 章）。</dd>
+  <dt>解决</dt><dd>在开发者模式下打开「设置 → 技术 → 模型」，或者在 <code>odoo shell</code> 里执行 <code>env['library.book']._fields.keys()</code>，查看真实的字段名。</dd>
+</dl>
+
+<h3>计算字段的值不更新</h3>
+
+<dl class="terms">
+  <dt>原因</dt><dd><code>@api.depends</code> 漏了某个依赖字段，Odoo 不知道该在什么时候重新计算。对存储的计算字段（<code>store=True</code>）尤其要紧：漏了依赖，数据库里的值就一直是旧的。</dd>
+  <dt>解决</dt><dd>把计算里读到的所有字段都写进 <code>@api.depends</code>，关联字段写成点号路径，比如 <code>@api.depends("line_ids.quantity")</code>。修好后升级模块，已存储的旧值才会重新计算。</dd>
+</dl>
+
+<h3>重写方法后功能「消失」了，或者无限递归</h3>
+
+<dl class="terms">
+  <dt>原因</dt><dd>重写 <code>create</code>、<code>write</code> 或按钮方法时忘了调用 <code>super()</code>，原来的逻辑就不会执行；反过来，在 <code>write()</code> 里又调用 <code>self.write()</code>，会无限递归，最终报 <code>RecursionError</code>。</dd>
+  <dt>解决</dt><dd>重写时总是调用 <code>super()</code> 并返回它的结果；在 <code>write()</code> 里要写别的字段，就把值合并进传给 <code>super().write()</code> 的字典里。</dd>
+</dl>
+
+<h3>旧教程里的 Python 写法</h3>
+
+<div class="tw"><table>
+  <tr><th>报错</th><th>旧写法</th><th>Odoo 20 写法</th></tr>
+  <tr><td><code>AttributeError: module 'odoo.api' has no attribute 'multi'</code></td><td><code>@api.multi</code>、<code>@api.one</code></td><td>删掉：方法默认就处理记录集</td></tr>
+  <tr><td><code>ModuleNotFoundError: No module named 'odoo.osv'</code></td><td><code>from odoo.osv import expression</code></td><td><code>from odoo.fields import Domain</code>（第 7 章）</td></tr>
+  <tr><td><code>AttributeError: ... 'get_param'</code></td><td><code>ICP.get_param("key")</code></td><td><code>ICP.get_str("key")</code>、<code>get_int</code>、<code>get_bool</code>……（第 14 章）</td></tr>
+  <tr><td><code>name_get</code> 被忽略，显示名没变</td><td>重写 <code>name_get()</code></td><td>重写 <code>_compute_display_name()</code>（第 6 章）</td></tr>
+  <tr><td><code>_sql_constraints</code> 不再生效</td><td><code>_sql_constraints = [...]</code></td><td><code>models.Constraint(...)</code>（第 6 章）</td></tr>
+</table></div>
+
+<div class="box tip">
+  <div class="t">&#128161; 让工具先替你改一遍</div>
+  <p>
+    迁移旧模块时，先运行 <code>odoo upgrade_code --addons-path=你的目录 --from 15.0 --dry-run</code> 看看它能自动改写哪些地方（附录 A），剩下的再对照上面的表格手工处理。
+  </p>
+</div>
+
+<h2 id="frontend">前端问题</h2>
+
+<h3>页面白屏，或者按钮没反应</h3>
+
+<dl class="terms">
+  <dt>原因</dt><dd>前端 JavaScript 出错时，服务器日志里往往什么都没有。常见原因：OWL 模板里引用了不存在的变量、导入路径写错（<code>@web/...</code>）、模板名和组件里 <code>static template</code> 写的不一致。</dd>
+  <dt>解决</dt><dd>
+    按 F12 打开浏览器的<strong>控制台</strong>看红色报错；在网址里加 <code>?debug=assets</code>，前端资源会以未压缩的形式加载，报错的文件名和行号才看得懂。
+    如果报的是 <code>Missing template</code> 或某个文件 404，检查清单的 <code>assets</code> 有没有包含这个文件，改了清单要重启服务器。
+  </dd>
+</dl>
+
+<h3>改了 JS / CSS，浏览器里还是旧的</h3>
+
+<dl class="terms">
+  <dt>原因</dt><dd>浏览器缓存了旧的资源包。</dd>
+  <dt>解决</dt><dd>Ctrl+Shift+R 强制刷新；还不行就在调试菜单点 <strong>Regenerate Assets</strong>，让服务器重新打包。</dd>
+</dl>
+
+<h2 id="env">运行环境</h2>
+
+<div class="tw"><table>
+  <tr><th>报错</th><th>原因</th><th>解决</th></tr>
+  <tr>
+    <td><code>OSError: [Errno 98] Address already in use</code></td>
+    <td>8069 端口已经被占用：多半是另一个 Odoo 还在运行（另一个终端、后台进程、Docker 容器）。</td>
+    <td>关掉它，或者用 <code>-p 8070</code> 换一个端口。</td>
+  </tr>
+  <tr>
+    <td><code>FATAL: role "you" does not exist</code></td>
+    <td>PostgreSQL 里没有和你的系统用户同名的数据库用户。</td>
+    <td><code>sudo -u postgres createuser -s $USER</code>（第 2 章）。</td>
+  </tr>
+  <tr>
+    <td><code>Using the database user 'postgres' is a security risk, aborting.</code></td>
+    <td>Odoo 拒绝用 PostgreSQL 的超级用户 <code>postgres</code> 连接数据库。</td>
+    <td>新建一个专用的数据库用户，在配置里用 <code>db_user</code> 指定。</td>
+  </tr>
+  <tr>
+    <td><code>Database mydb not initialized, you can force it with `-i base`</code></td>
+    <td>这个数据库是空的，或者不是 Odoo 的库。</td>
+    <td>用 <code>odoo db init</code> 或 <code>-i base</code> 初始化，或者检查 <code>-d</code> 有没有写错库名。</td>
+  </tr>
+  <tr>
+    <td><code>Outdated python version detected, Odoo requires Python &gt;= 3.12 to run.</code></td>
+    <td>当前用的 Python 太旧——很可能没激活虚拟环境，用了系统自带的另一个 Python。</td>
+    <td>激活虚拟环境，或者用 3.12 – 3.14 的 Python 重建它。</td>
+  </tr>
+  <tr>
+    <td><code>pip install</code> 时编译 <code>psycopg2</code>、<code>python-ldap</code> 失败</td>
+    <td>缺少编译需要的系统开发包。</td>
+    <td>安装 <code>libpq-dev</code>、<code>libldap2-dev</code>、<code>libsasl2-dev</code> 等（第 2 章的完整列表）后重试。</td>
+  </tr>
+</table></div>
+
+<h2 id="upgrade">升级之后的意外</h2>
+
+<h3>升级了模块，数据文件里的修改却没有生效</h3>
+
+<dl class="terms">
+  <dt>原因</dt><dd>那条记录放在 <code>&lt;data noupdate="1"&gt;</code> 里（第 5 章）。这种记录只在<strong>第一次安装</strong>时创建，以后升级都不会再覆盖，目的是保护用户在界面上做过的修改。</dd>
+  <dt>解决</dt><dd>开发阶段可以卸载再重装模块；已经上线的系统，在界面上手工修改，或者写一个迁移脚本（第 19 章）。</dd>
+</dl>
+
+<h3>我在界面上改过的视图 / 菜单，升级后被还原了</h3>
+
+<dl class="terms">
+  <dt>原因</dt><dd>和上一条正好相反：不带 <code>noupdate</code> 的记录，每次升级都会按模块文件里的内容重新写一遍，界面上的修改会被覆盖。</dd>
+  <dt>解决</dt><dd>不要直接改模块自带的记录。想调整界面，就写一个继承视图放进你自己的模块里（第 4 章）——这也是 Odoo 推荐的做法。</dd>
+</dl>
+
+<h2 id="toolbox">排错工具箱</h2>
+
+<div class="cards">
+  <div class="card"><span class="ic">&#128027;</span><h4>开发者模式</h4><p>网址加 <code>?debug=1</code>。调试菜单里的 Computed Arch、View、Metadata（查看记录的 XML ID）、Become Superuser 都是排错利器。</p></div>
+  <div class="card"><span class="ic">&#128187;</span><h4>odoo shell</h4><p>直接在命令行里调用 ORM，验证字段名、试运行一段逻辑，不用反复点界面（第 7 章）。</p></div>
+  <div class="card"><span class="ic">&#9208;</span><h4>断点调试</h4><p>代码里写 <code>breakpoint()</code>，或者用 VS Code 打图形化断点，一步步看变量怎么变（第 8、17 章）。</p></div>
+  <div class="card"><span class="ic">&#128220;</span><h4>日志开关</h4><p><code>--log-level=debug</code>、<code>--log-sql</code>、<code>--log-handler=模块:DEBUG</code>，只放大你关心的那一块。</p></div>
+  <div class="card"><span class="ic">&#129514;</span><h4>测试</h4><p>把复现问题的步骤写成一个测试（第 8 章），修好以后它还能防止问题再次出现。</p></div>
+  <div class="card"><span class="ic">&#128269;</span><h4>读源码</h4><p>Odoo 的源码就在 <code>~/work20/odoo</code>。用编辑器全局搜索报错消息，就能找到抛出它的那一行和触发条件。</p></div>
+</div>
+
+<div class="box key">
+  <div class="t">最有效的一招：拿报错文字去搜源码</div>
+  <p>
+    报错消息几乎都是源码里的一行字符串。复制消息中<strong>固定不变的部分</strong>（去掉记录名、ID 这些变量），在 Odoo 源码里全局搜索，
+    就能找到抛出它的 <code>raise</code> 语句。看懂它上面的 <code>if</code> 条件，通常就知道问题出在哪了。
+  </p>
+</div>
+
+<h2 id="ask">怎样提问才能得到回答</h2>
+
+<p>自己实在解决不了，就去 Odoo 官方论坛、OCA 的 GitHub 或中文社区求助。一个好问题应该包含：</p>
+
+<ol class="steps">
+  <li><strong>版本</strong>：Odoo 20 社区版还是企业版，Python 版本，怎么安装的（源码 / Docker / 安装包）。</li>
+  <li><strong>你想做什么</strong>：一两句话说明目标，而不只是「这段代码报错」。</li>
+  <li><strong>最小的可复现代码</strong>：删掉和问题无关的部分，只留下能触发报错的最少代码。很多时候在精简的过程中，你自己就发现问题了。</li>
+  <li><strong>完整的 Traceback</strong>：从服务器日志里复制文字，不要截图，也不要只贴最后一行。</li>
+  <li><strong>你已经试过什么</strong>：重启过吗？升级过吗？这能帮回答的人少走弯路。</li>
+</ol>
+
+<h2 id="summary">小结</h2>
+
+<ul>
+  <li>浏览器弹窗只是表象，完整的信息在<strong>服务器日志</strong>里；前端问题看浏览器的<strong>控制台</strong>。</li>
+  <li>读 Traceback：先看最后一行的异常类型和消息，再往上找自己模块的文件和行号。</li>
+  <li>Python 改动要重启，数据和视图要升级，静态文件要强制刷新；拿不准就 <code>-u</code> 重启再 Ctrl+Shift+R。</li>
+  <li>模块找不到：查 addons paths、路径层级、更新应用列表和「应用」筛选，以及清单版本号。</li>
+  <li><code>ParseError</code> 看文件和行号；<code>External ID not found</code> 多半是文件顺序或模块前缀的问题。</li>
+  <li>两种 AccessError：「not allowed to access」是没有规则，「top-secret records」是记录不满足规则的域。</li>
+  <li>旧教程的 <code>attrs</code>、<code>tree</code>、<code>kanban-box</code>、<code>@api.multi</code>、<code>odoo.osv</code> 在 Odoo 20 上都会报错，先用 <code>upgrade_code</code> 自动迁移。</li>
+</ul>
+
+<div class="exercise">
+  <h3>动手练习：故意制造错误</h3>
+  <p>认识报错最好的办法，是亲手把它制造出来。在图书馆模块的一个副本上逐个尝试，观察报错出现在哪里、长什么样：</p>
+  <ol>
+    <li>把清单的版本号改成 <code>15.0.1.0.0</code>，重启后在「应用」里搜索这个模块。</li>
+    <li>在 <code>library_menu.xml</code> 里把图书子菜单 <code>menu_library_book</code> 挪到动作 <code>action_library_book</code> 前面，然后升级模块。</li>
+    <li>在表单视图里加一个不存在的字段 <code>&lt;field name="foo"/&gt;</code>，升级模块。</li>
+    <li>注释掉 <code>ir.access.csv</code> 里图书的那一行，升级后用普通用户打开图书菜单。</li>
+    <li>在一个按钮方法里去掉 <code>for</code> 循环直接读 <code>self.name</code>，然后在列表里选中两条记录执行它。</li>
+    <li>在 Python 里加一个新的存储字段，只重启、不升级，打开列表视图看看会发生什么。</li>
+  </ol>
+</div>
+<div id="pager"></div>
+</main>
+</div>
+<script src="assets/site.js"></script>
+</body>
+</html>

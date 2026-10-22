@@ -22,11 +22,20 @@
     { n: 13, t: '网站与门户',             d: '控制器、网页模板与客户门户' },
     { n: 14, t: '内置模型',               d: '公司、用户、伙伴与元数据模型', part: '第五部分 · 部署与维护' },
     { n: 15, t: '部署与维护',             d: '生产环境安装、Nginx 反向代理与升级' },
-    { n: 16, t: '附录：15 → 20 变化速查', d: '书里的旧写法和今天的新写法一一对照', part: '附录' }
+    { n: 17, t: '开发环境进阶：Docker 与断点调试', d: '一条命令起 Odoo 20，用 VS Code 单步跟踪代码', part: '第六部分 · 进阶与实战' },
+    { n: 18, t: '多语言与翻译',           d: '让模块说中文：.pot 模板、.po 译文与翻译工作流' },
+    { n: 19, t: '编码规范与工具链',       d: '命名约定、ruff、pre-commit、Git 提交与模块版本' },
+    { n: 20, t: '综合实战：贸易公司进销存', d: '配置标准应用 + 写扩展模块，独立完成一个真实项目' },
+    { n: 16, t: '15 → 20 变化速查',       d: '书里的旧写法和今天的新写法一一对照', part: '附录', k: 'A' },
+    { n: 21, t: '常见报错与排错手册',     d: '症状 → 原因 → 解决，外加「改了什么要做什么」决策图', k: 'B' },
+    { n: 22, t: '术语表与概念地图',       d: '几十个核心概念的一句话解释，以及它们之间的关系', k: 'C' }
   ];
 
   const pad = (n) => String(n).padStart(2, '0');
   const href = (n) => `ch${pad(n)}.html`;
+  // 附录用字母编号（k），正文用数字
+  const key = (c) => c.k || String(c.n);
+  const label = (c) => (c.k ? `附录 ${c.k}` : `第 ${c.n} 章`);
 
   const cur = Number.parseInt(document.body.dataset.chapter || '0', 10);
 
@@ -35,9 +44,9 @@
   if (side) {
     const brand = '<a class="brand" href="index.html"><span class="flame">O</span>' +
       '<span>Odoo 20 开发入门<small>从开发者模式到生产部署</small></span></a>';
-    const links = CHAPTERS.map(({ n, t, part }) =>
-      (part ? `<div class="part">${part}</div>` : '') +
-      `<a class="ch${n === cur ? ' active' : ''}" href="${href(n)}"><span class="n">${n}</span><span>${t}</span></a>`
+    const links = CHAPTERS.map((c) =>
+      (c.part ? `<div class="part">${c.part}</div>` : '') +
+      `<a class="ch${c.n === cur ? ' active' : ''}" href="${href(c.n)}"><span class="n">${key(c)}</span><span>${c.t}</span></a>`
     );
     side.innerHTML = brand + links.join('');
     const active = side.querySelector('a.ch.active');
@@ -214,13 +223,15 @@
   /* ---------- 上一章 / 下一章 ---------- */
   const pager = document.getElementById('pager');
   if (pager && cur) {
-    const prev = CHAPTERS.find((c) => c.n === cur - 1);
-    const next = CHAPTERS.find((c) => c.n === cur + 1);
+    // 按目录顺序（而不是文件编号）决定上一章 / 下一章
+    const i = CHAPTERS.findIndex((c) => c.n === cur);
+    const prev = i > 0 ? CHAPTERS[i - 1] : null;
+    const next = i >= 0 ? CHAPTERS[i + 1] : null;
     const prevLink = prev
-      ? `<a class="prev" href="${href(prev.n)}"><span>&larr; 上一章</span>第 ${prev.n} 章 · ${prev.t}</a>`
+      ? `<a class="prev" href="${href(prev.n)}"><span>&larr; 上一章</span>${label(prev)} · ${prev.t}</a>`
       : '<a class="prev" href="index.html"><span>&larr; 返回</span>课程首页</a>';
     const nextLink = next
-      ? `<a class="next" href="${href(next.n)}"><span>下一章 &rarr;</span>第 ${next.n} 章 · ${next.t}</a>`
+      ? `<a class="next" href="${href(next.n)}"><span>下一章 &rarr;</span>${label(next)} · ${next.t}</a>`
       : '<a class="next ph" href="#">.</a>';
     pager.className = 'pager';
     pager.innerHTML = prevLink + nextLink;
@@ -230,11 +241,11 @@
   const grid = document.getElementById('toc-grid');
   if (grid) {
     grid.className = 'toc-grid';
-    grid.innerHTML = CHAPTERS.map(({ n, t, d }) =>
-      `<a class="toc-card" href="${href(n)}">` +
-      `<div class="n">${n === 16 ? '附录' : `第 ${n} 章`}</div>` +
-      `<div class="t">${t}</div>` +
-      `<div class="d">${d}</div></a>`
+    grid.innerHTML = CHAPTERS.map((c) =>
+      `<a class="toc-card" href="${href(c.n)}">` +
+      `<div class="n">${label(c)}</div>` +
+      `<div class="t">${c.t}</div>` +
+      `<div class="d">${c.d}</div></a>`
     ).join('');
   }
 })();

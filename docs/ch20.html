@@ -1,0 +1,1104 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 20 章 · 综合实战：贸易公司进销存 — Odoo 20 开发入门</title>
+<meta name="description" content="一个完整的实战项目：为一家中小型贸易公司实施 Odoo 20。先做需求分析和差异分析，用标准的销售、采购、库存、开票应用完成配置，再开发扩展模块实现客户分级、订单审批、装箱单和销售分析，最后写测试并按验收清单走通全流程。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-chapter="20">
+<div id="app">
+<aside id="sidebar"></aside>
+<main>
+<span class="chapter-eyebrow">第 20 章</span>
+<h1>综合实战：贸易公司进销存</h1>
+<p class="lede">
+  前面十几章我们一直在建设图书馆系统，每一步都有现成的代码可以照着敲。这一章换一种方式：给你一个<strong>真实的业务场景</strong>和一份需求清单，
+  由你自己决定哪些用标准功能配置、哪些需要写代码，然后动手实现。每个开发任务都附有思路提示和折叠起来的参考答案——
+  <strong>先自己做，卡住了再展开看</strong>。做完这个项目，你就走完了一次真实的 Odoo 实施。
+</p>
+
+<div class="goals">
+  <h4>本章目标</h4>
+  <ul>
+    <li>把业务需求拆解成「标准配置」和「定制开发」两部分（差异分析）</li>
+    <li>用销售、采购、库存、开票四个标准应用搭起贸易公司的主流程</li>
+    <li>开发扩展模块：新模型、继承已有模型和视图、计算字段、重写业务方法、权限、报表</li>
+    <li>为关键业务规则编写自动化测试</li>
+    <li>按验收清单从询价到收款走通全流程</li>
+  </ul>
+</div>
+
+<div id="chapter-toc"></div>
+
+<h2 id="scenario">项目背景：鑫达商贸</h2>
+
+<p>
+  <strong>鑫达商贸</strong>（虚构）是一家 20 人左右的贸易公司，从几家工厂采购手机配件和数码周边（数据线、充电器、转接头、移动电源……），
+  存放在自己的一个仓库里，再批发给各地的零售店和企业客户。公司目前用 Excel 管理库存、用微信接单，问题越来越多：
+</p>
+
+<ul>
+  <li>销售员给客户报价时随意打折，月底一算毛利才发现亏了；</li>
+  <li>库存数字总是对不上，经常卖出去了才发现没货，临时找工厂补货；</li>
+  <li>仓库发货靠手写清单，物流公司要货物重量时又得现称；</li>
+  <li>老板想知道「大客户和小客户各贡献了多少销售额」，没人答得上来。</li>
+</ul>
+
+<p>老板决定上 Odoo 20 社区版。先认识一下会用到系统的人：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 300" role="img" aria-label="鑫达商贸的组织结构与对应的 Odoo 权限组">
+  <rect class="bx-a" x="300" y="16" width="160" height="50" rx="10"/>
+  <text class="ttl on-a" x="380" y="38" text-anchor="middle">总经理</text>
+  <text class="sm" x="380" y="56" text-anchor="middle">看报表、批大单</text>
+  <path class="ln" d="M380 68 V88 H95 V108 M380 88 H285 V108 M380 88 H475 V108 M380 88 H665 V108"/>
+
+  <rect class="bx-b" x="20" y="110" width="150" height="170" rx="10"/>
+  <text class="ttl on-b" x="95" y="134" text-anchor="middle">销售部</text>
+  <text class="lbl" x="95" y="160" text-anchor="middle">销售经理 × 1</text>
+  <text class="sm" x="95" y="178" text-anchor="middle">销售：管理员</text>
+  <text class="lbl" x="95" y="208" text-anchor="middle">销售员 × 5</text>
+  <text class="sm" x="95" y="226" text-anchor="middle">销售：用户</text>
+  <text class="sm" x="95" y="242" text-anchor="middle">（仅自己的单据）</text>
+
+  <rect class="bx-g" x="210" y="110" width="150" height="170" rx="10"/>
+  <text class="ttl on-g" x="285" y="134" text-anchor="middle">采购部</text>
+  <text class="lbl" x="285" y="160" text-anchor="middle">采购员 × 2</text>
+  <text class="sm" x="285" y="178" text-anchor="middle">采购：用户</text>
+  <text class="sm" x="285" y="212" text-anchor="middle">管供应商、下采购单、</text>
+  <text class="sm" x="285" y="230" text-anchor="middle">跟进到货</text>
+
+  <rect class="bx-p" x="400" y="110" width="150" height="170" rx="10"/>
+  <text class="ttl on-p" x="475" y="134" text-anchor="middle">仓库</text>
+  <text class="lbl" x="475" y="160" text-anchor="middle">仓管员 × 3</text>
+  <text class="sm" x="475" y="178" text-anchor="middle">库存：用户</text>
+  <text class="sm" x="475" y="212" text-anchor="middle">收货、拣货、发货、</text>
+  <text class="sm" x="475" y="230" text-anchor="middle">盘点</text>
+
+  <rect class="bx-r" x="590" y="110" width="150" height="170" rx="10"/>
+  <text class="ttl on-r" x="665" y="134" text-anchor="middle">财务</text>
+  <text class="lbl" x="665" y="160" text-anchor="middle">会计 × 1</text>
+  <text class="sm" x="665" y="178" text-anchor="middle">开票：开票员</text>
+  <text class="sm" x="665" y="212" text-anchor="middle">开发票、登记收付款、</text>
+  <text class="sm" x="665" y="230" text-anchor="middle">对账</text>
+</svg>
+<figcaption>图 20-1　组织结构。框里的小字是他们在 Odoo 里对应的权限组——权限设计从认识用户开始</figcaption>
+</figure>
+
+<h2 id="flow">业务主流程</h2>
+
+<p>访谈下来，公司的核心业务就是一条「采购 → 入库 → 销售 → 出库 → 开票 → 收款」的链条。把它画出来，再标上每一步由哪个 Odoo 应用负责：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 360" role="img" aria-label="贸易公司业务流程泳道图：销售、采购、仓库、财务四条泳道">
+  <rect class="bx-d" x="20" y="16" width="720" height="78" rx="8"/>
+  <rect class="bx-d" x="20" y="100" width="720" height="78" rx="8"/>
+  <rect class="bx-d" x="20" y="184" width="720" height="78" rx="8"/>
+  <rect class="bx-d" x="20" y="268" width="720" height="78" rx="8"/>
+  <text class="ttl on-b" x="34" y="40">销售</text>
+  <text class="ttl on-g" x="34" y="124">采购</text>
+  <text class="ttl on-p" x="34" y="208">仓库</text>
+  <text class="ttl on-r" x="34" y="292">财务</text>
+  <text class="sm" x="34" y="60">Sales</text>
+  <text class="sm" x="34" y="144">Purchase</text>
+  <text class="sm" x="34" y="228">Inventory</text>
+  <text class="sm" x="34" y="312">Invoicing</text>
+
+  <rect class="bx-b" x="110" y="32" width="100" height="46" rx="8"/>
+  <text class="lbl on-b" x="160" y="52" text-anchor="middle">报价单</text>
+  <text class="sm" x="160" y="68" text-anchor="middle">价格表、折扣</text>
+  <rect class="bx-a" x="240" y="32" width="100" height="46" rx="8"/>
+  <text class="lbl on-a" x="290" y="52" text-anchor="middle">审批 ★</text>
+  <text class="sm" x="290" y="68" text-anchor="middle">超折扣 / 大单</text>
+  <rect class="bx-b" x="370" y="32" width="100" height="46" rx="8"/>
+  <text class="lbl on-b" x="420" y="52" text-anchor="middle">确认订单</text>
+  <text class="sm" x="420" y="68" text-anchor="middle">销售订单</text>
+
+  <rect class="bx-g" x="370" y="116" width="120" height="46" rx="8"/>
+  <text class="lbl on-g" x="430" y="136" text-anchor="middle">采购订单</text>
+  <text class="sm" x="430" y="152" text-anchor="middle">补货规则自动生成</text>
+
+  <rect class="bx-p" x="370" y="200" width="100" height="46" rx="8"/>
+  <text class="lbl on-p" x="420" y="220" text-anchor="middle">收货入库</text>
+  <text class="sm" x="420" y="236" text-anchor="middle">库存增加</text>
+  <rect class="bx-p" x="500" y="200" width="110" height="46" rx="8"/>
+  <text class="lbl on-p" x="555" y="220" text-anchor="middle">拣货发货</text>
+  <text class="sm" x="555" y="236" text-anchor="middle">装箱单 ★</text>
+
+  <rect class="bx-r" x="500" y="284" width="100" height="46" rx="8"/>
+  <text class="lbl on-r" x="550" y="304" text-anchor="middle">客户发票</text>
+  <text class="sm" x="550" y="320" text-anchor="middle">按发货数量</text>
+  <rect class="bx-r" x="630" y="284" width="96" height="46" rx="8"/>
+  <text class="lbl on-r" x="678" y="304" text-anchor="middle">登记收款</text>
+  <text class="sm" x="678" y="320" text-anchor="middle">对账</text>
+  <rect class="bx-r" x="230" y="284" width="110" height="46" rx="8"/>
+  <text class="lbl on-r" x="285" y="304" text-anchor="middle">供应商账单</text>
+  <text class="sm" x="285" y="320" text-anchor="middle">付款</text>
+
+  <path class="ln" d="M212 55 H236" marker-end="url(#ar)"/>
+  <path class="ln" d="M342 55 H366" marker-end="url(#ar)"/>
+  <path class="ln" d="M420 80 V112" marker-end="url(#ar)"/>
+  <text class="sm" x="428" y="100">库存不足</text>
+  <path class="ln" d="M420 164 V196" marker-end="url(#ar)"/>
+  <path class="ln" d="M472 223 H496" marker-end="url(#ar)"/>
+  <path class="ln" d="M472 55 C 560 55, 555 120, 555 196" marker-end="url(#ar)"/>
+  <text class="sm" x="560" y="110">生成发货单</text>
+  <path class="ln" d="M555 248 V280" marker-end="url(#ar)"/>
+  <path class="ln" d="M602 307 H626" marker-end="url(#ar)"/>
+  <path class="ln-d" d="M368 140 C 300 160, 285 220, 285 280" marker-end="url(#ar)"/>
+</svg>
+<figcaption>图 20-2　业务主流程。带 ★ 的两步是标准功能满足不了、需要我们开发的部分</figcaption>
+</figure>
+
+<h2 id="fitgap">差异分析：配置还是开发</h2>
+
+<p>
+  拿到需求清单后，有经验的 Odoo 顾问做的第一件事，是逐条判断：<strong>标准功能能不能满足？</strong>能配置解决的绝不写代码——
+  代码要维护、要测试、每次升级 Odoo 都要迁移，而标准功能由 Odoo 替你维护。这个过程叫<strong>差异分析</strong>（fit-gap analysis）。
+</p>
+
+<div class="tw"><table>
+  <tr><th>编号</th><th>需求</th><th>结论</th><th>怎么做</th></tr>
+  <tr><td><span class="req">R1</span></td><td>管理产品目录，记录进价、售价、重量、条码</td><td>标准</td><td>产品；勾选「跟踪库存」</td></tr>
+  <tr><td><span class="req">R2</span></td><td>客户和供应商档案、付款条件</td><td>标准</td><td>联系人、付款条款</td></tr>
+  <tr><td><span class="req">R3</span></td><td>不同客户用不同的价格</td><td>标准</td><td>销售设置里启用价格表，给客户指定价格表</td></tr>
+  <tr><td><span class="req">R4</span></td><td>库存低于安全量时自动补货</td><td>标准</td><td>产品的供应商 + 「购买」路线 + 补货规则（最小 / 最大库存）</td></tr>
+  <tr><td><span class="req">R5</span></td><td>销售员只能看自己的客户和订单</td><td>标准</td><td>权限组「销售：用户（仅自己的单据）」</td></tr>
+  <tr><td><span class="req">R6</span></td><td>控制客户欠款</td><td>标准</td><td>开票设置里启用客户信用额度，在客户上设置额度</td></tr>
+  <tr><td><span class="req">R7</span></td><td>客户分为 A / B / C 三级，每一级有自己的折扣上限和大单金额</td><td><strong>开发</strong></td><td>新模型 + 继承联系人</td></tr>
+  <tr><td><span class="req">R8</span></td><td>超过折扣上限或超过大单金额的订单，必须由销售经理批准才能确认</td><td><strong>开发</strong></td><td>继承销售订单：计算字段、审批按钮、拦截确认</td></tr>
+  <tr><td><span class="req">R9</span></td><td>发货时打印装箱单，列出每样货物和总重量</td><td><strong>开发</strong></td><td>库存调拨上的 QWeb 报表</td></tr>
+  <tr><td><span class="req">R10</span></td><td>按客户等级统计销售额</td><td><strong>开发</strong> + 标准</td><td>订单上加一个存储的等级字段，再用标准的分组和透视表</td></tr>
+</table></div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 200" role="img" aria-label="差异分析结果：六条需求用标准配置，四条需要开发，开发部分集中在一个扩展模块里">
+  <rect class="bx-g" x="20" y="20" width="420" height="160" rx="12"/>
+  <text class="ttl on-g" x="36" y="46">标准配置（第一阶段）</text>
+  <text class="sm" x="36" y="72">R1 产品　R2 客户与供应商　R3 价格表</text>
+  <text class="sm" x="36" y="94">R4 补货规则　R5 销售权限　R6 信用额度</text>
+  <text class="sm" x="36" y="128">应用：sale_management、purchase、stock、account</text>
+  <text class="sm" x="36" y="150">（sale_stock、purchase_stock 等桥接模块自动安装）</text>
+  <rect class="bx-a" x="470" y="20" width="270" height="160" rx="12"/>
+  <text class="ttl on-a" x="486" y="46">定制开发（第二阶段）</text>
+  <text class="sm" x="486" y="72">R7 客户分级　R8 订单审批</text>
+  <text class="sm" x="486" y="94">R9 装箱单　R10 等级分析</text>
+  <text class="sm mono on-a" x="486" y="128">trading_custom</text>
+  <text class="sm" x="486" y="150">一个扩展模块，依赖标准应用</text>
+  <path class="ln" d="M442 100 H466" marker-end="url(#ar)"/>
+</svg>
+<figcaption>图 20-3　十条需求里六条靠配置就能解决。这个比例在真实项目中很常见</figcaption>
+</figure>
+
+<div class="box key">
+  <div class="t">先配置，后开发</div>
+  <p>
+    很多新手一上来就写代码，结果花两周开发了一个「审批流」，后来发现标准功能稍加配置就能做到。
+    动手之前，先在一个装了演示数据的库里把标准流程完整走一遍，确认标准功能<strong>真的</strong>满足不了，再开始写代码。
+  </p>
+</div>
+
+<h2 id="setup">第一阶段：标准配置</h2>
+
+<h3>建库与安装应用</h3>
+
+<div class="code" data-lang="bash">
+<pre>
+(env20) $ odoo db -c ~/work20/trading.conf init trading --language zh_CN
+(env20) $ odoo module install -c ~/work20/trading.conf -d trading sale_management purchase stock account
+</pre>
+</div>
+
+<p>
+  <code>trading.conf</code> 可以从第 2 章的配置文件复制一份，把 <code>addons_path</code> 改成包含 <code>trading_custom</code> 所在的目录。
+  注意 <code>odoo db</code> 的 <code>-c</code> 要写在子命令 <code>init</code> 前面，而 <code>odoo module</code> 的写在后面。
+  用 Docker 环境（第 17 章）的话，在命令前面加 <code>docker compose exec odoo</code>，并省略 <code>-c</code>。<code>account</code> 在社区版里显示为「开票」应用。
+  安装销售和库存后，桥接模块 <code>sale_stock</code>（确认销售订单时自动生成发货单）会自动安装；采购和库存之间的 <code>purchase_stock</code> 也一样。
+</p>
+
+<div class="box tip">
+  <div class="t">&#128161; 先在演示库里试</div>
+  <p>另建一个 <code>--with-demo</code> 的库，用演示数据把销售、采购、发货、开票都点一遍，熟悉标准流程之后再配置正式的库。</p>
+</div>
+
+<h3>逐条配置</h3>
+
+<ol class="steps">
+  <li><strong>公司信息（设置 → 公司）</strong>：公司名称、地址、币种（人民币）、Logo。这些会出现在报价单、发票和后面我们自己做的装箱单上。</li>
+  <li><strong>产品（R1）</strong>：新建几个产品，类型选「货物」并勾选<strong>跟踪库存</strong>；填写销售价格、成本、重量和条码。在「采购」页签添加供应商及其报价；在「库存」页签勾选<strong>购买</strong>路线。</li>
+  <li><strong>客户与供应商（R2）</strong>：在联系人里建几家公司，区分客户和供应商（在销售和采购单据里用过，它们就会自动出现在对应的列表中）；在「销售和采购」页签设置付款条款。</li>
+  <li><strong>价格表（R3）</strong>：在销售设置里启用「价格表」，建一个「批发价」价格表（比如全场 9 折），指定给部分客户。</li>
+  <li><strong>补货规则（R4）</strong>：在库存的「补货」界面给常卖的产品设置最小库存和最大库存。库存低于最小值时，Odoo 会自动按产品的供应商生成采购询价单。</li>
+  <li><strong>用户与权限（R5）</strong>：建几个用户，销售员设为「销售：用户（仅自己的单据）」，销售经理设为「销售：管理员」，再分别给采购、库存、开票人员相应的权限。</li>
+  <li><strong>信用额度（R6）</strong>：在开票设置里启用客户信用额度，在客户的「开票」相关页签设置额度。超过额度的订单会在确认时显示提醒。</li>
+</ol>
+
+<div class="box note">
+  <div class="t">&#9432; 菜单位置找不到？</div>
+  <p>
+    Odoo 各版本的菜单布局时有调整，如果某个选项没在上面说的位置，用设置页面顶部的<strong>搜索框</strong>搜关键词（比如「价格表」「信用」）通常最快。
+  </p>
+</div>
+
+<p>配置完成后，按图 20-2 的流程走一遍：报价 → 确认 → 自动生成采购 → 收货 → 发货 → 开票 → 收款。这条主线跑通了，第一阶段就完成了。</p>
+
+<h2 id="design">第二阶段：设计扩展模块</h2>
+
+<p>四个开发需求放在同一个模块 <code>trading_custom</code> 里。先设计数据模型——哪些是新模型，哪些是扩展已有模型：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 360" role="img" aria-label="trading_custom 的数据模型：新模型 trading.customer.tier，扩展 res.partner、sale.order，以及 stock.picking 上的报表">
+  <rect class="bx-a" x="20" y="30" width="230" height="140" rx="12"/>
+  <text class="ttl on-a" x="36" y="56">trading.customer.tier</text>
+  <text class="sm" x="36" y="74">新模型：客户等级</text>
+  <text class="sm mono" x="36" y="100">name　　　　　Char</text>
+  <text class="sm mono" x="36" y="118">sequence　　　Integer</text>
+  <text class="sm mono" x="36" y="136">max_discount　Float</text>
+  <text class="sm mono" x="36" y="154">approval_amount Float</text>
+
+  <rect class="bx-b" x="300" y="30" width="200" height="110" rx="12"/>
+  <text class="ttl on-b" x="316" y="56">res.partner</text>
+  <text class="sm" x="316" y="74">扩展：联系人</text>
+  <text class="sm mono on-a" x="316" y="104">+ customer_tier_id</text>
+  <text class="sm" x="316" y="126">设在公司上，联系人沿用</text>
+  <path class="ln-a" d="M296 100 H254" marker-end="url(#ar-a)"/>
+
+  <rect class="bx-b" x="300" y="180" width="440" height="160" rx="12"/>
+  <text class="ttl on-b" x="316" y="206">sale.order</text>
+  <text class="sm" x="316" y="224">扩展：销售订单</text>
+  <text class="sm mono on-a" x="316" y="252">+ customer_tier_id　关联字段，存储（R10）</text>
+  <text class="sm mono on-a" x="316" y="272">+ approval_state　　计算字段，存储（R8）</text>
+  <text class="sm mono on-a" x="316" y="292">+ approval_reason / approved_by_id / ...</text>
+  <text class="sm mono on-a" x="316" y="318">~ action_approve()　~ _confirmation_error_message()</text>
+  <path class="ln-a" d="M400 142 V176" marker-end="url(#ar-a)"/>
+  <text class="sm" x="410" y="164">partner_id.commercial_partner_id</text>
+
+  <rect class="bx-p" x="20" y="210" width="230" height="130" rx="12"/>
+  <text class="ttl on-p" x="36" y="236">stock.picking</text>
+  <text class="sm" x="36" y="254">不改模型，只加报表（R9）</text>
+  <text class="sm mono on-p" x="36" y="284">report_packing_list</text>
+  <text class="sm" x="36" y="306">重量 = 产品重量 × 数量</text>
+  <text class="sm" x="36" y="324">打印菜单里出现「装箱单」</text>
+
+  <rect class="bx-g" x="550" y="30" width="190" height="110" rx="12"/>
+  <text class="ttl on-g" x="566" y="56">权限</text>
+  <text class="sm" x="566" y="80">内部用户：读等级</text>
+  <text class="sm" x="566" y="100">销售管理员：维护等级、</text>
+  <text class="sm" x="566" y="120">批准订单</text>
+  <text class="sm mono on-a" x="20" y="20">+ 新增　~ 重写</text>
+</svg>
+<figcaption>图 20-4　一个新模型、两个被扩展的模型、一张报表。注意订单上的等级取自<strong>商业实体</strong>（commercial partner），这样给公司的任何联系人下单都能找到公司的等级</figcaption>
+</figure>
+
+<p>审批规则（R8）是整个项目的核心，先把它的状态变化想清楚：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 270" role="img" aria-label="订单审批状态：无需审批、待审批、已批准，以及确认订单时的拦截">
+  <rect class="bx-g" x="20" y="40" width="170" height="64" rx="12"/>
+  <text class="ttl on-g" x="105" y="68" text-anchor="middle">not_required</text>
+  <text class="sm" x="105" y="88" text-anchor="middle">无需审批</text>
+  <rect class="bx-a" x="295" y="40" width="170" height="64" rx="12"/>
+  <text class="ttl on-a" x="380" y="68" text-anchor="middle">pending</text>
+  <text class="sm" x="380" y="88" text-anchor="middle">待审批</text>
+  <rect class="bx-b" x="570" y="40" width="170" height="64" rx="12"/>
+  <text class="ttl on-b" x="655" y="68" text-anchor="middle">approved</text>
+  <text class="sm" x="655" y="88" text-anchor="middle">已批准</text>
+
+  <path class="ln-a" d="M192 62 H291" marker-end="url(#ar-a)"/>
+  <text class="sm on-a" x="242" y="54" text-anchor="middle">折扣或金额超限</text>
+  <path class="ln-a" d="M291 84 H192" marker-end="url(#ar-a)"/>
+  <text class="sm" x="242" y="102" text-anchor="middle">改回限额以内</text>
+  <path class="ln-b" d="M467 62 H566" marker-end="url(#ar-b)"/>
+  <text class="sm on-b" x="516" y="54" text-anchor="middle">经理点「批准」</text>
+  <path class="ln-r" d="M566 84 H467" marker-end="url(#ar-r)"/>
+  <text class="sm on-r" x="516" y="102" text-anchor="middle">金额又超过批准时</text>
+
+  <rect class="bx-d" x="20" y="150" width="720" height="100" rx="12"/>
+  <text class="ttl" x="40" y="176">点「确认」时（action_confirm → _confirmation_error_message）</text>
+  <text class="sm on-g" x="40" y="204">not_required → 正常确认</text>
+  <text class="sm on-r" x="280" y="204">pending → 拒绝，弹出原因</text>
+  <text class="sm on-b" x="520" y="204">approved → 正常确认</text>
+  <text class="sm" x="40" y="232">状态是根据订单内容「算」出来的（存储的计算字段），不是谁手动设置的，所以不会和订单内容对不上</text>
+</svg>
+<figcaption>图 20-5　审批状态机。销售订单原有的状态（报价、已确认……）不变，审批状态是另外一个维度</figcaption>
+</figure>
+
+<h3>模块骨架</h3>
+
+<div class="code" data-lang="text">
+<pre>
+trading_custom/
+├── __init__.py
+├── __manifest__.py
+├── data/trading_customer_tier_data.xml
+├── models/
+│   ├── __init__.py
+│   ├── trading_customer_tier.py
+│   ├── res_partner.py
+│   └── sale_order.py
+├── report/stock_picking_reports.xml
+├── security/ir.access.csv
+├── tests/
+│   ├── __init__.py
+│   └── test_sale_approval.py
+└── views/
+    ├── trading_customer_tier_views.xml
+    ├── res_partner_views.xml
+    └── sale_order_views.xml
+</pre>
+</div>
+
+<div class="code" data-lang="py" data-file="trading_custom/__manifest__.py">
+<pre>
+{
+    "name": "Trading Customizations",
+    "summary": "Customer tiers, sales order approval and packing lists.",
+    "version": "20.0.1.0.0",
+    "category": "Sales/Sales",
+    "author": "Xinda Trading",
+    "license": "LGPL-3",
+    "depends": ["sale_management", "sale_stock"],
+    "data": [
+        "security/ir.access.csv",
+        "data/trading_customer_tier_data.xml",
+        "views/trading_customer_tier_views.xml",
+        "views/res_partner_views.xml",
+        "views/sale_order_views.xml",
+        "report/stock_picking_reports.xml",
+    ],
+}
+</pre>
+</div>
+
+<p>
+  依赖 <code>sale_stock</code> 而不只是 <code>sale_management</code>，是因为装箱单报表用到了库存调拨，而且我们希望确认订单时自动生成发货单。
+  有了这两个依赖，<code>sale</code>、<code>stock</code>、<code>sales_team</code> 等模块都会被间接带上，可以放心地引用它们的模型、视图和组。
+</p>
+
+<h2 id="t1">任务 1：客户分级（R7）</h2>
+
+<p><span class="req">R7</span>新建「客户等级」模型，在销售的配置菜单里维护；在联系人表单上可以给公司选择等级。</p>
+
+<ul>
+  <li>模型：等级名称、排序、折扣上限（%）、大单金额（0 表示不限）。（第 6 章）</li>
+  <li>访问规则：所有内部用户可读（仓管员打开联系人时也要显示等级名），销售管理员可增删改。（第 3 章）</li>
+  <li>预置 A、B、C 三个等级，放在 <code>noupdate</code> 数据里，免得升级时覆盖客户的调整。（第 5 章）</li>
+  <li>继承联系人表单，把等级字段放进「销售和采购」页签的「销售」分组；只在顶层公司上显示。（第 4 章）</li>
+</ul>
+
+<details class="answer">
+<summary>参考答案：模型、权限与数据</summary>
+
+<div class="code" data-lang="py" data-file="trading_custom/__init__.py">
+<pre>
+from . import models
+</pre>
+</div>
+
+<div class="code" data-lang="py" data-file="trading_custom/models/__init__.py">
+<pre>
+from . import res_partner, sale_order, trading_customer_tier
+</pre>
+</div>
+
+<div class="code" data-lang="py" data-file="trading_custom/models/trading_customer_tier.py">
+<pre>
+from odoo import fields, models
+
+
+class TradingCustomerTier(models.Model):
+    _name = "trading.customer.tier"
+    _description = "Customer Tier"
+    _order = "sequence, id"
+
+    name = fields.Char(required=True)
+    sequence = fields.Integer(default=10)
+    max_discount = fields.Float(
+        string="Max Discount (%)",
+        help="Order lines with a higher discount need a sales manager's approval.",
+    )
+    approval_amount = fields.Float(
+        string="Approval Threshold",
+        help="Orders with a higher untaxed amount (in company currency) need "
+        "a sales manager's approval. Zero means no limit.",
+    )
+    active = fields.Boolean(default=True)
+
+    _name_uniq = models.Constraint("unique(name)", "Tier names must be unique.")
+</pre>
+</div>
+
+<div class="code" data-lang="py" data-file="trading_custom/models/res_partner.py">
+<pre>
+from odoo import fields, models
+
+
+class ResPartner(models.Model):
+    _inherit = "res.partner"
+
+    customer_tier_id = fields.Many2one(
+        "trading.customer.tier",
+        string="Customer Tier",
+        help="Set on the company. Orders for any of its contacts use this tier.",
+    )
+</pre>
+</div>
+
+<div class="code" data-lang="text" data-file="trading_custom/security/ir.access.csv">
+<pre>
+id,name,model_id,group_id/id,operation,domain
+access_trading_customer_tier_user,Customer Tier: internal user,trading.customer.tier,base.group_user,r,
+access_trading_customer_tier_manager,Customer Tier: sales manager,trading.customer.tier,sales_team.group_sale_manager,crud,
+</pre>
+</div>
+
+<div class="code" data-lang="xml" data-file="trading_custom/data/trading_customer_tier_data.xml">
+<pre>
+&lt;odoo&gt;
+    &lt;data noupdate="1"&gt;
+        &lt;record id="tier_a" model="trading.customer.tier"&gt;
+            &lt;field name="name"&gt;A - Key Account&lt;/field&gt;
+            &lt;field name="sequence"&gt;10&lt;/field&gt;
+            &lt;field name="max_discount"&gt;15&lt;/field&gt;
+            &lt;field name="approval_amount"&gt;500000&lt;/field&gt;
+        &lt;/record&gt;
+        &lt;record id="tier_b" model="trading.customer.tier"&gt;
+            &lt;field name="name"&gt;B - Regular&lt;/field&gt;
+            &lt;field name="sequence"&gt;20&lt;/field&gt;
+            &lt;field name="max_discount"&gt;10&lt;/field&gt;
+            &lt;field name="approval_amount"&gt;100000&lt;/field&gt;
+        &lt;/record&gt;
+        &lt;record id="tier_c" model="trading.customer.tier"&gt;
+            &lt;field name="name"&gt;C - New or Small&lt;/field&gt;
+            &lt;field name="sequence"&gt;30&lt;/field&gt;
+            &lt;field name="max_discount"&gt;5&lt;/field&gt;
+            &lt;field name="approval_amount"&gt;20000&lt;/field&gt;
+        &lt;/record&gt;
+
+        &lt;!-- 没有等级的客户：不允许打折，超过这个金额要审批 --&gt;
+        &lt;record id="default_approval_amount" model="ir.config_parameter"&gt;
+            &lt;field name="key"&gt;trading_custom.default_approval_amount&lt;/field&gt;
+            &lt;field name="value"&gt;20000&lt;/field&gt;
+        &lt;/record&gt;
+    &lt;/data&gt;
+&lt;/odoo&gt;
+</pre>
+</div>
+
+<div class="code" data-lang="xml" data-file="trading_custom/views/trading_customer_tier_views.xml">
+<pre>
+&lt;odoo&gt;
+    &lt;record id="trading_customer_tier_view_list" model="ir.ui.view"&gt;
+        &lt;field name="name"&gt;trading.customer.tier.view.list&lt;/field&gt;
+        &lt;field name="model"&gt;trading.customer.tier&lt;/field&gt;
+        &lt;field name="arch" type="xml"&gt;
+            &lt;list editable="bottom"&gt;
+                &lt;field name="sequence" widget="handle"/&gt;
+                &lt;field name="name"/&gt;
+                &lt;field name="max_discount"/&gt;
+                &lt;field name="approval_amount"/&gt;
+            &lt;/list&gt;
+        &lt;/field&gt;
+    &lt;/record&gt;
+
+    &lt;record id="trading_customer_tier_action" model="ir.actions.act_window"&gt;
+        &lt;field name="name"&gt;Customer Tiers&lt;/field&gt;
+        &lt;field name="res_model"&gt;trading.customer.tier&lt;/field&gt;
+        &lt;field name="view_mode"&gt;list&lt;/field&gt;
+    &lt;/record&gt;
+
+    &lt;menuitem id="trading_customer_tier_menu"
+              action="trading_customer_tier_action"
+              parent="sale.menu_sale_config"
+              sequence="45"/&gt;
+&lt;/odoo&gt;
+</pre>
+</div>
+
+<div class="code" data-lang="xml" data-file="trading_custom/views/res_partner_views.xml">
+<pre>
+&lt;odoo&gt;
+    &lt;record id="view_partner_form_inherit_trading_custom" model="ir.ui.view"&gt;
+        &lt;field name="name"&gt;res.partner.view.form.inherit.trading_custom&lt;/field&gt;
+        &lt;field name="model"&gt;res.partner&lt;/field&gt;
+        &lt;field name="inherit_id" ref="base.view_partner_form"/&gt;
+        &lt;field name="arch" type="xml"&gt;
+            &lt;group name="sale" position="inside"&gt;
+                &lt;field name="customer_tier_id" invisible="parent_id"/&gt;
+            &lt;/group&gt;
+        &lt;/field&gt;
+    &lt;/record&gt;
+&lt;/odoo&gt;
+</pre>
+</div>
+
+<ul>
+  <li>可编辑列表（<code>editable="bottom"</code>）加拖动排序（<code>widget="handle"</code>），维护这种小配置表最顺手，不需要表单视图。</li>
+  <li>配置菜单 <code>sale.menu_sale_config</code> 本身只对销售管理员可见，所以我们的菜单不用再单独设权限。</li>
+  <li>系统参数和等级一样放在 <code>noupdate</code> 里；代码里用 <code>get_float()</code> 读取（第 14 章）。</li>
+</ul>
+</details>
+
+<h2 id="t2">任务 2：订单审批（R8）</h2>
+
+<p><span class="req">R8</span>订单的任意一行折扣超过客户等级的折扣上限，或者未税金额超过大单金额，订单就进入「待审批」；销售经理批准后才能确认。批准以后如果金额又增加了，需要重新审批。</p>
+
+<ul>
+  <li><code>customer_tier_id</code>：关联字段，取 <code>partner_id.commercial_partner_id.customer_tier_id</code>，<code>store=True</code>，后面的分析要用它分组。（第 6 章）</li>
+  <li><code>approval_state</code>：存储的计算字段，依赖金额、行折扣、等级、批准信息和订单状态；存储才能在列表里筛选「待审批」。</li>
+  <li><code>approval_reason</code>：不存储的计算字段，用文字说明为什么需要审批，显示在表单顶部。</li>
+  <li><code>action_approve()</code>：只有销售管理员能执行；记录批准人、时间和批准时的金额，并在消息区留言。（第 8 章）</li>
+  <li>拦截确认：不要重写整个 <code>action_confirm()</code>。读一读它的源码——它会对每张订单调用 <code>_confirmation_error_message()</code>，返回了消息就报错。重写这个小方法就够了。</li>
+  <li>界面：「批准」按钮、待审批提示条、列表里的审批状态徽标、搜索里的「待审批」筛选和「按客户等级」分组。（第 10 章）</li>
+</ul>
+
+<div class="box tip">
+  <div class="t">&#128161; 找到合适的扩展点</div>
+  <p>
+    扩展别人的业务逻辑时，先去源码里找「钩子」：Odoo 的开发者经常把一大段逻辑拆出一些小方法，专门留给别人重写。
+    在 <code>addons/sale/models/sale_order.py</code> 里搜 <code>def action_confirm</code>，就能看到 <code>_confirmation_error_message</code> 这个钩子。重写的范围越小，和其他模块冲突的可能越小，升级时要改的也越少。
+  </p>
+</div>
+
+<details class="answer">
+<summary>参考答案：sale_order.py</summary>
+
+<div class="code" data-lang="py" data-file="trading_custom/models/sale_order.py">
+<pre>
+from odoo import api, fields, models
+from odoo.exceptions import AccessError
+
+APPROVAL_FIELDS = {"approved_by_id", "approved_date", "approved_amount"}
+
+
+class SaleOrder(models.Model):
+    _inherit = "sale.order"
+
+    customer_tier_id = fields.Many2one(
+        related="partner_id.commercial_partner_id.customer_tier_id",
+        store=True,
+        string="Customer Tier",
+    )
+    approval_state = fields.Selection(
+        [
+            ("not_required", "Not Required"),
+            ("pending", "Waiting Approval"),
+            ("approved", "Approved"),
+        ],
+        compute="_compute_approval_state",
+        store=True,
+        tracking=True,
+    )
+    approval_reason = fields.Text(compute="_compute_approval_reason")
+    approved_by_id = fields.Many2one("res.users", readonly=True, copy=False)
+    approved_date = fields.Datetime(readonly=True, copy=False)
+    approved_amount = fields.Float(readonly=True, copy=False)
+
+    @api.depends(
+        "state",
+        "amount_untaxed",
+        "order_line.discount",
+        "customer_tier_id",
+        "approved_by_id",
+        "approved_amount",
+    )
+    def _compute_approval_state(self):
+        for order in self:
+            if order.state not in ("draft", "sent"):
+                # 已确认或已取消的订单不再参与审批
+                order.approval_state = "approved" if order.approved_by_id else "not_required"
+            elif not order._get_approval_reasons():
+                order.approval_state = "not_required"
+            elif order.approved_by_id and order.amount_untaxed &lt;= order.approved_amount:
+                order.approval_state = "approved"
+            else:
+                order.approval_state = "pending"
+
+    @api.depends("amount_untaxed", "order_line.discount", "customer_tier_id")
+    def _compute_approval_reason(self):
+        for order in self:
+            order.approval_reason = "\n".join(order._get_approval_reasons())
+
+    def write(self, vals):
+        # 只读字段只是界面上的限制；通过 API 直接写入时，在这里把关
+        if (
+            APPROVAL_FIELDS &amp; vals.keys()
+            and not self.env.su
+            and not self.env.user.has_group("sales_team.group_sale_manager")
+        ):
+            raise AccessError(self.env._("Only sales managers can approve orders."))
+        return super().write(vals)
+
+    def action_approve(self):
+        if not self.env.user.has_group("sales_team.group_sale_manager"):
+            raise AccessError(self.env._("Only sales managers can approve orders."))
+        for order in self.filtered(lambda o: o.approval_state == "pending"):
+            order.write({
+                "approved_by_id": self.env.user.id,
+                "approved_date": fields.Datetime.now(),
+                "approved_amount": order.amount_untaxed,
+            })
+            order.message_post(body=self.env._("Approved by %s.", self.env.user.name))
+        return True
+
+    def _confirmation_error_message(self):
+        error = super()._confirmation_error_message()
+        if not error and self.approval_state == "pending":
+            error = self.env._(
+                "Order %(order)s needs a sales manager's approval before it "
+                "can be confirmed:\n%(reasons)s",
+                order=self.name,
+                reasons=self.approval_reason,
+            )
+        return error
+
+    def _get_approval_reasons(self):
+        self.ensure_one()
+        tier = self.customer_tier_id
+        if tier:
+            max_discount, limit = tier.max_discount, tier.approval_amount
+        else:
+            max_discount = 0.0
+            limit = self.env["ir.config_parameter"].sudo().get_float(
+                "trading_custom.default_approval_amount"
+            )
+        reasons = []
+        lines = self.order_line.filtered(lambda line: not line.display_type)
+        if any(line.discount &gt; max_discount for line in lines):
+            reasons.append(
+                self.env._("A line has a discount above %(max)s%%.", max=max_discount)
+            )
+        if limit and self.amount_untaxed &gt; limit:
+            reasons.append(
+                self.env._("The untaxed amount exceeds %(limit)s.", limit=limit)
+            )
+        return reasons
+</pre>
+</div>
+
+<p>几个值得注意的地方：</p>
+
+<ul>
+  <li><strong>状态是算出来的</strong>：批准只是记下「谁、何时、批了多少钱」，<code>approval_state</code> 由计算方法根据这些事实推导。金额增加超过 <code>approved_amount</code> 时，状态自动回到 <code>pending</code>，不需要在 <code>write()</code> 里写一堆「如果……就重置」。</li>
+  <li><code>display_type</code> 不为空的行是分节标题和备注，不是真正的商品行，要排除掉。</li>
+  <li><code>get_float()</code> 要读系统参数，普通销售员没有这个权限，所以用 <code>sudo()</code>——这正是「只在需要的那一小段代码里提权」的例子。</li>
+  <li>按钮上的 <code>groups</code> 只是把按钮藏起来，真正的安全检查在服务器端：<code>action_approve()</code> 和 <code>write()</code> 都会检查组。不要依赖界面来保证安全。</li>
+  <li><code>tracking=True</code>：审批状态的每次变化都会自动记录在订单的消息区里，谁在什么时候让订单进入了待审批一目了然。</li>
+</ul>
+</details>
+
+<details class="answer">
+<summary>参考答案：sale_order_views.xml</summary>
+
+<div class="code" data-lang="xml" data-file="trading_custom/views/sale_order_views.xml">
+<pre>
+&lt;odoo&gt;
+    &lt;record id="view_order_form_inherit_trading_custom" model="ir.ui.view"&gt;
+        &lt;field name="name"&gt;sale.order.view.form.inherit.trading_custom&lt;/field&gt;
+        &lt;field name="model"&gt;sale.order&lt;/field&gt;
+        &lt;field name="inherit_id" ref="sale.view_order_form"/&gt;
+        &lt;field name="arch" type="xml"&gt;
+            &lt;header position="inside"&gt;
+                &lt;button name="action_approve" type="object" string="Approve"
+                        class="btn-primary"
+                        groups="sales_team.group_sale_manager"
+                        invisible="approval_state != 'pending'"/&gt;
+            &lt;/header&gt;
+            &lt;sheet position="before"&gt;
+                &lt;div class="alert alert-warning mb-0" role="alert"
+                     invisible="approval_state != 'pending'"&gt;
+                    &lt;strong&gt;This order is waiting for a sales manager's approval.&lt;/strong&gt;
+                    &lt;field name="approval_reason" class="d-block"/&gt;
+                &lt;/div&gt;
+            &lt;/sheet&gt;
+            &lt;field name="partner_id" position="after"&gt;
+                &lt;field name="customer_tier_id"/&gt;
+                &lt;field name="approval_state" widget="badge"
+                       decoration-warning="approval_state == 'pending'"
+                       decoration-success="approval_state == 'approved'"/&gt;
+                &lt;field name="approved_by_id" invisible="not approved_by_id"/&gt;
+            &lt;/field&gt;
+        &lt;/field&gt;
+    &lt;/record&gt;
+
+    &lt;record id="sale_order_tree_inherit_trading_custom" model="ir.ui.view"&gt;
+        &lt;field name="name"&gt;sale.order.view.list.inherit.trading_custom&lt;/field&gt;
+        &lt;field name="model"&gt;sale.order&lt;/field&gt;
+        &lt;field name="inherit_id" ref="sale.sale_order_tree"/&gt;
+        &lt;field name="arch" type="xml"&gt;
+            &lt;field name="partner_id" position="after"&gt;
+                &lt;field name="customer_tier_id" optional="show"/&gt;
+            &lt;/field&gt;
+            &lt;field name="state" position="before"&gt;
+                &lt;field name="approval_state" widget="badge" optional="show"
+                       decoration-warning="approval_state == 'pending'"
+                       decoration-success="approval_state == 'approved'"/&gt;
+            &lt;/field&gt;
+        &lt;/field&gt;
+    &lt;/record&gt;
+
+    &lt;record id="view_sales_order_filter_inherit_trading_custom" model="ir.ui.view"&gt;
+        &lt;field name="name"&gt;sale.order.view.search.inherit.trading_custom&lt;/field&gt;
+        &lt;field name="model"&gt;sale.order&lt;/field&gt;
+        &lt;field name="inherit_id" ref="sale.view_sales_order_filter"/&gt;
+        &lt;field name="arch" type="xml"&gt;
+            &lt;filter name="my_sale_orders_filter" position="after"&gt;
+                &lt;filter name="approval_pending" string="Waiting Approval"
+                        domain="[('approval_state', '=', 'pending')]"/&gt;
+            &lt;/filter&gt;
+            &lt;filter name="customer" position="after"&gt;
+                &lt;filter name="group_customer_tier" string="Customer Tier"
+                        context="{'group_by': 'customer_tier_id'}"/&gt;
+            &lt;/filter&gt;
+        &lt;/field&gt;
+    &lt;/record&gt;
+&lt;/odoo&gt;
+</pre>
+</div>
+
+<ul>
+  <li>列表视图继承的是 <code>sale.sale_order_tree</code>：报价单列表和订单列表都是以它为基础的 <code>primary</code> 视图，改它一处，两个列表都生效。</li>
+  <li>提示条用 Bootstrap 的 <code>alert</code> 样式，要加 <code>role="alert"</code>，否则视图校验会给出警告。</li>
+</ul>
+</details>
+
+<h2 id="t3">任务 3：装箱单（R9）</h2>
+
+<p><span class="req">R9</span>在发货单（库存调拨）的「打印」菜单里增加「装箱单」：抬头是收货方地址、单号、来源订单和日期；表格列出每样产品的数量、单位重量、小计重量；最后是总重量和签收栏。</p>
+
+<ul>
+  <li>报表动作绑定到 <code>stock.picking</code> 模型。（第 12 章）</li>
+  <li>调拨的明细在 <code>move_ids</code> 里。每个库存移动有 <code>product_uom_qty</code>（需求数量，按移动的单位）和 <code>product_qty</code>（换算成产品基本单位的数量）——算重量要用后者，因为产品的重量是按基本单位填的。</li>
+  <li>总重量可以在模板里直接用 <code>sum(... for ... in ...)</code> 计算。</li>
+</ul>
+
+<details class="answer">
+<summary>参考答案：stock_picking_reports.xml</summary>
+
+<div class="code" data-lang="xml" data-file="trading_custom/report/stock_picking_reports.xml">
+<pre>
+&lt;odoo&gt;
+    &lt;record id="action_report_packing_list" model="ir.actions.report"&gt;
+        &lt;field name="name"&gt;Packing List&lt;/field&gt;
+        &lt;field name="model"&gt;stock.picking&lt;/field&gt;
+        &lt;field name="report_type"&gt;qweb-pdf&lt;/field&gt;
+        &lt;field name="report_name"&gt;trading_custom.report_packing_list&lt;/field&gt;
+        &lt;field name="print_report_name"&gt;'Packing List - %s' % object.name&lt;/field&gt;
+        &lt;field name="binding_model_id" ref="stock.model_stock_picking"/&gt;
+        &lt;field name="binding_type"&gt;report&lt;/field&gt;
+    &lt;/record&gt;
+
+    &lt;template id="report_packing_list"&gt;
+        &lt;t t-call="web.html_container"&gt;
+            &lt;t t-foreach="docs" t-as="o"&gt;
+                &lt;t t-call="web.external_layout"&gt;
+                    &lt;div class="page"&gt;
+                        &lt;div class="row mb-4"&gt;
+                            &lt;div class="col-6"&gt;
+                                &lt;strong&gt;Ship to:&lt;/strong&gt;
+                                &lt;div t-field="o.partner_id"
+                                     t-options='{"widget": "contact", "fields": ["name", "address", "phone"], "no_marker": true}'/&gt;
+                            &lt;/div&gt;
+                            &lt;div class="col-6 text-end"&gt;
+                                &lt;h2&gt;Packing List &lt;span t-field="o.name"/&gt;&lt;/h2&gt;
+                                &lt;div t-if="o.origin"&gt;Order: &lt;span t-field="o.origin"/&gt;&lt;/div&gt;
+                                &lt;div&gt;Date: &lt;span t-field="o.scheduled_date" t-options='{"widget": "date"}'/&gt;&lt;/div&gt;
+                            &lt;/div&gt;
+                        &lt;/div&gt;
+
+                        &lt;table class="table table-sm"&gt;
+                            &lt;thead&gt;
+                                &lt;tr&gt;
+                                    &lt;th&gt;Product&lt;/th&gt;
+                                    &lt;th class="text-end"&gt;Quantity&lt;/th&gt;
+                                    &lt;th class="text-end"&gt;Unit Weight (kg)&lt;/th&gt;
+                                    &lt;th class="text-end"&gt;Weight (kg)&lt;/th&gt;
+                                &lt;/tr&gt;
+                            &lt;/thead&gt;
+                            &lt;tbody&gt;
+                                &lt;tr t-foreach="o.move_ids" t-as="move"&gt;
+                                    &lt;td&gt;&lt;span t-field="move.product_id"/&gt;&lt;/td&gt;
+                                    &lt;td class="text-end"&gt;
+                                        &lt;span t-field="move.product_uom_qty"/&gt;
+                                        &lt;span t-field="move.uom_id"/&gt;
+                                    &lt;/td&gt;
+                                    &lt;td class="text-end"&gt;&lt;span t-field="move.product_id.weight"/&gt;&lt;/td&gt;
+                                    &lt;td class="text-end"&gt;
+                                        &lt;span t-out="'%.2f' % (move.product_id.weight * move.product_qty)"/&gt;
+                                    &lt;/td&gt;
+                                &lt;/tr&gt;
+                            &lt;/tbody&gt;
+                        &lt;/table&gt;
+
+                        &lt;t t-set="total_weight"
+                           t-value="sum(m.product_id.weight * m.product_qty for m in o.move_ids)"/&gt;
+                        &lt;p class="text-end fs-5"&gt;
+                            &lt;strong&gt;Total weight: &lt;span t-out="'%.2f' % total_weight"/&gt; kg&lt;/strong&gt;
+                        &lt;/p&gt;
+
+                        &lt;div class="row mt-5"&gt;
+                            &lt;div class="col-6"&gt;Packed by: ______________&lt;/div&gt;
+                            &lt;div class="col-6"&gt;Received by: ______________&lt;/div&gt;
+                        &lt;/div&gt;
+                    &lt;/div&gt;
+                &lt;/t&gt;
+            &lt;/t&gt;
+        &lt;/t&gt;
+    &lt;/template&gt;
+&lt;/odoo&gt;
+</pre>
+</div>
+
+<p>
+  <code>stock</code> 模块自带一张「Delivery Slip」（发货单）报表，结构和我们的很像。做完自己的版本，去 <code>addons/stock/report/report_deliveryslip.xml</code> 对照看看官方是怎么处理批次号、包裹这些情况的。
+</p>
+</details>
+
+<h2 id="t4">任务 4：按客户等级分析（R10）</h2>
+
+<p><span class="req">R10</span>老板要看每个客户等级的订单金额和数量。</p>
+
+<p>
+  这个需求在任务 2 里其实已经完成了一大半：订单上的 <code>customer_tier_id</code> 是<strong>存储的</strong>关联字段，可以分组；搜索视图里也加了「按客户等级」分组。
+  打开销售订单列表，选择分组「Customer Tier」，每组的金额合计就出来了；切换到透视表视图，把等级放在行、订单日期的月份放在列，就是一张月度分级销售表。
+</p>
+
+<div class="box note">
+  <div class="t">&#9432; 为什么一定要 store=True</div>
+  <p>
+    分组和透视表是在数据库里用 SQL 的 <code>GROUP BY</code> 完成的，只有存在表里的列才能参与。不存储的关联字段每次读取时临时计算，没法分组。
+    存储的代价是：客户换了等级，<strong>历史订单上的等级也会跟着变</strong>，因为关联字段会随源字段一起更新。如果老板想看的是「下单当时」的等级，就要改成一个普通字段，在创建订单时赋值。这是一个值得和客户讨论的业务问题。
+  </p>
+</div>
+
+<h2 id="tests">编写测试</h2>
+
+<p>审批规则一旦出错，要么拦住了不该拦的订单，要么放过了该拦的，所以它值得用自动化测试保护起来。（第 8 章）</p>
+
+<details class="answer">
+<summary>参考答案：test_sale_approval.py</summary>
+
+<div class="code" data-lang="py" data-file="trading_custom/tests/test_sale_approval.py">
+<pre>
+from odoo.exceptions import AccessError, UserError
+from odoo.fields import Command
+from odoo.tests import TransactionCase, tagged
+
+
+@tagged("post_install", "-at_install")
+class TestSaleApproval(TransactionCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.tier = cls.env["trading.customer.tier"].create({
+            "name": "Test Tier",
+            "max_discount": 5.0,
+            "approval_amount": 10000.0,
+        })
+        cls.customer = cls.env["res.partner"].create({
+            "name": "Test Retailer",
+            "is_company": True,
+            "customer_tier_id": cls.tier.id,
+        })
+        cls.product = cls.env["product.product"].create({
+            "name": "USB-C Cable",
+            "list_price": 100.0,
+        })
+        cls.salesman = cls._create_user("sam", "sales_team.group_sale_salesman")
+        cls.manager = cls._create_user("mia", "sales_team.group_sale_manager")
+
+    @classmethod
+    def _create_user(cls, login, group_xmlid):
+        return cls.env["res.users"].create({
+            "name": login.title(),
+            "login": login,
+            "group_ids": [Command.set([cls.env.ref(group_xmlid).id])],
+        })
+
+    def _create_order(self, discount=0.0, qty=10):
+        return self.env["sale.order"].create({
+            "partner_id": self.customer.id,
+            "order_line": [Command.create({
+                "product_id": self.product.id,
+                "product_uom_qty": qty,
+                "discount": discount,
+            })],
+        })
+
+    def test_small_order_needs_no_approval(self):
+        order = self._create_order(discount=3.0)
+        self.assertEqual(order.approval_state, "not_required")
+        order.action_confirm()
+        self.assertEqual(order.state, "sale")
+
+    def test_high_discount_blocks_confirmation(self):
+        order = self._create_order(discount=8.0)
+        self.assertEqual(order.approval_state, "pending")
+        with self.assertRaises(UserError):
+            order.action_confirm()
+
+    def test_salesman_cannot_approve(self):
+        order = self._create_order(discount=8.0)
+        with self.assertRaises(AccessError):
+            order.with_user(self.salesman).action_approve()
+
+    def test_manager_approves_then_confirms(self):
+        order = self._create_order(discount=8.0)
+        order.with_user(self.manager).action_approve()
+        self.assertEqual(order.approval_state, "approved")
+        self.assertEqual(order.approved_by_id, self.manager)
+        order.action_confirm()
+        self.assertEqual(order.state, "sale")
+
+    def test_bigger_amount_needs_new_approval(self):
+        order = self._create_order(discount=8.0)
+        order.with_user(self.manager).action_approve()
+        order.order_line.product_uom_qty = 200      # 金额远超批准时的金额
+        self.assertEqual(order.approval_state, "pending")
+</pre>
+</div>
+
+<div class="code" data-lang="py" data-file="trading_custom/tests/__init__.py">
+<pre>
+from . import test_sale_approval
+</pre>
+</div>
+
+<div class="code" data-lang="bash">
+<pre>
+(env20) $ odoo -c ~/work20/trading.conf -d trading -u trading_custom --test-tags /trading_custom --stop-after-init
+</pre>
+</div>
+
+<ul>
+  <li>测试用的用户用 <code>Command.set</code> 指定组。Odoo 20 里用户的组字段叫 <code>group_ids</code>（书中版本叫 <code>groups_id</code>）。</li>
+  <li><code>with_user()</code> 切换执行身份，用来验证权限检查真的起作用。测试里默认的 <code>self.env</code> 是超级用户，什么都能做，权限相关的断言一定要换成普通用户。</li>
+</ul>
+</details>
+
+<h2 id="acceptance">验收：走通全流程</h2>
+
+<p>代码写完、测试通过，最后用真实的操作走一遍。下面是一份验收清单，每一步都要在界面上亲手完成并确认结果：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 330" role="img" aria-label="验收流程：两个订单场景，从报价到收款">
+  <text class="ttl on-g" x="20" y="28">场景一：A 级客户，折扣 8%，金额 3 万</text>
+  <rect class="bx-g" x="20" y="40" width="130" height="50" rx="8"/><text class="sm" x="85" y="62" text-anchor="middle">新建报价单</text><text class="sm" x="85" y="80" text-anchor="middle">销售员</text>
+  <rect class="bx-g" x="170" y="40" width="130" height="50" rx="8"/><text class="sm" x="235" y="62" text-anchor="middle">无需审批</text><text class="sm" x="235" y="80" text-anchor="middle">8% ≤ 15%</text>
+  <rect class="bx-g" x="320" y="40" width="130" height="50" rx="8"/><text class="sm" x="385" y="62" text-anchor="middle">直接确认</text><text class="sm" x="385" y="80" text-anchor="middle">生成发货单</text>
+  <path class="ln-g" d="M152 65 H166" marker-end="url(#ar-g)"/>
+  <path class="ln-g" d="M302 65 H316" marker-end="url(#ar-g)"/>
+
+  <text class="ttl on-a" x="20" y="128">场景二：C 级客户，折扣 8%，金额 3 万</text>
+  <rect class="bx-a" x="20" y="140" width="130" height="50" rx="8"/><text class="sm" x="85" y="162" text-anchor="middle">新建报价单</text><text class="sm" x="85" y="180" text-anchor="middle">销售员</text>
+  <rect class="bx-a" x="170" y="140" width="130" height="50" rx="8"/><text class="sm" x="235" y="162" text-anchor="middle">待审批</text><text class="sm" x="235" y="180" text-anchor="middle">两条原因</text>
+  <rect class="bx-r" x="320" y="140" width="130" height="50" rx="8"/><text class="sm" x="385" y="162" text-anchor="middle">销售员点确认</text><text class="sm" x="385" y="180" text-anchor="middle">被拒绝 ✓</text>
+  <rect class="bx-b" x="470" y="140" width="130" height="50" rx="8"/><text class="sm" x="535" y="162" text-anchor="middle">经理批准</text><text class="sm" x="535" y="180" text-anchor="middle">消息区有记录</text>
+  <rect class="bx-g" x="620" y="140" width="120" height="50" rx="8"/><text class="sm" x="680" y="162" text-anchor="middle">销售员确认</text><text class="sm" x="680" y="180" text-anchor="middle">成功 ✓</text>
+  <path class="ln-a" d="M152 165 H166" marker-end="url(#ar-a)"/>
+  <path class="ln-a" d="M302 165 H316" marker-end="url(#ar-a)"/>
+  <path class="ln-a" d="M452 165 H466" marker-end="url(#ar-a)"/>
+  <path class="ln-a" d="M602 165 H616" marker-end="url(#ar-a)"/>
+
+  <text class="ttl on-p" x="20" y="228">之后的共同流程</text>
+  <rect class="bx-p" x="20" y="240" width="130" height="50" rx="8"/><text class="sm" x="85" y="262" text-anchor="middle">库存不足？</text><text class="sm" x="85" y="280" text-anchor="middle">自动生成采购</text>
+  <rect class="bx-p" x="170" y="240" width="130" height="50" rx="8"/><text class="sm" x="235" y="262" text-anchor="middle">确认采购、收货</text><text class="sm" x="235" y="280" text-anchor="middle">仓管员</text>
+  <rect class="bx-p" x="320" y="240" width="130" height="50" rx="8"/><text class="sm" x="385" y="262" text-anchor="middle">打印装箱单</text><text class="sm" x="385" y="280" text-anchor="middle">核对总重量</text>
+  <rect class="bx-p" x="470" y="240" width="130" height="50" rx="8"/><text class="sm" x="535" y="262" text-anchor="middle">验证发货</text><text class="sm" x="535" y="280" text-anchor="middle">库存减少</text>
+  <rect class="bx-r" x="620" y="240" width="120" height="50" rx="8"/><text class="sm" x="680" y="262" text-anchor="middle">开票、登记收款</text><text class="sm" x="680" y="280" text-anchor="middle">会计</text>
+  <path class="ln-p" d="M152 265 H166" marker-end="url(#ar-p)"/>
+  <path class="ln-p" d="M302 265 H316" marker-end="url(#ar-p)"/>
+  <path class="ln-p" d="M452 265 H466" marker-end="url(#ar-p)"/>
+  <path class="ln-p" d="M602 265 H616" marker-end="url(#ar-p)"/>
+  <text class="sm" x="380" y="320" text-anchor="middle">最后打开销售订单列表，按「客户等级」分组，确认两个订单分别出现在 A 级和 C 级下面</text>
+</svg>
+<figcaption>图 20-6　验收场景。用不同的用户登录来做每一步，权限问题往往只有这样才会暴露</figcaption>
+</figure>
+
+<ol class="steps">
+  <li>销售员（仅自己的单据）登录，确认看不到别的销售员的订单（R5）。</li>
+  <li>场景一和场景二按上图操作；检查场景二待审批时，表单顶部的提示条列出了两条原因。</li>
+  <li>场景二批准后，销售员把数量改大，确认订单重新回到「待审批」。</li>
+  <li>仓管员登录，打开一张联系人表单，确认能看到客户等级、不报权限错误。</li>
+  <li>打印装箱单，用计算器核对总重量；注意产品要先填好重量。</li>
+  <li>会计按发货数量开票并登记收款，订单的开票状态变为「已开票」。</li>
+</ol>
+
+<h2 id="more">扩展挑战</h2>
+
+<p>基本需求完成后，可以挑几个继续做，每一个都对应着前面某一章的知识点：</p>
+
+<div class="tw"><table>
+  <tr><th>挑战</th><th>提示</th></tr>
+  <tr><td>批准后如果有人把<strong>折扣</strong>继续调高（金额反而变小），目前不会触发重新审批。修正它</td><td>批准时把最大折扣也记下来，在计算方法里一起比较</td></tr>
+  <tr><td>订单进入待审批时，自动给销售团队的负责人安排一个待办活动</td><td><code>activity_schedule()</code>（第 4、8 章）；团队负责人在 <code>team_id.user_id</code></td></tr>
+  <tr><td>多币种：美元订单要先换算成公司本位币再和大单金额比较</td><td>研究 <code>res.currency</code> 的换算方法</td></tr>
+  <tr><td>每天早上给销售经理发一封邮件，列出超过两天还没审批的订单</td><td>计划任务 + 邮件模板（第 8 章）</td></tr>
+  <tr><td>电商平台每天导出一份客户名单（CSV），自动导入 Odoo 并设置等级</td><td>JSON-2 API 脚本（第 9 章），见下面的起步代码</td></tr>
+  <tr><td>在客户门户的订单页上显示「您的客户等级」</td><td>继承门户模板（第 13 章）</td></tr>
+  <tr><td>把整个模块翻译成中文，并配上 pre-commit</td><td>第 18、19 章</td></tr>
+</table></div>
+
+<div class="code" data-lang="py" data-file="import_customers.py（起步代码）">
+<pre>
+import csv
+import os
+
+import requests
+
+BASE_URL = os.environ["ODOO_URL"] + "/json/2"
+HEADERS = {
+    "Authorization": "bearer " + os.environ["ODOO_API_KEY"],
+    "X-Odoo-Database": os.environ["ODOO_DB"],
+}
+
+
+def call(model, method, **params):
+    r = requests.post(f"{BASE_URL}/{model}/{method}", headers=HEADERS, json=params, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+
+tiers = {
+    t["name"]: t["id"]
+    for t in call("trading.customer.tier", "search_read", domain=[], fields=["name"])
+}
+with open("customers.csv", newline="", encoding="utf-8") as f:
+    for row in csv.DictReader(f):
+        call("res.partner", "create", vals_list=[{
+            "name": row["name"],
+            "is_company": True,
+            "customer_tier_id": tiers[row["tier"]],
+        }])
+</pre>
+</div>
+
+<h2 id="summary">小结</h2>
+
+<ul>
+  <li>真实项目从业务出发：先认识用户和流程，再逐条做差异分析，<strong>能配置的不开发</strong>。</li>
+  <li>贸易公司的主流程完全由标准的销售、采购、库存、开票应用覆盖；定制部分集中在一个扩展模块里。</li>
+  <li>扩展已有业务逻辑时，在源码里找最小的钩子（这里是 <code>_confirmation_error_message</code>），而不是重写一整个大方法。</li>
+  <li>状态尽量「算」出来（存储的计算字段），而不是到处手动维护，数据就不会自相矛盾。</li>
+  <li>界面上的 <code>groups</code> 和 <code>readonly</code> 只是体验，安全检查必须放在服务器端。</li>
+  <li>关键业务规则写成测试；验收时用不同角色的账号亲手走一遍全流程。</li>
+</ul>
+
+<div class="exercise">
+  <h3>项目交付清单</h3>
+  <ol>
+    <li>一个配置好的数据库：公司信息、至少 10 个产品、5 个客户（分属 A / B / C 级）、3 个供应商、价格表、补货规则、各角色用户。</li>
+    <li><code>trading_custom</code> 模块：任务 1–4 全部完成，<code>--test-tags /trading_custom</code> 全部通过。</li>
+    <li>模块的中文翻译 <code>i18n/zh_CN.po</code>（第 18 章）。</li>
+    <li>一份简短的说明文档：哪些需求用配置解决、哪些用开发解决，以及原因。</li>
+    <li>按验收清单走通两个场景，并截图保存每一步的结果。</li>
+  </ol>
+</div>
+<div id="pager"></div>
+</main>
+</div>
+<script src="assets/site.js"></script>
+</body>
+</html>

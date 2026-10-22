@@ -12,7 +12,7 @@
 <aside id="sidebar"></aside>
 <main>
 <div class="hero">
-  <span class="chapter-eyebrow">面向初学者的 15 章教程 + 附录</span>
+  <span class="chapter-eyebrow">面向初学者的 20 章教程 + 3 个附录</span>
   <h1>Odoo 20 开发入门：从开发者模式到生产部署</h1>
   <p class="sub">
     这套教程改编自 Daniel Reis 的《Odoo 15 Development Essentials》（第 5 版，Packt 出版）。
@@ -23,7 +23,7 @@
   <p style="margin-top:14px">
     <span class="pill">Odoo 20</span><span class="pill">Python 3.12</span><span class="pill">PostgreSQL 16</span>
     <span class="pill">ORM</span><span class="pill">XML 视图</span><span class="pill">QWeb</span><span class="pill">OWL 3</span>
-    <span class="pill">JSON-2 API</span><span class="pill">Nginx</span>
+    <span class="pill">JSON-2 API</span><span class="pill">Nginx</span><span class="pill">Docker</span><span class="pill">VS Code 调试</span>
   </p>
 </div>
 
@@ -132,47 +132,49 @@
 
 <h2 id="roadmap">学习路线</h2>
 
-<p>全书分为五个部分，从「用鼠标」到「写代码」再到「上线运维」：</p>
+<p>全书分为六个部分，从「用鼠标」到「写代码」再到「上线运维」，最后用一个综合项目把所学串起来；三个附录供随时查阅：</p>
 
 <figure>
-<svg class="dgm" viewBox="0 0 760 210" role="img" aria-label="五个部分的学习路线">
-  <rect class="bx-b" x="20" y="40" width="130" height="120" rx="10"/>
-  <text class="ttl on-b" x="85" y="68" text-anchor="middle">入门</text>
-  <text class="sm" x="85" y="94" text-anchor="middle">第 1–4 章</text>
-  <text class="sm" x="85" y="116" text-anchor="middle">开发者模式</text>
-  <text class="sm" x="85" y="136" text-anchor="middle">环境 · 第一个模块</text>
-
-  <rect class="bx-a" x="170" y="40" width="130" height="120" rx="10"/>
-  <text class="ttl on-a" x="235" y="68" text-anchor="middle">模型</text>
-  <text class="sm" x="235" y="94" text-anchor="middle">第 5–7 章</text>
-  <text class="sm" x="235" y="116" text-anchor="middle">数据文件 · 字段</text>
-  <text class="sm" x="235" y="136" text-anchor="middle">记录集</text>
-
-  <rect class="bx-p" x="320" y="40" width="130" height="120" rx="10"/>
-  <text class="ttl on-p" x="385" y="68" text-anchor="middle">业务逻辑</text>
-  <text class="sm" x="385" y="94" text-anchor="middle">第 8–9 章</text>
-  <text class="sm" x="385" y="116" text-anchor="middle">方法 · 测试</text>
-  <text class="sm" x="385" y="136" text-anchor="middle">外部 API</text>
-
-  <rect class="bx-g" x="470" y="40" width="130" height="120" rx="10"/>
-  <text class="ttl on-g" x="535" y="68" text-anchor="middle">视图</text>
-  <text class="sm" x="535" y="94" text-anchor="middle">第 10–13 章</text>
-  <text class="sm" x="535" y="116" text-anchor="middle">后台 · 看板 · 报表</text>
-  <text class="sm" x="535" y="136" text-anchor="middle">网站与门户</text>
-
-  <rect class="bx-r" x="620" y="40" width="120" height="120" rx="10"/>
-  <text class="ttl on-r" x="680" y="68" text-anchor="middle">上线</text>
-  <text class="sm" x="680" y="94" text-anchor="middle">第 14–15 章</text>
-  <text class="sm" x="680" y="116" text-anchor="middle">内置模型</text>
-  <text class="sm" x="680" y="136" text-anchor="middle">部署与维护</text>
-
-  <path class="ln" d="M152 100 H166" marker-end="url(#ar)"/>
-  <path class="ln" d="M302 100 H316" marker-end="url(#ar)"/>
-  <path class="ln" d="M452 100 H466" marker-end="url(#ar)"/>
-  <path class="ln" d="M602 100 H616" marker-end="url(#ar)"/>
-  <text class="sm" x="380" y="192" text-anchor="middle">附录：Odoo 15 → 20 变化速查，以及用 upgrade_code 迁移旧代码</text>
+<svg class="dgm" viewBox="0 0 760 220" role="img" aria-label="六个部分的学习路线与三个附录">
+  <rect class="bx-b" x="20" y="30" width="108" height="120" rx="10"/>
+  <text class="ttl on-b" x="74" y="58" text-anchor="middle">入门</text>
+  <text class="sm" x="74" y="84" text-anchor="middle">第 1–4 章</text>
+  <text class="sm" x="74" y="106" text-anchor="middle">开发者模式</text>
+  <text class="sm" x="74" y="126" text-anchor="middle">环境 · 首个模块</text>
+  <path class="ln" d="M129 90 H140" marker-end="url(#ar)"/>
+  <rect class="bx-a" x="142" y="30" width="108" height="120" rx="10"/>
+  <text class="ttl on-a" x="196" y="58" text-anchor="middle">模型</text>
+  <text class="sm" x="196" y="84" text-anchor="middle">第 5–7 章</text>
+  <text class="sm" x="196" y="106" text-anchor="middle">数据文件 · 字段</text>
+  <text class="sm" x="196" y="126" text-anchor="middle">记录集</text>
+  <path class="ln" d="M251 90 H262" marker-end="url(#ar)"/>
+  <rect class="bx-p" x="264" y="30" width="108" height="120" rx="10"/>
+  <text class="ttl on-p" x="318" y="58" text-anchor="middle">业务逻辑</text>
+  <text class="sm" x="318" y="84" text-anchor="middle">第 8–9 章</text>
+  <text class="sm" x="318" y="106" text-anchor="middle">方法 · 测试</text>
+  <text class="sm" x="318" y="126" text-anchor="middle">外部 API</text>
+  <path class="ln" d="M373 90 H384" marker-end="url(#ar)"/>
+  <rect class="bx-g" x="386" y="30" width="108" height="120" rx="10"/>
+  <text class="ttl on-g" x="440" y="58" text-anchor="middle">视图</text>
+  <text class="sm" x="440" y="84" text-anchor="middle">第 10–13 章</text>
+  <text class="sm" x="440" y="106" text-anchor="middle">后台 · 看板</text>
+  <text class="sm" x="440" y="126" text-anchor="middle">报表 · 门户</text>
+  <path class="ln" d="M495 90 H506" marker-end="url(#ar)"/>
+  <rect class="bx-r" x="508" y="30" width="108" height="120" rx="10"/>
+  <text class="ttl on-r" x="562" y="58" text-anchor="middle">上线</text>
+  <text class="sm" x="562" y="84" text-anchor="middle">第 14–15 章</text>
+  <text class="sm" x="562" y="106" text-anchor="middle">内置模型</text>
+  <text class="sm" x="562" y="126" text-anchor="middle">部署与维护</text>
+  <path class="ln" d="M617 90 H628" marker-end="url(#ar)"/>
+  <rect class="bx" x="630" y="30" width="108" height="120" rx="10"/>
+  <text class="ttl" x="684" y="58" text-anchor="middle">进阶与实战</text>
+  <text class="sm" x="684" y="84" text-anchor="middle">第 17–20 章</text>
+  <text class="sm" x="684" y="106" text-anchor="middle">Docker · 翻译</text>
+  <text class="sm" x="684" y="126" text-anchor="middle">规范 · 实战项目</text>
+  <rect class="bx-d" x="20" y="168" width="718" height="40" rx="10"/>
+  <text class="sm" x="379" y="193" text-anchor="middle">附录 A：15 → 20 变化速查　·　附录 B：常见报错与排错手册　·　附录 C：术语表与概念地图</text>
 </svg>
-<figcaption>图 0-3　五个部分，由浅入深</figcaption>
+<figcaption>图 0-3　六个部分，由浅入深；附录按需查阅</figcaption>
 </figure>
 
 <h2 id="how">怎么用这套教程</h2>
@@ -182,6 +184,8 @@
   <li><strong>亲手敲代码。</strong>每章末尾都有「动手练习」。看懂和写出来之间的差距，比你想象的大。</li>
   <li><strong>留意紫色提示框。</strong>标着「&#8682; Odoo 20 变化」的框说明这里和原书（Odoo 15）不同；如果你从没用过旧版本，把它当作「顺便了解一下历史」即可。</li>
   <li><strong>左右对照卡片。</strong>左边是原书的 Odoo 15 写法，右边是 Odoo 20 写法。在网上搜到老代码时，这些对照能帮你一眼认出该怎么改。</li>
+  <li><strong>卡住了先查附录。</strong>报错看不懂，去附录 B 按关键词搜；概念记混了，去附录 C 的术语表和概念地图。</li>
+  <li><strong>用实战项目检验自己。</strong>学完前五部分，试着不看答案完成第 20 章的贸易公司项目——它没有逐步代码，只有需求和提示。</li>
   <li><strong>参考原书仓库的代码。</strong>本仓库的 <code>ch02</code>～<code>ch15</code> 和 <code>final</code> 目录是原书的 Odoo 15 代码，可以对照阅读，但直接安装到 Odoo 20 上会失败——请以教程里的代码为准。</li>
 </ul>
 

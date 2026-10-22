@@ -1,0 +1,762 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 17 章 · 开发环境进阶：Docker 与断点调试 — Odoo 20 开发入门</title>
+<meta name="description" content="用 Docker Compose 一条命令启动 Odoo 20 和 PostgreSQL，在 Windows、macOS、Linux 上得到一致的开发环境；再用 VS Code 和 debugpy 给 Odoo 打断点、单步执行、查看变量。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-chapter="17">
+<div id="app">
+<aside id="sidebar"></aside>
+<main>
+<span class="chapter-eyebrow">第 17 章</span>
+<h1>开发环境进阶：Docker 与断点调试</h1>
+<p class="lede">
+  第 2 章我们在 Ubuntu 上从源码安装了 Odoo。这种方式最透明，但对用 Windows 或 macOS 的同学门槛不低，换一台电脑又要从头装一遍。
+  这一章介绍另一条路：<strong>用 Docker 一条命令把 Odoo 20 和 PostgreSQL 都跑起来</strong>。
+  然后再解决第 8 章留下的一个问题：在终端里用 pdb 调试不太直观，我们改用 <strong>VS Code 的图形化调试器</strong>，点一下就能打断点、看变量、单步执行。
+</p>
+
+<div class="goals">
+  <h4>本章目标</h4>
+  <ul>
+    <li>理解镜像、容器、数据卷、端口映射这几个 Docker 概念</li>
+    <li>用 Docker Compose 搭建 Odoo 20 + PostgreSQL 开发环境，并挂载自己的模块</li>
+    <li>在容器里执行建库、安装 / 升级模块、<code>odoo shell</code> 等日常操作</li>
+    <li>用 VS Code + debugpy 调试源码安装的 Odoo（第 2 章的环境）</li>
+    <li>用 VS Code 附加到 Docker 容器里的 Odoo 进行调试</li>
+    <li>熟练使用断点、条件断点、单步执行、调试控制台</li>
+  </ul>
+</div>
+
+<div id="chapter-toc"></div>
+
+<h2 id="why">为什么用 Docker</h2>
+
+<p>
+  Odoo 的运行需要好几样东西：特定版本的 Python、几十个 Python 库、一些系统库、PostgreSQL 数据库、生成 PDF 用的 wkhtmltopdf……
+  第 2 章我们一样一样装上了它们。<strong>Docker</strong> 的思路是：把「Odoo 加上它需要的一切」提前打包成一个<strong>镜像</strong>，
+  任何装了 Docker 的电脑都能直接运行它，不用关心本机是什么系统。
+</p>
+
+<dl class="terms">
+  <dt>镜像（image）</dt><dd>一个只读的软件包，里面是一套完整的运行环境。Odoo 官方在 Docker Hub 上发布了 <code>odoo:20</code> 镜像，PostgreSQL 也有官方的 <code>postgres:17</code> 镜像。</dd>
+  <dt>容器（container）</dt><dd>镜像运行起来的实例，像一台轻量的虚拟机。同一个镜像可以启动很多个容器。容器删掉后，里面的改动也就没了。</dd>
+  <dt>数据卷（volume）</dt><dd>容器外面的持久存储。数据库文件、附件这些不能丢的数据放在卷里，删掉容器再重建，数据还在。</dd>
+  <dt>挂载（bind mount）</dt><dd>把本机的一个目录「映射」进容器。我们把自己的模块目录挂载进去：在本机用编辑器改代码，容器里立刻就能看到。</dd>
+  <dt>端口映射</dt><dd>把容器里的端口暴露到本机。容器里 Odoo 监听 8069，映射后在本机浏览器访问 <code>localhost:8069</code> 即可。</dd>
+</dl>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 360" role="img" aria-label="Docker 开发环境：本机的模块目录挂载进 Odoo 容器，Odoo 容器连接数据库容器，数据存放在数据卷里">
+  <rect class="bx-d" x="20" y="20" width="720" height="320" rx="14"/>
+  <text class="ttl" x="40" y="46">你的电脑（Windows / macOS / Linux 都一样）</text>
+
+  <rect class="bx" x="40" y="66" width="170" height="120" rx="10"/>
+  <text class="ttl" x="125" y="92" text-anchor="middle">VS Code</text>
+  <text class="sm mono" x="125" y="116" text-anchor="middle">./addons/</text>
+  <text class="sm mono" x="125" y="134" text-anchor="middle">library_app/ ...</text>
+  <text class="sm" x="125" y="162" text-anchor="middle">在本机编辑代码</text>
+
+  <rect class="bx" x="40" y="206" width="170" height="110" rx="10"/>
+  <text class="ttl" x="125" y="232" text-anchor="middle">浏览器</text>
+  <text class="sm mono" x="125" y="258" text-anchor="middle">localhost:8069</text>
+  <text class="sm" x="125" y="284" text-anchor="middle">端口映射到容器</text>
+
+  <rect class="bx-a" x="270" y="66" width="230" height="250" rx="12"/>
+  <text class="ttl on-a" x="385" y="92" text-anchor="middle">容器 odoo</text>
+  <text class="sm mono" x="385" y="112" text-anchor="middle">镜像 odoo:20</text>
+  <rect class="bx" x="286" y="126" width="198" height="40" rx="6"/>
+  <text class="sm mono" x="385" y="151" text-anchor="middle">/mnt/extra-addons</text>
+  <rect class="bx" x="286" y="174" width="198" height="40" rx="6"/>
+  <text class="sm mono" x="385" y="199" text-anchor="middle">/etc/odoo/odoo.conf</text>
+  <rect class="bx" x="286" y="222" width="198" height="40" rx="6"/>
+  <text class="sm mono" x="385" y="247" text-anchor="middle">/var/lib/odoo（附件）</text>
+  <text class="sm" x="385" y="290" text-anchor="middle">Python + Odoo 20 + 全部依赖</text>
+
+  <rect class="bx-g" x="560" y="66" width="160" height="150" rx="12"/>
+  <text class="ttl on-g" x="640" y="92" text-anchor="middle">容器 db</text>
+  <text class="sm mono" x="640" y="112" text-anchor="middle">镜像 postgres:17</text>
+  <text class="sm" x="640" y="146" text-anchor="middle">主机名就是 db</text>
+  <text class="sm mono" x="640" y="170" text-anchor="middle">用户 odoo</text>
+
+  <rect class="bx-p" x="560" y="236" width="160" height="80" rx="12"/>
+  <text class="ttl on-p" x="640" y="262" text-anchor="middle">数据卷</text>
+  <text class="sm mono" x="640" y="284" text-anchor="middle">db-data</text>
+  <text class="sm mono" x="640" y="302" text-anchor="middle">odoo-data</text>
+
+  <path class="ln-a" d="M212 140 H282" marker-end="url(#ar-a)"/>
+  <text class="sm on-a" x="247" y="132" text-anchor="middle">挂载</text>
+  <path class="ln" d="M212 262 C 240 262, 245 296, 266 296" marker-end="url(#ar)"/>
+  <text class="sm" x="240" y="252" text-anchor="middle">8069</text>
+  <path class="ln-g" d="M502 140 H556" marker-end="url(#ar-g)"/>
+  <text class="sm on-g" x="529" y="132" text-anchor="middle">SQL</text>
+  <path class="ln-d" d="M640 218 V232"/>
+  <path class="ln-d" d="M502 242 C 530 242, 530 276, 556 276"/>
+</svg>
+<figcaption>图 17-1　两个容器各司其职：odoo 容器运行 Odoo，db 容器运行 PostgreSQL；你的代码通过挂载进入容器，数据存放在数据卷里</figcaption>
+</figure>
+
+<div class="tw"><table>
+  <tr><th></th><th>源码安装（第 2 章）</th><th>Docker（本章）</th></tr>
+  <tr><td>适合的系统</td><td>Linux（Windows 上用 WSL）</td><td>任何装了 Docker 的系统</td></tr>
+  <tr><td>安装耗时</td><td>装系统包、建虚拟环境、装依赖，二三十分钟</td><td>下载镜像，几分钟</td></tr>
+  <tr><td>Odoo 源码</td><td>就在 <code>~/work20/odoo</code>，随时可以看、可以改</td><td>在镜像里，要看需要先复制出来</td></tr>
+  <tr><td>切换版本</td><td>再克隆一份、再建一个虚拟环境</td><td>把 <code>odoo:20</code> 改成 <code>odoo:19</code> 即可</td></tr>
+  <tr><td>团队一致性</td><td>每个人的环境多少有差异</td><td>所有人用同一个镜像，「在我电脑上能跑」的问题少很多</td></tr>
+</table></div>
+
+<div class="box note">
+  <div class="t">&#9432; 两种方式不冲突</div>
+  <p>
+    很多开发者两种都用：日常开发用 Docker，需要深入阅读或修改 Odoo 核心代码时用源码安装。本章后半部分的 VS Code 调试，两种环境都会讲到。
+  </p>
+</div>
+
+<h2 id="install">安装 Docker</h2>
+
+<ul>
+  <li><strong>Windows / macOS</strong>：安装 <strong>Docker Desktop</strong>（docker.com 下载）。Windows 上它会使用 WSL 2 作为后端，安装向导会提示你启用。</li>
+  <li><strong>Ubuntu</strong>：可以安装 Docker 官方的 Docker Engine，也可以直接用系统自带的软件包：</li>
+</ul>
+
+<div class="code" data-lang="bash">
+<pre>
+sudo apt install -y docker.io docker-compose-v2
+sudo usermod -aG docker $USER      # 让当前用户不用 sudo 也能运行 docker
+# 注销并重新登录，让用户组的变化生效
+</pre>
+</div>
+
+<p>装好后检查一下：</p>
+
+<div class="code" data-lang="bash">
+<pre>
+docker --version
+docker compose version
+docker run --rm hello-world        # 能打印出 "Hello from Docker!" 就说明一切正常
+</pre>
+</div>
+
+<div class="box warn">
+  <div class="t">注意是 <code>docker compose</code>，不是 <code>docker-compose</code></div>
+  <p>
+    Compose 现在是 Docker 的一个子命令（V2），写作 <code>docker compose</code>，中间是空格。网上的老教程常写成带连字符的 <code>docker-compose</code>，那是已经停止维护的 V1 版本。
+  </p>
+</div>
+
+<h2 id="compose">用 Docker Compose 搭环境</h2>
+
+<p>
+  一个 Odoo 环境需要两个容器，还要配置挂载、端口和数据卷。如果都写在 <code>docker run</code> 命令行里，会长得没法看。
+  <strong>Docker Compose</strong> 让我们把这些写进一个 YAML 文件，然后一条命令全部启动。先建一个项目目录：
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 250" role="img" aria-label="Docker 项目的目录结构">
+  <rect class="bx" x="20" y="20" width="420" height="210" rx="10"/>
+  <text class="ttl mono" x="40" y="48">~/odoo20-docker/</text>
+  <text class="sm mono" x="60" y="76">├── compose.yaml</text>
+  <text class="sm mono" x="60" y="100">├── config/</text>
+  <text class="sm mono" x="60" y="124">│   └── odoo.conf</text>
+  <text class="sm mono" x="60" y="148">├── addons/</text>
+  <text class="sm mono" x="60" y="172">│   ├── library_app/</text>
+  <text class="sm mono" x="60" y="196">│   └── library_member/ ...</text>
+  <text class="sm mono" x="60" y="220">└── .vscode/launch.json</text>
+
+  <rect class="bx-a" x="470" y="20" width="270" height="44" rx="8"/>
+  <text class="lbl on-a" x="486" y="47">描述两个容器怎么运行</text>
+  <rect class="bx-b" x="470" y="80" width="270" height="44" rx="8"/>
+  <text class="lbl on-b" x="486" y="107">Odoo 配置，挂载到 /etc/odoo</text>
+  <rect class="bx-g" x="470" y="140" width="270" height="44" rx="8"/>
+  <text class="lbl on-g" x="486" y="167">你的模块，挂载到 /mnt/extra-addons</text>
+  <rect class="bx-p" x="470" y="196" width="270" height="34" rx="8"/>
+  <text class="lbl on-p" x="486" y="218">VS Code 调试配置（稍后）</text>
+  <path class="ln-a" d="M196 72 H466"/>
+  <path class="ln-b" d="M204 120 C 330 120, 380 102, 466 102"/>
+  <path class="ln-g" d="M226 168 C 330 168, 380 162, 466 162"/>
+  <path class="ln-p" d="M276 216 H466"/>
+</svg>
+<figcaption>图 17-2　项目目录：一个 Compose 文件、一个配置目录、一个放模块的目录</figcaption>
+</figure>
+
+<div class="code" data-lang="bash">
+<pre>
+mkdir -p ~/odoo20-docker/config ~/odoo20-docker/addons
+cd ~/odoo20-docker
+# 把前面章节写好的模块复制进来（没有的话先空着）
+cp -r ~/work20/library/* addons/
+</pre>
+</div>
+
+<h3>compose.yaml</h3>
+
+<div class="code" data-lang="text" data-file="~/odoo20-docker/compose.yaml">
+<pre>
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: odoo
+      POSTGRES_PASSWORD: odoo
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+  odoo:
+    image: odoo:20
+    depends_on:
+      - db
+    ports:
+      - "8069:8069"
+    environment:
+      PGHOST: db              # 数据库的主机名，就是上面的服务名
+      PGPORT: 5432
+      PGUSER: odoo
+      PGPASSWORD: odoo
+      ODOO_DEV: all           # 相当于 --dev=all
+    volumes:
+      - ./addons:/mnt/extra-addons
+      - ./config:/etc/odoo
+      - odoo-data:/var/lib/odoo
+
+volumes:
+  db-data:
+  odoo-data:
+</pre>
+</div>
+
+<p>逐段看一下：</p>
+
+<ul>
+  <li><code>services</code> 下面定义了两个服务 <code>db</code> 和 <code>odoo</code>。Compose 会给它们建一个专用网络，容器之间可以<strong>用服务名当主机名</strong>互相访问，所以 Odoo 连接数据库时主机名写 <code>db</code>。</li>
+  <li><code>POSTGRES_USER</code> / <code>POSTGRES_PASSWORD</code> 让 PostgreSQL 镜像在第一次启动时创建一个名为 <code>odoo</code> 的数据库用户。别用 <code>postgres</code>，Odoo 会拒绝用这个用户连接（附录 B）。</li>
+  <li><code>PGHOST</code>、<code>PGPORT</code>、<code>PGUSER</code>、<code>PGPASSWORD</code> 是 PostgreSQL 的标准环境变量，Odoo 20 会直接读取它们作为数据库连接参数。<code>ODOO_DEV</code> 对应 <code>--dev</code> 选项。
+    四个 <code>PG*</code> 变量最好都写上：官方镜像的启动脚本发现缺了哪一个，就会自己往命令行后面追加 <code>--db_port</code> 之类的参数，而 <code>odoo db</code> 这样的子命令不接受追加在后面的这些参数。</li>
+  <li><code>volumes</code> 里以 <code>./</code> 开头的是挂载本机目录，其余的是命名数据卷，在文件末尾声明。</li>
+</ul>
+
+<div class="box ver">
+  <div class="t">&#8682; 用环境变量配置 Odoo</div>
+  <p>
+    Odoo 20 的大部分配置项都能用环境变量设置，优先级是：<strong>命令行 &gt; 环境变量 &gt; 配置文件 &gt; 默认值</strong>。
+    数据库连接用 PostgreSQL 的标准变量（<code>PGHOST</code>、<code>PGPORT</code>、<code>PGUSER</code>、<code>PGPASSWORD</code>、<code>PGDATABASE</code>），
+    配置文件路径用 <code>ODOO_RC</code>，开发选项用 <code>ODOO_DEV</code>。这在容器里特别方便：同一个镜像，换一组环境变量就是另一套配置。
+  </p>
+</div>
+
+<h3>config/odoo.conf</h3>
+
+<p>挂载 <code>./config</code> 会替换掉镜像自带的配置文件，所以我们要自己写一个：</p>
+
+<div class="code" data-lang="ini" data-file="~/odoo20-docker/config/odoo.conf">
+<pre>
+[options]
+addons_path = /mnt/extra-addons
+data_dir = /var/lib/odoo
+http_interface = 0.0.0.0
+admin_passwd = 换成一个你自己的主密码
+</pre>
+</div>
+
+<p>
+  <code>addons_path</code> 只需要写我们挂载的目录，Odoo 自带的模块路径会自动加上。注意这里写的都是<strong>容器里的路径</strong>，不是本机路径。
+  <code>http_interface = 0.0.0.0</code> <strong>不能省</strong>：Odoo 20 默认只监听 <code>127.0.0.1</code>，在容器里这意味着只有容器自己能访问，端口映射过来的请求进不去，浏览器会一直连不上。
+</p>
+
+<h3>启动</h3>
+
+<div class="code" data-lang="bash">
+<pre>
+docker compose up -d          # 后台启动两个容器（第一次会先下载镜像）
+docker compose ps             # 查看容器状态
+docker compose logs -f odoo   # 实时查看 Odoo 的日志，Ctrl+C 退出查看（容器继续运行）
+</pre>
+</div>
+
+<p>日志里出现 <code>HTTP service running on 0.0.0.0:8069</code> 之后，打开浏览器访问 <code>http://localhost:8069</code>，就能看到第 2 章介绍过的数据库管理页面。</p>
+
+<h2 id="daily">日常操作</h2>
+
+<p>
+  在容器里执行命令用 <code>docker compose exec 服务名 命令</code>。容器里的 <code>odoo</code> 命令和第 2 章源码安装的完全一样，
+  而且因为配置文件路径（<code>ODOO_RC</code>）和数据库连接（<code>PG*</code> 变量）都已经通过环境变量设好了，不用再写 <code>-c</code>：
+</p>
+
+<div class="code" data-lang="bash">
+<pre>
+# 建一个带演示数据、默认语言为简体中文的数据库
+docker compose exec odoo odoo db init library --with-demo --language zh_CN
+
+# 安装 / 升级模块
+docker compose exec odoo odoo module install -d library library_app
+docker compose exec odoo odoo module upgrade -d library library_app
+
+# 进入 odoo shell（第 7 章）
+docker compose exec odoo odoo shell -d library
+
+# 重启 Odoo（改了清单、或者需要重新加载 Python 代码时）
+docker compose restart odoo
+</pre>
+</div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 210" role="img" aria-label="Docker 环境下的开发循环：本机改代码，容器里立即可见，按修改类型选择重启或升级">
+  <rect class="bx" x="20" y="60" width="150" height="70" rx="10"/>
+  <text class="lbl" x="95" y="90" text-anchor="middle">在 VS Code 里</text>
+  <text class="lbl" x="95" y="108" text-anchor="middle">改代码、保存</text>
+  <rect class="bx-a" x="210" y="60" width="160" height="70" rx="10"/>
+  <text class="lbl on-a" x="290" y="90" text-anchor="middle">挂载：容器里</text>
+  <text class="lbl on-a" x="290" y="108" text-anchor="middle">立刻是新文件</text>
+  <rect class="bx-b" x="420" y="20" width="320" height="50" rx="10"/>
+  <text class="lbl on-b" x="436" y="42">Python：--dev=all 自动重启</text>
+  <text class="sm" x="436" y="60">没生效就 docker compose restart odoo</text>
+  <rect class="bx-g" x="420" y="80" width="320" height="50" rx="10"/>
+  <text class="lbl on-g" x="436" y="102">视图 XML：--dev=all 下刷新即可</text>
+  <text class="sm" x="436" y="120">直接从文件读取视图</text>
+  <rect class="bx-p" x="420" y="140" width="320" height="50" rx="10"/>
+  <text class="lbl on-p" x="436" y="162">字段、数据文件、权限：升级模块</text>
+  <text class="sm mono" x="436" y="180">exec odoo odoo module upgrade ...</text>
+  <path class="ln" d="M172 95 H206" marker-end="url(#ar)"/>
+  <path class="ln" d="M372 85 L416 47" marker-end="url(#ar)"/>
+  <path class="ln" d="M372 95 H416" marker-end="url(#ar)"/>
+  <path class="ln" d="M372 105 L416 160" marker-end="url(#ar)"/>
+</svg>
+<figcaption>图 17-3　开发循环和源码安装时一样（附录 B 的决策图同样适用），只是命令前面多了 <code>docker compose exec odoo</code></figcaption>
+</figure>
+
+<div class="tw"><table>
+  <tr><th>命令</th><th>作用</th></tr>
+  <tr><td><code>docker compose up -d</code></td><td>创建并启动所有容器（已存在就直接启动）</td></tr>
+  <tr><td><code>docker compose stop</code></td><td>停止容器，下次 <code>up -d</code> 或 <code>start</code> 继续用</td></tr>
+  <tr><td><code>docker compose down</code></td><td>停止并<strong>删除</strong>容器，数据卷保留</td></tr>
+  <tr><td><code>docker compose down -v</code></td><td>连数据卷一起删除——<strong>所有数据库都没了</strong>，相当于从零开始</td></tr>
+  <tr><td><code>docker compose logs -f odoo</code></td><td>跟踪 Odoo 的日志</td></tr>
+  <tr><td><code>docker compose exec odoo bash</code></td><td>在 Odoo 容器里开一个终端，四处看看</td></tr>
+  <tr><td><code>docker compose pull &amp;&amp; docker compose up -d</code></td><td>拉取最新的镜像（包含 Odoo 的每日修复）并重建容器</td></tr>
+</table></div>
+
+<div class="box tip">
+  <div class="t">&#128161; 想看 Odoo 源码？从容器里复制一份出来</div>
+  <p>
+    镜像里的 Odoo 是用官方的 Debian 软件包安装的，源码在 <code>/usr/lib/python3/dist-packages/odoo</code>。复制到本机，就能在编辑器里搜索和阅读，后面调试时也用得上：
+  </p>
+  <div class="code" data-lang="bash">
+<pre>
+docker compose cp odoo:/usr/lib/python3/dist-packages/odoo ./odoo-src
+</pre>
+  </div>
+</div>
+
+<div class="box warn">
+  <div class="t">这是开发环境，不是生产环境</div>
+  <p>
+    本章的配置为了方便开发，密码写死在文件里、打开了 <code>--dev</code>。生产部署请参照第 15 章的安全要求（强主密码、关闭数据库管理器、反向代理与 HTTPS 等），
+    无论最后是否使用容器。
+  </p>
+</div>
+
+<h2 id="debugger">图形化调试器是怎么工作的</h2>
+
+<p>
+  第 8 章我们用 <code>breakpoint()</code> 在终端里调试。它能用，但要记一堆单字母命令，看复杂的数据结构也费劲。
+  VS Code 的调试器把这一切变成了图形界面：在行号左边点一下就是断点，变量的值直接在侧边栏里展开。
+</p>
+
+<p>
+  VS Code 本身并不执行你的代码。它通过一个叫 <strong>debugpy</strong> 的 Python 库来控制 Odoo 进程：debugpy 运行在 Odoo 进程<strong>内部</strong>，
+  在一个网络端口上等待指令；VS Code 连上这个端口，发出「在第 42 行停下」「执行下一行」「告诉我变量 x 的值」这样的请求。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 270" role="img" aria-label="VS Code 通过调试协议连接 Odoo 进程中的 debugpy；launch 模式由 VS Code 启动进程，attach 模式连接已运行的进程">
+  <rect class="bx-b" x="20" y="60" width="200" height="150" rx="12"/>
+  <text class="ttl on-b" x="120" y="88" text-anchor="middle">VS Code</text>
+  <text class="sm" x="120" y="112" text-anchor="middle">断点、变量面板、</text>
+  <text class="sm" x="120" y="130" text-anchor="middle">调用栈、调试控制台</text>
+  <text class="sm" x="120" y="164" text-anchor="middle">Python Debugger 扩展</text>
+  <text class="sm" x="120" y="184" text-anchor="middle">（调试的「客户端」）</text>
+
+  <rect class="bx-a" x="420" y="40" width="320" height="190" rx="12"/>
+  <text class="ttl on-a" x="580" y="66" text-anchor="middle">Odoo 进程</text>
+  <rect class="bx" x="440" y="82" width="280" height="50" rx="8"/>
+  <text class="lbl" x="580" y="104" text-anchor="middle">debugpy</text>
+  <text class="sm" x="580" y="122" text-anchor="middle">监听端口，执行调试指令</text>
+  <rect class="bx" x="440" y="146" width="280" height="64" rx="8"/>
+  <text class="lbl" x="580" y="170" text-anchor="middle">Odoo 服务器 + 你的模块</text>
+  <text class="sm" x="580" y="192" text-anchor="middle">运行到断点处暂停</text>
+
+  <path class="ln-b" d="M222 110 H436" marker-end="url(#ar-b)"/>
+  <path class="ln-a" d="M436 128 H222" marker-end="url(#ar-a)"/>
+  <text class="sm on-b" x="329" y="100" text-anchor="middle">在第 42 行设断点 / 下一步</text>
+  <text class="sm on-a" x="329" y="146" text-anchor="middle">停在这里了，变量是……</text>
+  <text class="sm" x="329" y="176" text-anchor="middle">调试协议（DAP），默认端口 5678</text>
+
+  <text class="lbl" x="120" y="246" text-anchor="middle">launch：VS Code 启动 Odoo</text>
+  <text class="lbl" x="580" y="256" text-anchor="middle">attach：VS Code 连上已在运行的 Odoo（如容器里）</text>
+</svg>
+<figcaption>图 17-4　调试器由两部分组成：VS Code 是界面，debugpy 在 Odoo 进程里干活</figcaption>
+</figure>
+
+<p>VS Code 有两种开始调试的方式，后面两节各用一种：</p>
+
+<ul>
+  <li><strong>launch（启动）</strong>：由 VS Code 来启动 Odoo，自动带上 debugpy。适合<strong>源码安装</strong>的环境。</li>
+  <li><strong>attach（附加）</strong>：Odoo 自己带着 debugpy 先跑起来，VS Code 再连上去。适合 <strong>Docker</strong> 或远程服务器。</li>
+</ul>
+
+<p>
+  两种方式都要先在 VS Code 里安装微软的 <strong>Python</strong> 扩展（它会一并装上 <strong>Python Debugger</strong> 扩展）。
+  所有调试配置都写在项目的 <code>.vscode/launch.json</code> 文件里。
+</p>
+
+<h2 id="launch">调试源码安装的 Odoo（launch）</h2>
+
+<p>
+  用 VS Code 打开第 2 章的工作目录 <code>~/work20</code>（菜单「文件 → 打开文件夹」）。Windows 用户如果在 WSL 里安装了 Odoo，
+  先装 VS Code 的 <strong>WSL</strong> 扩展，再用「连接到 WSL」打开这个目录，后面的步骤完全一样。然后新建 <code>.vscode/launch.json</code>：
+</p>
+
+<div class="code" data-lang="json" data-file="~/work20/.vscode/launch.json">
+<pre>
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Odoo 20：library 库",
+            "type": "debugpy",
+            "request": "launch",
+            "python": "${workspaceFolder}/env20/bin/python",
+            "program": "${workspaceFolder}/odoo/odoo-bin",
+            "args": [
+                "-c", "${workspaceFolder}/library.conf",
+                "-d", "library",
+                "--dev=xml,qweb,access"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false
+        }
+    ]
+}
+</pre>
+</div>
+
+<dl class="terms">
+  <dt><code>type</code></dt><dd><code>debugpy</code> 表示用 Python Debugger 扩展。</dd>
+  <dt><code>python</code></dt><dd>用哪个 Python 解释器运行。一定要指向虚拟环境里的那个，否则会找不到 Odoo 的依赖库。</dd>
+  <dt><code>program</code> / <code>args</code></dt><dd>相当于在终端里执行 <code>odoo-bin -c library.conf -d library --dev=...</code>。<code>${workspaceFolder}</code> 是打开的文件夹路径。</dd>
+  <dt><code>justMyCode</code></dt><dd>默认是 <code>true</code>，调试器只在「你的代码」里停，单步时会跳过库代码。设成 <code>false</code> 才能单步进入 Odoo 自己的源码（比如 ORM 的 <code>write()</code>），对学习非常有帮助。</dd>
+</dl>
+
+<div class="box warn">
+  <div class="t">调试时不要用 <code>--dev=reload</code>，也不要开多进程</div>
+  <p>
+    <code>reload</code> 检测到文件变化时会<strong>重新启动整个进程</strong>，调试会话随之断开，所以上面的配置只开了 <code>xml,qweb,access</code>。
+    改了 Python 代码后，按调试工具栏上的「重启」按钮（Ctrl+Shift+F5）即可。另外，配置文件里的 <code>workers</code> 必须是 0（默认值）：
+    多进程模式下请求由子进程处理，调试器默认只附加在主进程上，断点不会生效。
+  </p>
+</div>
+
+<p>保存后，切换到 VS Code 左侧的「运行和调试」面板，在顶部的下拉框里选中「Odoo 20：library 库」，按 <strong>F5</strong>。Odoo 会在 VS Code 的集成终端里启动，日志和平时一样。</p>
+
+<h2 id="attach">调试 Docker 里的 Odoo（attach）</h2>
+
+<p>容器里的 Odoo 不是 VS Code 启动的，所以要换个思路，分三步：</p>
+
+<ol class="steps">
+  <li>在镜像里装上 debugpy；</li>
+  <li>让 Odoo 在 debugpy 的「监听」下启动，并把调试端口映射出来；</li>
+  <li>VS Code 用 attach 方式连上这个端口，并告诉它容器里的路径和本机路径怎么对应。</li>
+</ol>
+
+<h3>第一步：给镜像加上 debugpy</h3>
+
+<p>官方镜像里没有 debugpy。在项目目录新建一个 <code>Dockerfile.debug</code>，在官方镜像的基础上装上它：</p>
+
+<div class="code" data-lang="text" data-file="~/odoo20-docker/Dockerfile.debug">
+<pre>
+FROM odoo:20
+USER root
+RUN pip3 install --no-cache-dir --break-system-packages debugpy
+USER odoo
+</pre>
+</div>
+
+<p>
+  镜像基于 Ubuntu 24.04，系统的 Python 默认不允许直接用 pip 安装包（为了保护系统软件包），<code>--break-system-packages</code> 表示我们知道自己在做什么。
+  装完切回 <code>odoo</code> 用户，和官方镜像保持一致。
+</p>
+
+<h3>第二步：调试用的 Compose 覆盖文件</h3>
+
+<p>
+  我们不改 <code>compose.yaml</code>，而是另写一个只包含「差异」的覆盖文件。需要调试时把两个文件叠加起来使用，平时还是只用原来那个：
+</p>
+
+<div class="code" data-lang="text" data-file="~/odoo20-docker/compose.debug.yaml">
+<pre>
+services:
+  odoo:
+    build:
+      context: .
+      dockerfile: Dockerfile.debug
+    environment:
+      ODOO_DEV: xml,qweb,access      # 调试时不要 reload
+    command:
+      - python3
+      - -m
+      - debugpy
+      - --listen
+      - 0.0.0.0:5678
+      - /usr/bin/odoo
+    ports:
+      - "127.0.0.1:5678:5678"        # 只允许本机连接调试端口
+</pre>
+</div>
+
+<div class="code" data-lang="bash">
+<pre>
+docker compose -f compose.yaml -f compose.debug.yaml up -d --build
+</pre>
+</div>
+
+<ul>
+  <li><code>command</code> 把容器的启动命令换成「用 debugpy 运行 <code>/usr/bin/odoo</code>」。<code>--listen 0.0.0.0:5678</code> 让 debugpy 在容器的 5678 端口等待 VS Code 连接。</li>
+  <li>端口映射写成 <code>127.0.0.1:5678:5678</code>，只绑定本机地址。调试端口能执行任意代码，<strong>绝不能暴露到网络上</strong>。</li>
+  <li>覆盖文件里的 <code>environment</code>、<code>ports</code> 会和 <code>compose.yaml</code> 里的合并：<code>ODOO_DEV</code> 被覆盖，8069 端口照样保留。</li>
+</ul>
+
+<h3>第三步：attach 配置与路径映射</h3>
+
+<p>
+  容器里的文件路径和本机不一样：本机的 <code>./addons/library_app/models/library_book.py</code>，在容器里是 <code>/mnt/extra-addons/library_app/models/library_book.py</code>。
+  VS Code 在本机文件上设的断点，必须翻译成容器里的路径，debugpy 才认得。这就是 <strong>pathMappings</strong> 的作用：
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 220" role="img" aria-label="路径映射：本机的 addons 目录对应容器的 /mnt/extra-addons，本机的 odoo-src 对应容器里的 Odoo 源码目录">
+  <text class="ttl" x="180" y="30" text-anchor="middle">本机（VS Code 看到的）</text>
+  <text class="ttl" x="580" y="30" text-anchor="middle">容器里（debugpy 看到的）</text>
+  <rect class="bx-g" x="20" y="48" width="320" height="56" rx="10"/>
+  <text class="sm mono on-g" x="36" y="72">${workspaceFolder}/addons</text>
+  <text class="sm" x="36" y="92">你的模块</text>
+  <rect class="bx-g" x="420" y="48" width="320" height="56" rx="10"/>
+  <text class="sm mono on-g" x="436" y="72">/mnt/extra-addons</text>
+  <text class="sm" x="436" y="92">挂载点</text>
+  <path class="ln-g" d="M342 76 H416" marker-end="url(#ar-g)"/>
+  <path class="ln-g" d="M416 76 H342" marker-end="url(#ar-g)"/>
+
+  <rect class="bx-p" x="20" y="124" width="320" height="56" rx="10"/>
+  <text class="sm mono on-p" x="36" y="148">${workspaceFolder}/odoo-src</text>
+  <text class="sm" x="36" y="168">从容器里复制出来的源码（可选）</text>
+  <rect class="bx-p" x="420" y="124" width="320" height="56" rx="10"/>
+  <text class="sm mono on-p" x="436" y="148">/usr/lib/python3/dist-packages/odoo</text>
+  <text class="sm" x="436" y="168">镜像里的 Odoo 源码</text>
+  <path class="ln-p" d="M342 152 H416" marker-end="url(#ar-p)"/>
+  <path class="ln-p" d="M416 152 H342" marker-end="url(#ar-p)"/>
+  <text class="sm" x="380" y="208" text-anchor="middle">断点从左往右翻译；单步时停下的位置从右往左翻译，VS Code 才能打开对应的本机文件</text>
+</svg>
+<figcaption>图 17-5　pathMappings 把两边的路径对应起来</figcaption>
+</figure>
+
+<div class="code" data-lang="json" data-file="~/odoo20-docker/.vscode/launch.json">
+<pre>
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "附加到 Docker 里的 Odoo",
+            "type": "debugpy",
+            "request": "attach",
+            "connect": { "host": "localhost", "port": 5678 },
+            "pathMappings": [
+                {
+                    "localRoot": "${workspaceFolder}/addons",
+                    "remoteRoot": "/mnt/extra-addons"
+                },
+                {
+                    "localRoot": "${workspaceFolder}/odoo-src",
+                    "remoteRoot": "/usr/lib/python3/dist-packages/odoo"
+                }
+            ],
+            "justMyCode": false
+        }
+    ]
+}
+</pre>
+</div>
+
+<p>
+  第二条映射是可选的：如果你按前面的提示把 Odoo 源码复制到了 <code>./odoo-src</code>，单步进入 Odoo 核心代码时 VS Code 就能打开对应的文件。
+  用 VS Code 打开 <code>~/odoo20-docker</code> 目录，选中「附加到 Docker 里的 Odoo」，按 F5。底部状态栏变色，说明已经连上了。
+</p>
+
+<div class="box note">
+  <div class="t">&#9432; 断开调试器，Odoo 照常运行</div>
+  <p>
+    attach 模式下，停止调试（Shift+F5）只是断开连接，容器里的 Odoo 继续运行；再按 F5 可以随时重新连上。
+    调试结束后，用 <code>docker compose up -d</code>（不带 <code>compose.debug.yaml</code>）回到普通模式。
+  </p>
+</div>
+
+<h2 id="use">使用调试器</h2>
+
+<p>两种方式连上之后，用法就完全一样了。拿第 3 章图书模型的「检查 ISBN」按钮试一试：</p>
+
+<ol class="steps">
+  <li>在 VS Code 里打开 <code>library_app/models/library_book.py</code>，在 <code>button_check_isbn</code> 方法第一行的行号左边点一下，出现一个红点，这就是<strong>断点</strong>。</li>
+  <li>在浏览器里打开一本书，点「Check ISBN」按钮。浏览器会一直转圈——因为服务器停在了断点上。</li>
+  <li>VS Code 自动跳到前台，断点所在行高亮显示。现在可以四处看看了。</li>
+</ol>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 380" role="img" aria-label="VS Code 调试界面：调试工具栏、变量面板、监视、调用栈、编辑器中的断点和当前行、调试控制台">
+  <rect class="bx" x="20" y="20" width="720" height="340" rx="10"/>
+  <rect class="bx-b" x="400" y="30" width="250" height="34" rx="6"/>
+  <text class="sm mono on-b" x="525" y="52" text-anchor="middle">▶ F5　⤼ F10　↓ F11　↑ ⇧F11　⟲　■</text>
+
+  <rect class="bx-p" x="30" y="76" width="220" height="102" rx="6"/>
+  <text class="lbl on-p" x="42" y="96">变量</text>
+  <text class="sm mono" x="42" y="118">▾ self: library.book(3,)</text>
+  <text class="sm mono" x="54" y="136">  name: 'Odoo Development'</text>
+  <text class="sm mono" x="54" y="154">  isbn: '978-1-80020-...'</text>
+  <text class="sm mono" x="42" y="170">▸ book: library.book(3,)</text>
+  <rect class="bx-p" x="30" y="186" width="220" height="62" rx="6"/>
+  <text class="lbl on-p" x="42" y="206">监视</text>
+  <text class="sm mono" x="42" y="228">len(self) = 1</text>
+  <rect class="bx-p" x="30" y="256" width="220" height="94" rx="6"/>
+  <text class="lbl on-p" x="42" y="276">调用栈</text>
+  <text class="sm mono" x="42" y="298">button_check_isbn</text>
+  <text class="sm mono" x="42" y="316">call_kw …</text>
+  <text class="sm mono" x="42" y="334">dispatch …</text>
+
+  <rect class="bx" x="262" y="76" width="468" height="182" rx="6"/>
+  <text class="sm mono" x="292" y="100">40   def button_check_isbn(self):</text>
+  <circle cx="276" cy="114" r="5" class="bx-r" style="fill:var(--red)"/>
+  <rect class="bx-a" x="286" y="104" width="436" height="20" rx="3"/>
+  <text class="sm mono" x="292" y="119">41       for book in self:</text>
+  <text class="sm mono" x="292" y="140">42           if not book.isbn:</text>
+  <text class="sm mono" x="292" y="160">43               raise ValidationError(...)</text>
+  <text class="sm mono" x="292" y="180">44           if not book._check_isbn():</text>
+  <text class="sm mono" x="292" y="200">45               raise ValidationError(...)</text>
+  <text class="sm mono" x="292" y="220">46       return True</text>
+
+  <rect class="bx-g" x="262" y="266" width="468" height="84" rx="6"/>
+  <text class="lbl on-g" x="276" y="286">调试控制台</text>
+  <text class="sm mono" x="276" y="308">&gt; self.mapped("author_ids.name")</text>
+  <text class="sm mono" x="276" y="326">['Daniel Reis']</text>
+  <text class="sm mono" x="276" y="344">&gt; |</text>
+
+  <text class="sm on-r" x="616" y="152">● 断点</text>
+  <text class="sm on-a" x="616" y="172">▮ 将要执行的下一行</text>
+</svg>
+<figcaption>图 17-6　VS Code 调试界面的几个区域：工具栏、变量、监视、调用栈、编辑器、调试控制台</figcaption>
+</figure>
+
+<div class="tw"><table>
+  <tr><th>区域 / 按键</th><th>用途</th></tr>
+  <tr><td><strong>变量</strong>面板</td><td>当前作用域里的所有变量。记录集可以展开，看到每个字段的值。</td></tr>
+  <tr><td><strong>监视</strong>面板</td><td>添加任意表达式（比如 <code>len(self)</code>、<code>book.state</code>），每走一步自动刷新。</td></tr>
+  <tr><td><strong>调用栈</strong>面板</td><td>是谁一层层调用到这里的。点上面的某一层，可以看到那一层当时的变量——想知道「Odoo 是怎么调到我的方法的」，就看这里。</td></tr>
+  <tr><td><strong>调试控制台</strong></td><td>在当前位置执行任意 Python 表达式，甚至调用 ORM：<code>self.env['res.partner'].search_count([])</code>。</td></tr>
+  <tr><td>F5 继续</td><td>一直运行到下一个断点（没有的话请求就正常完成了）。</td></tr>
+  <tr><td>F10 单步跳过</td><td>执行当前行，不进入它调用的函数。</td></tr>
+  <tr><td>F11 单步进入</td><td>进入当前行调用的函数内部。配合 <code>justMyCode: false</code>，能一路走进 Odoo 的 ORM。</td></tr>
+  <tr><td>Shift+F11 单步跳出</td><td>执行完当前函数，回到调用它的地方。</td></tr>
+</table></div>
+
+<h3>条件断点与日志点</h3>
+
+<p>
+  断点打在一个会被调用很多次的地方（比如计算方法）时，每次都停下来会很烦。在红点上<strong>右键 → 编辑断点</strong>，可以设置：
+</p>
+
+<ul>
+  <li><strong>条件</strong>：只有表达式为真时才停，比如 <code>book.id == 3</code> 或 <code>not book.isbn</code>。</li>
+  <li><strong>命中次数</strong>：第 N 次经过时才停。</li>
+  <li><strong>日志消息</strong>（logpoint）：不停下来，只把一段文字打印到调试控制台，花括号里可以写表达式，比如 <code>检查 {book.name}</code>。相当于不用改代码的 <code>print</code>。</li>
+</ul>
+
+<h3>暂停时，其他请求怎么办</h3>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 200" role="img" aria-label="在默认的多线程模式下，一个请求停在断点上时，其他请求由别的线程继续处理">
+  <rect class="bx-a" x="20" y="20" width="720" height="160" rx="12"/>
+  <text class="ttl on-a" x="40" y="46">Odoo 进程（workers = 0，多线程模式）</text>
+  <rect class="bx-r" x="40" y="62" width="330" height="50" rx="8"/>
+  <text class="lbl on-r" x="56" y="84">线程 1：点「Check ISBN」的请求</text>
+  <text class="sm" x="56" y="102">停在断点上，浏览器那个标签页一直转圈</text>
+  <rect class="bx-g" x="390" y="62" width="330" height="50" rx="8"/>
+  <text class="lbl on-g" x="406" y="84">线程 2、3……：其他请求</text>
+  <text class="sm" x="406" y="102">照常处理，别的页面还能正常打开</text>
+  <text class="sm" x="40" y="140">如果别的请求也经过同一个断点，它们会依次停下，VS Code 的调用栈面板里会出现多个线程。</text>
+  <text class="sm" x="40" y="162">在断点上停太久，浏览器可能提示连接超时；按 F5 继续后，Odoo 仍会把响应处理完。</text>
+</svg>
+<figcaption>图 17-7　开发时 Odoo 以多线程模式运行，一个请求暂停不会让整个服务器卡死</figcaption>
+</figure>
+
+<h3>调试测试</h3>
+
+<p>
+  第 8 章写的自动化测试也能在调试器里运行：在 launch 配置里复制一份，把 <code>args</code> 改成运行测试的参数。
+  在测试方法里打上断点，就能一步步看测试数据是怎么被处理的：
+</p>
+
+<div class="code" data-lang="json" data-file="launch.json 里的另一项配置">
+<pre>
+        {
+            "name": "Odoo 20：运行 library_app 的测试",
+            "type": "debugpy",
+            "request": "launch",
+            "python": "${workspaceFolder}/env20/bin/python",
+            "program": "${workspaceFolder}/odoo/odoo-bin",
+            "args": [
+                "-c", "${workspaceFolder}/library.conf",
+                "-d", "library",
+                "-u", "library_app",
+                "--test-tags", "/library_app",
+                "--stop-after-init"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false
+        }
+</pre>
+</div>
+
+<div class="box tip">
+  <div class="t">&#128161; 用调试器读懂 Odoo</div>
+  <p>
+    调试器不只是用来修 bug 的。想知道「点保存时 Odoo 到底做了什么」？在 <code>write()</code> 的重写方法里打一个断点，用 F11 一路走进 ORM，看它怎样检查权限、触发计算字段、写入数据库。
+    这比读文档直观得多，也是很多资深 Odoo 开发者学习新功能的方式。
+  </p>
+</div>
+
+<h2 id="summary">小结</h2>
+
+<ul>
+  <li>Docker 把 Odoo 和它的依赖打包成镜像；容器是镜像的运行实例；数据放在数据卷里，代码通过挂载进入容器。</li>
+  <li><code>compose.yaml</code> 定义 <code>db</code> 和 <code>odoo</code> 两个服务；容器间用服务名互访；<code>PGHOST</code>、<code>PGUSER</code>、<code>PGPASSWORD</code>、<code>ODOO_DEV</code> 等环境变量直接配置 Odoo。</li>
+  <li>日常命令：<code>docker compose up -d</code>、<code>logs -f</code>、<code>exec odoo odoo ...</code>、<code>restart odoo</code>；<code>down -v</code> 会删光数据，慎用。</li>
+  <li>VS Code 调试 = 界面（VS Code）+ 执行者（Odoo 进程里的 debugpy），配置写在 <code>.vscode/launch.json</code>。</li>
+  <li>源码安装用 <code>launch</code>，Docker 用 <code>attach</code> + <code>pathMappings</code>；调试端口只绑定 <code>127.0.0.1</code>。</li>
+  <li>调试时不要开 <code>--dev=reload</code>，<code>workers</code> 保持为 0；<code>justMyCode: false</code> 才能进入 Odoo 源码。</li>
+  <li>条件断点、日志点、调试控制台能大大减少「加 print → 重启 → 再看」的循环。</li>
+</ul>
+
+<div class="exercise">
+  <h3>动手练习</h3>
+  <ol>
+    <li>按本章搭建 Docker 环境，用 <code>odoo db init</code> 建库，把第 3–4 章的 <code>library_app</code> 和 <code>library_member</code> 装进去。</li>
+    <li>把 <code>compose.yaml</code> 里的 <code>odoo:20</code> 改成 <code>odoo:19</code>，另建一个库，看看同样的模块在旧版本上能不能装（并在附录 B 里查一查报错的原因）。改回来时注意：两个版本不能共用同一个数据库。</li>
+    <li>在 <code>button_check_isbn</code> 里打一个条件断点，只有 ISBN 为空时才停下。</li>
+    <li>在图书模型的 <code>write()</code> 方法（没有的话就先重写一个，只调用 <code>super()</code>）里打断点，用 F11 进入 <code>super().write()</code>，在调用栈里找到 Odoo 检查访问权限的那一层。</li>
+    <li>在调试控制台里执行 <code>self.env.user.name</code> 和 <code>self.env.context</code>，看看当前请求是以谁的身份、带着什么上下文在运行。</li>
+  </ol>
+</div>
+<div id="pager"></div>
+</main>
+</div>
+<script src="assets/site.js"></script>
+</body>
+</html>

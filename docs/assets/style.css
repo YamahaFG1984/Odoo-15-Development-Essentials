@@ -364,6 +364,27 @@ figcaption {
   .ic { font-size: 20px; line-height: 1; margin-bottom: 6px; display: block; }
 }
 
+/* 可折叠的参考答案：先自己做，再展开对照 */
+details.answer {
+  margin: 16px 0 24px; border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--panel);
+
+  > summary {
+    cursor: pointer; padding: 10px 16px; font-weight: 700; font-size: 14px;
+    color: var(--green); list-style-position: inside;
+  }
+  &[open] > summary { border-bottom: 1px solid var(--line); }
+  > :not(summary) { margin-left: 16px; margin-right: 16px; }
+  > :last-child { margin-bottom: 16px; }
+}
+
+/* 需求卡片上的编号徽标 */
+.req {
+  display: inline-block; min-width: 2.4em; padding: 1px 8px; margin-right: 6px;
+  border-radius: 999px; font: 700 12px/1.6 var(--mono); text-align: center;
+  color: var(--accent-2); background: var(--accent-bg); border: 1px solid var(--accent);
+}
+
 /* 练习 */
 .exercise {
   border: 1px dashed var(--accent); background: var(--accent-bg);
