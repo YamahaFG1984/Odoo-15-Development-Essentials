@@ -1,0 +1,1392 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 3 章 · 第一个 Odoo 应用 — Odoo 20 开发入门</title>
+<meta name="description" content="从一个空目录开始，一步步写出图书馆模块 library_app：清单文件、用户组、测试、模型、访问规则、视图、业务逻辑和网页。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-chapter="3">
+<div id="app">
+<aside id="sidebar"></aside>
+<main>
+<span class="chapter-eyebrow">第 3 章</span>
+<h1>第一个 Odoo 应用</h1>
+<p class="lede">
+  在 Odoo 里做开发，几乎就等于「写模块」。这一章我们从一个空目录开始，写出一个图书馆应用 <code>library_app</code>。
+  它很小，但五脏俱全：模型、权限、视图、业务逻辑、网页、自动化测试全都有。后面的每一章，都是在它的基础上继续长出新功能。
+</p>
+
+<div class="goals">
+  <h4>本章目标</h4>
+  <ul>
+    <li>理解一个 Odoo 模块由哪些文件组成，学会写清单文件 <code>__manifest__.py</code></li>
+    <li>掌握「改代码 → 重启 / 升级 → 看效果」的开发循环</li>
+    <li>为应用定义用户组和访问规则（Odoo 20 的 <code>ir.access</code>）</li>
+    <li>用 Python 定义模型，用 XML 定义菜单、动作、表单、列表和搜索视图</li>
+    <li>给表单加一个按钮，调用 Python 方法；再写一个简单的网页</li>
+    <li>写自动化测试，并让它们通过</li>
+  </ul>
+</div>
+
+<div id="chapter-toc"></div>
+
+<h2 id="overview">项目概览：图书馆应用</h2>
+
+<p>我们要做一个管理图书馆的应用，第一个功能是<strong>书目</strong>：记录馆藏图书的信息。每本书有这些数据：</p>
+
+<div class="cards">
+  <div class="card"><h4>书名</h4><p>必填</p></div>
+  <div class="card"><h4>作者</h4><p>可以有多位</p></div>
+  <div class="card"><h4>出版社</h4><p>一家</p></div>
+  <div class="card"><h4>出版日期</h4><p>日期</p></div>
+  <div class="card"><h4>封面</h4><p>图片</p></div>
+  <div class="card"><h4>ISBN</h4><p>需要校验校验位</p></div>
+  <div class="card"><h4>是否有效</h4><p>无效的书不在网站上展示</p></div>
+</div>
+
+<p>和 Odoo 自带的应用一样，图书馆应用有两个用户组：</p>
+<ul>
+  <li><strong>图书馆用户（User）</strong>：负责日常操作，可以查看、新建、修改书目，但不能删除，也看不到已归档（无效）的书。</li>
+  <li><strong>图书馆经理（Manager）</strong>：拥有用户的全部权限，另外可以删除书、管理应用配置。</li>
+</ul>
+
+<p>Odoo 应用大致遵循 MVC（模型 - 视图 - 控制器）结构。这一章会依次碰到下面这些层：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 300" role="img" aria-label="library_app 模块的组成部分及其所属层次">
+  <rect class="bx-a" x="20" y="20" width="720" height="44" rx="10"/>
+  <text class="ttl on-a" x="380" y="47" text-anchor="middle">library_app 模块（一个目录 + 一个 __manifest__.py）</text>
+
+  <rect class="bx-b" x="20" y="84" width="170" height="190" rx="10"/>
+  <text class="ttl on-b" x="105" y="108" text-anchor="middle">模型层</text>
+  <text class="sm" x="105" y="130" text-anchor="middle">models/</text>
+  <text class="sm" x="105" y="150" text-anchor="middle">library.book 模型</text>
+  <text class="sm" x="105" y="170" text-anchor="middle">字段 → 数据库表</text>
+  <text class="lbl on-b" x="105" y="250" text-anchor="middle">第 4 步</text>
+
+  <rect class="bx-r" x="200" y="84" width="170" height="190" rx="10"/>
+  <text class="ttl on-r" x="285" y="108" text-anchor="middle">安全</text>
+  <text class="sm" x="285" y="130" text-anchor="middle">security/</text>
+  <text class="sm" x="285" y="150" text-anchor="middle">用户组</text>
+  <text class="sm" x="285" y="170" text-anchor="middle">ir.access 访问规则</text>
+  <text class="lbl on-r" x="285" y="250" text-anchor="middle">第 2、5 步</text>
+
+  <rect class="bx-g" x="380" y="84" width="170" height="190" rx="10"/>
+  <text class="ttl on-g" x="465" y="108" text-anchor="middle">视图层</text>
+  <text class="sm" x="465" y="130" text-anchor="middle">views/</text>
+  <text class="sm" x="465" y="150" text-anchor="middle">菜单、动作</text>
+  <text class="sm" x="465" y="170" text-anchor="middle">表单、列表、搜索</text>
+  <text class="sm" x="465" y="190" text-anchor="middle">网页模板</text>
+  <text class="lbl on-g" x="465" y="250" text-anchor="middle">第 6、8 步</text>
+
+  <rect class="bx-p" x="560" y="84" width="180" height="190" rx="10"/>
+  <text class="ttl on-p" x="650" y="108" text-anchor="middle">逻辑 / 控制器</text>
+  <text class="sm" x="650" y="130" text-anchor="middle">模型里的方法</text>
+  <text class="sm" x="650" y="150" text-anchor="middle">controllers/</text>
+  <text class="sm" x="650" y="170" text-anchor="middle">网址 → Python</text>
+  <text class="sm" x="650" y="196" text-anchor="middle">tests/ 自动化测试</text>
+  <text class="lbl on-p" x="650" y="250" text-anchor="middle">第 3、7、8 步</text>
+</svg>
+<figcaption>图 3-1　本章的八个步骤，分别落在模块的哪个目录、哪一层</figcaption>
+</figure>
+
+<h2 id="step1">第 1 步：创建模块</h2>
+
+<h3>模块和应用</h3>
+
+<p>
+  <strong>插件模块（addon module）</strong>就是一个包含 <code>__manifest__.py</code> 文件的目录，它可以添加新功能，也可以修改已有功能。
+  有些模块被标记为<strong>应用（app）</strong>：它们是某个业务领域的顶层模块，会出现在「应用」菜单里，比如 CRM、项目、人力资源。
+  非应用模块通常依赖某个应用，给它添加或修改功能。
+</p>
+
+<p>判断标准很简单：<strong>带来一整块新功能的，做成应用；只是改改已有应用的，做成普通模块。</strong>图书馆是全新的功能，所以是应用。</p>
+
+<h3>准备插件路径</h3>
+
+<p>
+  我们为图书馆项目单独建一个插件目录 <code>~/work20/library</code>，项目里的所有模块都放这里。
+  把一个大项目拆成多个小模块是好习惯：每个模块更专注，复杂度更低。
+</p>
+
+<div class="code" data-lang="bash">
+<pre>
+mkdir ~/work20/library
+source ~/work20/env20/bin/activate
+(env20) $ odoo scaffold library_app ~/work20/library
+(env20) $ odoo --addons-path="~/work20/library,~/work20/odoo/addons" \
+    -d library -c ~/work20/library.conf --save --stop
+</pre>
+</div>
+
+<ul>
+  <li><code>odoo scaffold 模块名 目录</code>：生成一个模块骨架。先 scaffold 再保存配置，是因为 Odoo 会检查插件路径里的目录是否真的有模块，空目录会报错。</li>
+  <li>第二条命令把插件路径和数据库名保存进 <code>library.conf</code>，以后用 <code>-c ~/work20/library.conf</code> 就够了。相对路径会被自动转成绝对路径保存。</li>
+</ul>
+
+<p>
+  启动日志的前几行有 <code>Using configuration file at ...</code> 和 <code>addons paths: [...]</code> 两行。
+  <strong>Odoo 找不到你的模块时，第一件事就是看这两行。</strong>
+</p>
+
+<h3>模块目录结构</h3>
+
+<p><code>scaffold</code> 生成的结构如下。这些子目录不是强制的，但是社区通用的约定，照着做别人就能一眼看懂你的模块：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 330" role="img" aria-label="Odoo 模块的标准目录结构和每个部分的作用">
+  <text class="mono ttl" x="30" y="34">library_app/</text>
+  <path class="ln" d="M40 42 V300"/>
+  <path class="ln" d="M40 62 H60"/><text class="mono" x="66" y="66">__init__.py</text>
+  <path class="ln" d="M40 90 H60"/><text class="mono on-a" x="66" y="94">__manifest__.py</text>
+  <path class="ln" d="M40 118 H60"/><text class="mono" x="66" y="122">models/</text>
+  <path class="ln" d="M40 146 H60"/><text class="mono" x="66" y="150">security/</text>
+  <path class="ln" d="M40 174 H60"/><text class="mono" x="66" y="178">views/</text>
+  <path class="ln" d="M40 202 H60"/><text class="mono" x="66" y="206">controllers/</text>
+  <path class="ln" d="M40 230 H60"/><text class="mono" x="66" y="234">data/ · demo/</text>
+  <path class="ln" d="M40 258 H60"/><text class="mono" x="66" y="262">static/description/</text>
+  <path class="ln" d="M40 300 H60"/><text class="mono" x="66" y="304">tests/</text>
+
+  <path class="ln-d" d="M210 62 H300"/><text class="lbl" x="308" y="66">让 Python 能导入这个目录；导入 models、controllers</text>
+  <path class="ln-a" d="M210 90 H300"/><text class="lbl on-a" x="308" y="94">清单文件：模块的「身份证」。有它才算模块</text>
+  <path class="ln-d" d="M210 118 H300"/><text class="lbl" x="308" y="122">Python 模型类，一个模型一个文件</text>
+  <path class="ln-d" d="M210 146 H300"/><text class="lbl" x="308" y="150">用户组（XML）和访问规则（ir.access.csv）</text>
+  <path class="ln-d" d="M210 174 H300"/><text class="lbl" x="308" y="178">菜单、动作、视图、网页模板（XML）</text>
+  <path class="ln-d" d="M210 202 H300"/><text class="lbl" x="308" y="206">网页控制器：URL → Python 方法</text>
+  <path class="ln-d" d="M210 230 H300"/><text class="lbl" x="308" y="234">初始数据 / 演示数据（XML、CSV）</text>
+  <path class="ln-d" d="M210 258 H300"/><text class="lbl" x="308" y="262">图标 icon.png、应用介绍页 index.html</text>
+  <path class="ln-d" d="M210 300 H300"/><text class="lbl" x="308" y="304">自动化测试，不需要在 __init__.py 里导入</text>
+</svg>
+<figcaption>图 3-2　模块目录的约定结构。目录名 <code>library_app</code> 就是模块的技术名</figcaption>
+</figure>
+
+<p>
+  目录名就是模块的<strong>技术名</strong>，必须是合法的 Python 标识符：字母开头，只含字母、数字、下划线。
+  一个合法的模块目录至少要有 <code>__manifest__.py</code>（描述模块）和 <code>__init__.py</code>（让 Python 能导入它）。
+  <code>__init__.py</code> 负责导入模块里的 Python 代码，每个含 Python 文件的子目录也各有一个 <code>__init__.py</code>：
+</p>
+
+<div class="code" data-lang="py" data-file="library_app/__init__.py">
+<pre>
+from . import models
+from . import controllers
+</pre>
+</div>
+
+<div class="box warn">
+  <div class="t">&#9888; scaffold 生成的权限文件是旧格式</div>
+  <p>
+    在 Odoo 20 里，<code>odoo scaffold</code> 的模板仍然会生成一个 <code>security/ir.model.access.csv</code>，
+    但 <code>ir.model.access</code> 这个模型已经不存在了，原样安装会报错。我们会在第 5 步用新的 <code>ir.access.csv</code> 替换它。
+    scaffold 生成的其他示例文件（<code>models.py</code>、<code>views.xml</code> 等）也可以删掉，我们自己从头写。
+  </p>
+</div>
+
+<h3>清单文件</h3>
+
+<p>清单文件是一个 Python 字典。下面是图书馆应用的起点：</p>
+
+<div class="code" data-lang="py" data-file="library_app/__manifest__.py">
+<pre>
+{
+    "name": "Library Management",
+    "summary": "Manage library catalog and book lending.",
+    "author": "Daniel Reis",
+    "license": "AGPL-3",
+    "website": "https://github.com/PacktPublishing/Odoo-15-Development-Essentials",
+    "version": "20.0.1.0.0",
+    "category": "Services/Library",
+    "depends": ["base"],
+    "application": True,
+}
+</pre>
+</div>
+
+<div class="tw"><table>
+  <tr><th>键</th><th>说明</th></tr>
+  <tr><td><code>name</code></td><td>模块标题</td></tr>
+  <tr><td><code>summary</code></td><td>一句话简介，显示在应用列表的标题下面</td></tr>
+  <tr><td><code>author</code></td><td>版权作者，可以用逗号分隔多个</td></tr>
+  <tr><td><code>license</code></td><td>许可证，常用 <code>AGPL-3</code>、<code>LGPL-3</code>；在 Odoo 商店售卖的专有模块一般用 <code>OPL-1</code>。不写会告警并默认为 <code>LGPL-3</code></td></tr>
+  <tr><td><code>website</code></td><td>获取更多信息的网址，比如文档或问题追踪</td></tr>
+  <tr><td><code>version</code></td><td>模块版本。惯例是在语义化版本前加 Odoo 版本：<code>20.0.1.0.0</code> 表示「给 Odoo 20.0 用的 1.0.0 版」</td></tr>
+  <tr><td><code>category</code></td><td>分类，用于在应用列表里分组，也用于组织用户组</td></tr>
+  <tr><td><code>depends</code></td><td>依赖的模块列表。安装本模块会先安装它们</td></tr>
+  <tr><td><code>application</code></td><td>是否作为「应用」显示在应用列表里</td></tr>
+  <tr><td><code>installable</code></td><td>是否可安装，默认 <code>True</code>。设为 <code>False</code> 可以临时禁用模块但保留文件</td></tr>
+  <tr><td><code>auto_install</code></td><td>设为 <code>True</code> 时，一旦依赖全部装好就自动安装。用于连接两个应用的「胶水模块」</td></tr>
+</table></div>
+
+<div class="box warn">
+  <div class="t">&#9888; 依赖一定要写全</div>
+  <p>
+    如果你用到了某个模块的东西却没写进 <code>depends</code>，在你自己的库里可能碰巧能用（因为那个模块恰好已经装了、恰好先加载了），
+    换一台机器、换一个干净的数据库就会安装失败或加载报错。这类问题非常难排查，宁可多写也不要漏写。
+  </p>
+</div>
+
+<h3>模块分类</h3>
+
+<p>
+  <code>category</code> 可以有层级，用 <code>/</code> 分隔，比如项目应用属于 <code>Services/Project</code>。
+  如果写了一个不存在的分类，Odoo 会自动创建它。我们利用这一点，创建 <code>Services/Library</code> 分类。
+</p>
+
+<p>
+  分类在后面定义用户组时还要被引用，所以需要知道它的<strong>外部标识符（XML ID）</strong>。自动生成的规则是：
+  <code>base.module_category_</code> 加上分类路径（小写、空格变下划线、斜杠变下划线）。
+  所以 <code>Services/Library</code> 的 XML ID 是 <code>base.module_category_services_library</code>。
+  Odoo 自带的分类列表可以在源码 <code>odoo/addons/base/data/ir_module_category_data.xml</code> 里查到。
+</p>
+
+<h3>描述和图标</h3>
+
+<p>
+  长描述可以写在清单的 <code>description</code> 键里（支持 reStructuredText 格式），也可以在模块根目录放一个 <code>README.rst</code> 或 <code>README.md</code>。
+  在应用商店发布的模块常用 <code>static/description/index.html</code> 做一个图文介绍页。
+  注意：<code>application</code> 为 <code>True</code> 的模块只使用 <code>index.html</code>，忽略 <code>description</code> 键。
+</p>
+
+<p>应用需要一个图标，放在 <code>static/description/icon.png</code>。我们先借用一个 Odoo 自带应用的图标：</p>
+
+<div class="code" data-lang="bash">
+<pre>
+cd ~/work20/library/library_app
+mkdir -p static/description
+cp ~/work20/odoo/addons/maintenance/static/description/icon.png static/description/
+</pre>
+</div>
+
+<h3>安装模块</h3>
+
+<p>
+  现在模块虽然什么功能都没有，但已经可以安装了。启动服务器时用 <code>-i</code>（<code>--init</code>）指定要安装的模块：
+</p>
+
+<div class="code" data-lang="bash">
+<pre>
+(env20) $ odoo -c ~/work20/library.conf -d library -i library_app
+</pre>
+</div>
+
+<p>
+  即使配置文件里已经写了数据库，也建议在命令行再写一次 <code>-d library</code>，免得装错库。
+  安装新模块时，Odoo 会自动刷新可用模块列表，不需要先去界面上点「更新应用列表」。
+</p>
+
+<h3>开发循环：重启还是升级？</h3>
+
+<p>开发是一个反复迭代的过程：改代码 → 让 Odoo 用上新代码 → 看效果。关键是要知道每种修改需要做什么：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 290" role="img" aria-label="不同类型的修改需要重启服务器还是升级模块">
+  <text class="ttl" x="20" y="28">你改了什么？</text>
+  <rect class="bx" x="20" y="44" width="230" height="56" rx="10"/>
+  <text class="lbl" x="135" y="68" text-anchor="middle">Python 逻辑代码</text>
+  <text class="sm" x="135" y="88" text-anchor="middle">方法里的实现</text>
+  <rect class="bx" x="20" y="116" width="230" height="56" rx="10"/>
+  <text class="lbl" x="135" y="140" text-anchor="middle">模型结构</text>
+  <text class="sm" x="135" y="160" text-anchor="middle">新模型、新字段、字段属性</text>
+  <rect class="bx" x="20" y="188" width="230" height="56" rx="10"/>
+  <text class="lbl" x="135" y="212" text-anchor="middle">XML / CSV 数据文件</text>
+  <text class="sm" x="135" y="232" text-anchor="middle">视图、菜单、权限、数据</text>
+
+  <rect class="bx-b" x="330" y="44" width="180" height="56" rx="10"/>
+  <text class="ttl on-b" x="420" y="68" text-anchor="middle">重启服务器</text>
+  <text class="sm" x="420" y="88" text-anchor="middle">重新加载 Python 代码</text>
+  <rect class="bx-a" x="330" y="152" width="180" height="56" rx="10"/>
+  <text class="ttl on-a" x="420" y="176" text-anchor="middle">升级模块 -u</text>
+  <text class="sm" x="420" y="196" text-anchor="middle">更新表结构、重载数据</text>
+
+  <path class="ln-b" d="M252 72 H326" marker-end="url(#ar-b)"/>
+  <path class="ln-a" d="M252 144 L326 172" marker-end="url(#ar-a)"/>
+  <path class="ln-a" d="M252 216 L326 188" marker-end="url(#ar-a)"/>
+  <path class="ln-b" d="M252 140 L326 90" marker-end="url(#ar-b)"/>
+
+  <rect class="bx-g" x="560" y="80" width="180" height="100" rx="10"/>
+  <text class="ttl on-g" x="650" y="108" text-anchor="middle">最省心的做法</text>
+  <text class="sm" x="650" y="130" text-anchor="middle">每次都「重启 + 升级」</text>
+  <text class="sm mono" x="650" y="152" text-anchor="middle">Ctrl+C → ↑ → Enter</text>
+  <text class="sm" x="650" y="170" text-anchor="middle">命令里带着 -u 模块名</text>
+  <path class="ln-d" d="M512 100 L556 120"/>
+  <path class="ln-d" d="M512 172 L556 150"/>
+
+  <text class="sm" x="20" y="272">改模型结构时两样都要：先让新 Python 代码加载（重启），再让 ORM 按新定义更新数据库（升级）</text>
+</svg>
+<figcaption>图 3-3　什么时候重启、什么时候升级</figcaption>
+</figure>
+
+<div class="code" data-lang="bash">
+<pre>
+# 最常用的一条命令：重启服务器，同时升级 library_app
+(env20) $ odoo -c ~/work20/library.conf -d library -u library_app
+</pre>
+</div>
+
+<p>
+  <code>-u</code>（<code>--update</code>）接受逗号分隔的模块列表，比如 <code>-u library_app,mail</code>。
+  升级一个模块时，所有<strong>依赖它的</strong>已安装模块也会跟着升级。
+  也可以在网页的「应用」里找到模块点「升级」，但那样不会重新加载 Python 代码。
+  第 2 章介绍的 <code>--dev=all</code> 能省掉一部分重复操作：Python 改动自动重载，视图改动直接从文件读取。
+</p>
+
+<h2 id="step2">第 2 步：创建应用的骨架</h2>
+
+<p>一个「应用」通常应该具备三样东西：</p>
+<ul>
+  <li><strong>图标</strong>：<code>static/description/icon.png</code>，刚才已经放好了。</li>
+  <li><strong>顶级菜单</strong>：应用的所有菜单都挂在它下面。</li>
+  <li><strong>用户组</strong>：只有需要它的用户才能用，访问权限也授予这些组。</li>
+</ul>
+
+<h3>顶级菜单</h3>
+
+<p>菜单是用 XML <strong>数据文件</strong>定义的。新建 <code>views/library_menu.xml</code>：</p>
+
+<div class="code" data-lang="xml" data-file="library_app/views/library_menu.xml">
+<pre>
+&lt;odoo&gt;
+    &lt;!-- 图书馆应用的顶级菜单 --&gt;
+    &lt;menuitem id="menu_library"
+              name="Library"
+              web_icon="library_app,static/description/icon.png"/&gt;
+&lt;/odoo&gt;
+</pre>
+</div>
+
+<p>
+  菜单、动作、视图这些界面元素，其实都是<strong>存放在数据库里的记录</strong>，Web 客户端实时读取并解释它们。
+  上面的文件描述的就是「要写进数据库的记录」：<code>&lt;menuitem&gt;</code> 是一种快捷写法，表示在菜单模型 <code>ir.ui.menu</code> 上写一条记录。
+</p>
+
+<p>
+  <code>id</code> 属性叫做 <strong>XML ID</strong>（外部标识符），用来唯一标识这条数据，让别的元素能引用它。
+  比如稍后添加的子菜单要指定父菜单，就写 <code>parent="menu_library"</code>。
+  <code>web_icon</code> 指定主菜单（应用切换器）里显示的图标，格式是「模块名,文件路径」。
+</p>
+
+<p>Odoo 不会自动发现这个文件，必须在清单的 <code>data</code> 键里声明：</p>
+
+<div class="code" data-lang="py" data-file="__manifest__.py（片段）">
+<pre>
+    "data": [
+        "views/library_menu.xml",
+    ],
+</pre>
+</div>
+
+<p>
+  <code>data</code> 是一个列表，列出模块安装或升级时要加载的数据文件，路径相对于模块根目录。
+  现在升级模块不会看到任何变化：<strong>菜单只有在它下面有可见的子菜单时才显示</strong>，而子菜单只有在用户有权访问对应模型时才显示。
+</p>
+
+<h3>用户组</h3>
+
+<p>
+  权限是授予用户组的，用户再被分配到组里。安全相关的文件惯例放在 <code>security/</code> 目录。
+  在 Odoo 20 里，一个应用的用户组是这样组织的：
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 300" role="img" aria-label="Odoo 20 中模块分类、权限作用域和用户组的层次关系">
+  <rect class="bx" x="20" y="20" width="294" height="64" rx="10"/>
+  <text class="ttl" x="167" y="44" text-anchor="middle">模块分类 ir.module.category</text>
+  <text class="sm mono" x="167" y="66" text-anchor="middle">base.module_category_services_library</text>
+
+  <rect class="bx-p" x="20" y="118" width="294" height="64" rx="10"/>
+  <text class="ttl on-p" x="167" y="142" text-anchor="middle">作用域 res.groups.privilege</text>
+  <text class="sm mono" x="167" y="164" text-anchor="middle">privilege_library「Library」</text>
+  <path class="ln" d="M167 116 V88" marker-end="url(#ar)"/>
+  <text class="sm" x="174" y="106">category_id</text>
+
+  <rect class="bx-a" x="340" y="118" width="190" height="64" rx="10"/>
+  <text class="ttl on-a" x="435" y="142" text-anchor="middle">Manager</text>
+  <text class="sm mono" x="435" y="164" text-anchor="middle">library_group_manager</text>
+
+  <rect class="bx-a" x="340" y="216" width="190" height="64" rx="10"/>
+  <text class="ttl on-a" x="435" y="240" text-anchor="middle">User</text>
+  <text class="sm mono" x="435" y="262" text-anchor="middle">library_group_user</text>
+
+  <rect class="bx-b" x="580" y="216" width="160" height="64" rx="10"/>
+  <text class="ttl on-b" x="660" y="240" text-anchor="middle">Role / User</text>
+  <text class="sm mono" x="660" y="262" text-anchor="middle">base.group_user</text>
+
+  <path class="ln-p" d="M338 150 H318" marker-end="url(#ar-p)"/>
+  <path class="ln-p" d="M338 240 L300 186" marker-end="url(#ar-p)"/>
+  <text class="sm on-p" x="230" y="226">privilege_id</text>
+
+  <path class="ln-a" d="M435 184 V212" marker-end="url(#ar-a)"/>
+  <text class="sm on-a" x="444" y="203">implied_ids</text>
+  <path class="ln-b" d="M532 248 H576" marker-end="url(#ar-b)"/>
+  <text class="sm on-b" x="534" y="238">implied_ids</text>
+
+  <rect class="bx-d" x="580" y="118" width="160" height="64" rx="10"/>
+  <text class="sm" x="660" y="142" text-anchor="middle">admin、OdooBot</text>
+  <text class="sm" x="660" y="162" text-anchor="middle">默认放进经理组</text>
+  <path class="ln-d" d="M578 150 H534" marker-end="url(#ar)"/>
+  <text class="sm" x="556" y="112">user_ids</text>
+</svg>
+<figcaption>图 3-4　分类 → 作用域 → 组。经理组隐含用户组，用户组隐含内部用户组，权限一路继承</figcaption>
+</figure>
+
+<div class="box ver">
+  <div class="t">&#8682; 用户组的写法变了</div>
+  <p>
+    书里直接给组设置 <code>category_id</code>（应用分类）；Odoo 19 起中间多了一层<strong>作用域</strong>（<code>res.groups.privilege</code>），
+    组通过 <code>privilege_id</code> 挂到作用域上，作用域再通过 <code>category_id</code> 挂到分类上。
+    另外，组的成员字段从 <code>users</code> 改名为 <code>user_ids</code>，用户的组字段从 <code>groups_id</code> 改名为 <code>group_ids</code>。
+  </p>
+</div>
+
+<p>新建 <code>security/library_security.xml</code>：</p>
+
+<div class="code" data-lang="xml" data-file="library_app/security/library_security.xml">
+<pre>
+&lt;odoo&gt;
+    &lt;!-- 作用域：在用户表单的「访问权限」页里，图书馆的组会归在这一栏下 --&gt;
+    &lt;record id="privilege_library" model="res.groups.privilege"&gt;
+        &lt;field name="name"&gt;Library&lt;/field&gt;
+        &lt;field name="category_id" ref="base.module_category_services_library"/&gt;
+    &lt;/record&gt;
+
+    &lt;!-- 图书馆用户组 --&gt;
+    &lt;record id="library_group_user" model="res.groups"&gt;
+        &lt;field name="name"&gt;User&lt;/field&gt;
+        &lt;field name="privilege_id" ref="privilege_library"/&gt;
+        &lt;field name="implied_ids" eval="[Command.link(ref('base.group_user'))]"/&gt;
+    &lt;/record&gt;
+
+    &lt;!-- 图书馆经理组 --&gt;
+    &lt;record id="library_group_manager" model="res.groups"&gt;
+        &lt;field name="name"&gt;Manager&lt;/field&gt;
+        &lt;field name="privilege_id" ref="privilege_library"/&gt;
+        &lt;field name="implied_ids" eval="[Command.link(ref('library_group_user'))]"/&gt;
+        &lt;field name="user_ids" eval="[Command.link(ref('base.user_root')),
+                                      Command.link(ref('base.user_admin'))]"/&gt;
+    &lt;/record&gt;
+&lt;/odoo&gt;
+</pre>
+</div>
+
+<p>这里信息量不小，逐个来看：</p>
+<ul>
+  <li><code>&lt;record model="..." id="..."&gt;</code>：在指定模型上创建一条记录，并给它一个 XML ID。里面每个 <code>&lt;field&gt;</code> 是一个字段的值。</li>
+  <li><code>name</code>：普通文本值，直接写在标签中间。</li>
+  <li><code>ref="..."</code>：关系字段的值，通过 XML ID 引用另一条记录。</li>
+  <li><code>eval="..."</code>：把属性值当作 Python 表达式求值。<code>implied_ids</code> 和 <code>user_ids</code> 是「对多」关系字段，要用特殊的命令语法写入。
+      <code>Command.link(id)</code> 表示「把这条记录加进去」，书里写作等价的旧式元组 <code>(4, id)</code>。第 5、6 章会详细讲。</li>
+  <li><code>base.user_root</code> 是超级用户 OdooBot，<code>base.user_admin</code> 是默认管理员。我们把他们放进经理组，这样安装后管理员立刻就能用。</li>
+</ul>
+
+<p>最后在清单里声明这个文件，<strong>放在菜单文件之前</strong>：</p>
+
+<div class="code" data-lang="py" data-file="__manifest__.py（片段）">
+<pre>
+    "data": [
+        "security/library_security.xml",
+        "views/library_menu.xml",
+    ],
+</pre>
+</div>
+
+<div class="box key">
+  <div class="t">&#9733; data 列表的顺序很重要</div>
+  <p>
+    数据文件按列表顺序依次加载，<strong>只能引用已经加载过的 XML ID</strong>。菜单和视图经常要引用用户组，
+    所以惯例是：安全文件在前，视图在中间，菜单在最后（菜单要引用动作，动作要先定义）。
+  </p>
+</div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 170" role="img" aria-label="数据文件按清单顺序加载，后面的文件可以引用前面文件定义的 ID">
+  <rect class="bx-r" x="20" y="40" width="160" height="56" rx="10"/>
+  <text class="lbl on-r" x="100" y="64" text-anchor="middle">library_security.xml</text>
+  <text class="sm" x="100" y="84" text-anchor="middle">定义组</text>
+  <rect class="bx-r" x="210" y="40" width="160" height="56" rx="10"/>
+  <text class="lbl on-r" x="290" y="64" text-anchor="middle">ir.access.csv</text>
+  <text class="sm" x="290" y="84" text-anchor="middle">引用组</text>
+  <rect class="bx-g" x="400" y="40" width="160" height="56" rx="10"/>
+  <text class="lbl on-g" x="480" y="64" text-anchor="middle">book_view.xml</text>
+  <text class="sm" x="480" y="84" text-anchor="middle">定义视图</text>
+  <rect class="bx-p" x="590" y="40" width="150" height="56" rx="10"/>
+  <text class="lbl on-p" x="665" y="64" text-anchor="middle">library_menu.xml</text>
+  <text class="sm" x="665" y="84" text-anchor="middle">定义动作和菜单</text>
+  <path class="ln" d="M182 68 H206" marker-end="url(#ar)"/>
+  <path class="ln" d="M372 68 H396" marker-end="url(#ar)"/>
+  <path class="ln" d="M562 68 H586" marker-end="url(#ar)"/>
+  <text class="sm" x="20" y="26">加载顺序 →</text>
+  <path class="ln-a" d="M290 100 C290 140, 100 140, 100 100" marker-end="url(#ar-a)"/>
+  <text class="sm on-a" x="195" y="150" text-anchor="middle">向前引用：OK</text>
+  <text class="sm on-r" x="560" y="150">反过来引用后面才定义的 ID：报错</text>
+</svg>
+<figcaption>图 3-5　每个文件只能引用在它之前加载的 ID</figcaption>
+</figure>
+
+<h2 id="step3">第 3 步：先写测试</h2>
+
+<p>
+  好的编程习惯包括给代码写自动化测试。对 Python 这种没有编译步骤的动态语言尤其重要：不运行，你甚至不知道有没有拼写错误。
+  <strong>测试驱动开发（TDD）</strong>主张先写测试、看它失败、再写功能让它通过。我们也这样做：在写模型之前，先写好测试。
+</p>
+
+<p>Odoo 的测试基于 Python 自带的 <code>unittest</code>，有几条规则：</p>
+<ol>
+  <li>测试放在模块的 <code>tests/</code> 子目录里。它<strong>不需要</strong>在模块顶层的 <code>__init__.py</code> 里导入，测试运行器会自己去找。</li>
+  <li>测试文件名以 <code>test_</code> 开头，并在 <code>tests/__init__.py</code> 里导入。</li>
+  <li>测试写在继承自 Odoo 测试基类的类里，最常用的是 <code>TransactionCase</code>。每个以 <code>test_</code> 开头的方法是一个测试用例。</li>
+  <li><code>TransactionCase</code> 中，每个测试用例在独立的事务里运行，结束后<strong>回滚</strong>。所以一个测试做的修改，下一个测试看不到。</li>
+</ol>
+
+<div class="code" data-lang="py" data-file="library_app/tests/__init__.py">
+<pre>
+from . import test_book
+</pre>
+</div>
+
+<div class="code" data-lang="py" data-file="library_app/tests/test_book.py">
+<pre>
+from odoo.tests import TransactionCase
+
+
+class TestBook(TransactionCase):
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        # 用管理员身份运行测试，这样才会检查访问权限
+        user_admin = cls.env.ref("base.user_admin")
+        cls.env = cls.env(user=user_admin)
+        cls.Book = cls.env["library.book"]
+        cls.book1 = cls.Book.create({
+            "name": "Odoo Development Essentials",
+            "isbn": "879-1-78439-279-6",
+        })
+
+    def test_book_create(self):
+        "新建的书默认是有效的"
+        self.assertEqual(self.book1.active, True)
+
+    def test_check_isbn(self):
+        "检查一个合法的 ISBN"
+        self.assertTrue(self.book1._check_isbn())
+</pre>
+</div>
+
+<ul>
+  <li><code>setUpClass()</code> 在整个测试类开始前运行一次，准备测试数据。每个测试用例都能使用 <code>cls.book1</code>，结束后改动会被回滚。</li>
+  <li>测试默认以内部的系统用户运行，它会<strong>绕过权限检查</strong>。为了顺便验证权限配置是否正确，我们用 <code>cls.env(user=...)</code> 把运行身份换成管理员。<code>env.ref()</code> 根据 XML ID 找到记录。</li>
+  <li><code>test_check_isbn</code> 测试一个还不存在的方法 <code>_check_isbn()</code>，它稍后会在第 7 步实现。</li>
+</ul>
+
+<div class="box ver">
+  <div class="t">&#8682; 和书上代码的区别</div>
+  <p>
+    书里在 <code>setUp()</code>（每个测试前都运行）里准备数据，现在更推荐用只运行一次的类方法 <code>setUpClass()</code>，测试更快。
+    另外，书中 <code>test_check_isbn</code> 写的是 <code>self.assertTrue(self.book1._check_isbn)</code>，少了一对括号 ——
+    它检查的是「方法对象」本身，永远为真，等于什么也没测。这里已改正。
+  </p>
+</div>
+
+<div class="box tip">
+  <div class="t">&#128161; 不要依赖演示数据</div>
+  <p>测试可以用演示数据省事，但那样它就只能在装了演示数据的库里跑。在测试里自己准备全部数据，测试才能在任何库（包括生产库的副本）上运行。</p>
+</div>
+
+<p>运行测试：升级模块时加上 <code>--test-enable</code>：</p>
+
+<div class="code" data-lang="bash">
+<pre>
+(env20) $ odoo -c ~/work20/library.conf -d library -u library_app --test-enable --stop
+</pre>
+</div>
+
+<p>现在测试必然失败（日志里会有 ERROR），因为 <code>library.book</code> 模型还不存在。这正是 TDD 的第一步。</p>
+
+<h2 id="step4">第 4 步：模型层</h2>
+
+<p>
+  <strong>模型</strong>描述并存储业务对象的数据，比如一个 CRM 商机、一张销售订单、一个合作伙伴。
+  模型由一个继承自 Odoo 基类的 Python 类定义，ORM 负责让数据库结构和类定义保持一致，并把你的各种操作翻译成 SQL。
+</p>
+
+<p>按照约定，模型代码放在 <code>models/</code> 目录，<strong>一个模型一个文件</strong>：</p>
+
+<div class="code" data-lang="py" data-file="library_app/models/__init__.py">
+<pre>
+from . import library_book
+</pre>
+</div>
+
+<div class="code" data-lang="py" data-file="library_app/models/library_book.py">
+<pre>
+from odoo import fields, models
+
+
+class LibraryBook(models.Model):
+    _name = "library.book"
+    _description = "Book"
+
+    name = fields.Char("Title", required=True)
+    isbn = fields.Char("ISBN")
+    active = fields.Boolean("Active?", default=True)
+    date_published = fields.Date()
+    image = fields.Binary("Cover")
+    publisher_id = fields.Many2one("res.partner", string="Publisher")
+    author_ids = fields.Many2many("res.partner", string="Authors")
+</pre>
+</div>
+
+<ul>
+  <li><code>from odoo import fields, models</code>：导入 Odoo 的模型和字段。</li>
+  <li><code>class LibraryBook(models.Model)</code>：定义一个模型类。<strong>类名对 Odoo 来说无所谓</strong>，真正起作用的是 <code>_name</code>。</li>
+  <li><code>_name</code>：模型的唯一标识，全系统都用它来引用这个模型。模型名用<strong>点</strong>分隔单词。</li>
+  <li><code>_description</code>：模型的可读名称，在一些提示消息里会用到。不写会在日志里产生警告。</li>
+  <li>后面七行是字段。第一个参数是字段在界面上的<strong>标签</strong>；不写的话，Odoo 会根据字段名自动生成（<code>date_published</code> → 「Date Published」）。</li>
+</ul>
+
+<div class="box tip">
+  <div class="t">&#128161; 命名规则一句话</div>
+  <p>
+    <strong>模型名用点</strong>（<code>library.book</code>），<strong>其他一切用下划线</strong>：模块名、XML ID、数据库表名、字段名……
+    多对一字段名以 <code>_id</code> 结尾，对多字段名以 <code>_ids</code> 结尾。
+  </p>
+</div>
+
+<h3>模型如何对应到数据库</h3>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 330" role="img" aria-label="library.book 模型映射成数据库表，多对一字段成为外键，多对多字段使用中间表">
+  <rect class="bx-a" x="20" y="20" width="250" height="200" rx="10"/>
+  <text class="ttl on-a" x="145" y="44" text-anchor="middle">Python：library.book</text>
+  <text class="sm mono" x="36" y="72">name = Char</text>
+  <text class="sm mono" x="36" y="94">isbn = Char</text>
+  <text class="sm mono" x="36" y="116">active = Boolean</text>
+  <text class="sm mono" x="36" y="138">date_published = Date</text>
+  <text class="sm mono" x="36" y="160">image = Binary</text>
+  <text class="sm mono on-b" x="36" y="182">publisher_id = Many2one</text>
+  <text class="sm mono on-p" x="36" y="204">author_ids = Many2many</text>
+
+  <path class="ln-a" d="M272 110 H330" marker-end="url(#ar-a)"/>
+  <text class="sm" x="300" y="100" text-anchor="middle">ORM</text>
+
+  <rect class="bx-b" x="336" y="20" width="200" height="200" rx="10"/>
+  <text class="ttl on-b" x="436" y="44" text-anchor="middle">表 library_book</text>
+  <text class="sm mono" x="352" y="72">id（主键，自动）</text>
+  <text class="sm mono" x="352" y="94">name · isbn · active</text>
+  <text class="sm mono" x="352" y="116">date_published</text>
+  <text class="sm mono on-b" x="352" y="138">publisher_id → 外键</text>
+  <text class="sm mono" x="352" y="160">create_uid · create_date</text>
+  <text class="sm mono" x="352" y="182">write_uid · write_date</text>
+  <text class="sm" x="352" y="206">（image 存在 filestore）</text>
+
+  <rect class="bx" x="586" y="20" width="154" height="90" rx="10"/>
+  <text class="ttl" x="663" y="44" text-anchor="middle">res_partner</text>
+  <text class="sm" x="663" y="68" text-anchor="middle">出版社和作者</text>
+  <text class="sm" x="663" y="88" text-anchor="middle">都是联系人</text>
+  <path class="ln-b" d="M538 134 L584 80" marker-end="url(#ar-b)"/>
+
+  <rect class="bx-p" x="336" y="250" width="404" height="60" rx="10"/>
+  <text class="ttl on-p" x="538" y="274" text-anchor="middle">中间表 library_book_res_partner_rel</text>
+  <text class="sm mono" x="538" y="296" text-anchor="middle">library_book_id | res_partner_id</text>
+  <path class="ln-p" d="M272 200 L332 268" marker-end="url(#ar-p)"/>
+  <path class="ln-p" d="M663 248 V112" marker-end="url(#ar-p)"/>
+</svg>
+<figcaption>图 3-6　一个模型 = 一张表；多对一 = 一个外键列；多对多 = 一张额外的中间表</figcaption>
+</figure>
+
+<p>这几个字段展示了最常用的字段类型：</p>
+<ul>
+  <li>标量字段：<code>Char</code>（文本）、<code>Boolean</code>（布尔）、<code>Date</code>（日期）、<code>Binary</code>（二进制，这里存封面图片）。</li>
+  <li><code>publisher_id</code> 是<strong>多对一</strong>（Many2one）关系，在数据库里就是一个外键：每本书指向一个出版社。</li>
+  <li><code>author_ids</code> 是<strong>多对多</strong>（Many2many）关系：一本书可以有多位作者，一位作者可以写多本书。它不是表里的一列，而是 ORM 自动创建的一张中间表。</li>
+  <li>出版社和作者都用了 Odoo 内置的<strong>联系人</strong>模型 <code>res.partner</code> —— 人、公司、地址都存在这里。</li>
+</ul>
+
+<div class="box key">
+  <div class="t">&#9733; 两个特殊字段名</div>
+  <ul>
+    <li><code>name</code>：默认用作记录的<strong>显示名称</strong> —— 别的模型引用这本书时，显示的就是它的 name。</li>
+    <li><code>active</code>：为 <code>False</code> 的记录被视为「已归档」，默认在界面和搜索中<strong>自动隐藏</strong>。适合那些不再使用、但为了历史记录不能删除的数据。</li>
+  </ul>
+</div>
+
+<p>升级模块后，可以在 <strong>设置 → 技术 → 数据库结构 → 模型</strong>里搜索 <code>library.book</code>，确认字段都建好了。还会看到几个我们没写的字段：</p>
+
+<dl class="terms">
+  <dt><code>id</code></dt><dd>每条记录唯一的数字 ID</dd>
+  <dt><code>create_uid</code> / <code>create_date</code></dt><dd>创建人、创建时间</dd>
+  <dt><code>write_uid</code> / <code>write_date</code></dt><dd>最后修改人、最后修改时间</dd>
+  <dt><code>display_name</code></dt><dd>记录的文本表示，计算字段，默认取 <code>name</code> 的值</dd>
+</dl>
+
+<h2 id="step5">第 5 步：访问权限</h2>
+
+<p>
+  模型建好了，但它还没有任何访问规则，所以<strong>谁都用不了它</strong>（包括管理员）。
+  这时候运行测试，<code>test_book_create</code> 会因为 <code>AccessError</code> 失败 —— 这正说明我们把测试切换到管理员身份是有意义的。
+  接下来把模型授权给刚才创建的两个组。
+</p>
+
+<div class="box ver">
+  <div class="t">&#8682; 少了一条提醒</div>
+  <p>
+    Odoo 15 在模型缺少访问规则时，会在日志里打印 <code>The model library.book has no access rules, consider adding one.</code>。
+    Odoo 20 不再输出这条警告，所以新建模型后要记得自己补上访问规则。
+  </p>
+</div>
+
+<h3>用 ir.access.csv 定义访问规则</h3>
+
+<p>
+  访问规则是 <code>ir.access</code> 模型上的记录，最方便的写法是 CSV 文件。<strong>CSV 数据文件的文件名必须等于要导入的模型名</strong>，
+  所以文件叫 <code>security/ir.access.csv</code>：
+</p>
+
+<div class="code" data-lang="csv" data-file="library_app/security/ir.access.csv">
+<pre>
+id,name,model_id,group_id/id,operation,domain
+access_book_user,Book: user,library.book,library_group_user,cru,"[('active', '=', True)]"
+access_book_manager,Book: manager,library.book,library_group_manager,crud,
+</pre>
+</div>
+
+<div class="tw"><table>
+  <tr><th>列</th><th>含义</th></tr>
+  <tr><td><code>id</code></td><td>这条记录的 XML ID，在本模块内唯一</td></tr>
+  <tr><td><code>name</code></td><td>描述性名称，建议唯一，方便在界面上辨认</td></tr>
+  <tr><td><code>model_id</code></td><td>作用于哪个模型，直接写模型名</td></tr>
+  <tr><td><code>group_id/id</code></td><td>授予哪个组，写组的 XML ID（<code>/id</code> 后缀表示「按 XML ID 引用」）。<strong>留空表示这是一条对所有人生效的「限制」</strong></td></tr>
+  <tr><td><code>operation</code></td><td>允许的操作，由 <code>c</code>（创建）、<code>r</code>（读）、<code>u</code>（改）、<code>d</code>（删）组合而成，按 crud 的顺序书写</td></tr>
+  <tr><td><code>domain</code></td><td>可选。只对满足这个域的记录允许上述操作；留空表示全部记录</td></tr>
+</table></div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 270" role="img" aria-label="图书馆用户与经理对有效书和已归档书的权限">
+  <rect class="bx-d" x="250" y="20" width="230" height="44" rx="8"/>
+  <text class="ttl" x="365" y="47" text-anchor="middle">有效的书（active=True）</text>
+  <rect class="bx-d" x="500" y="20" width="240" height="44" rx="8"/>
+  <text class="ttl" x="620" y="47" text-anchor="middle">已归档的书（active=False）</text>
+
+  <rect class="bx-a" x="20" y="84" width="210" height="70" rx="10"/>
+  <text class="ttl on-a" x="125" y="110" text-anchor="middle">图书馆用户</text>
+  <text class="sm mono" x="125" y="132" text-anchor="middle">access_book_user</text>
+
+  <rect class="bx-g" x="250" y="84" width="230" height="70" rx="10"/>
+  <text class="ttl on-g" x="365" y="112" text-anchor="middle">创建 · 读 · 改</text>
+  <text class="sm" x="365" y="134" text-anchor="middle">不能删</text>
+  <rect class="bx-r" x="500" y="84" width="240" height="70" rx="10"/>
+  <text class="ttl on-r" x="620" y="112" text-anchor="middle">看不到</text>
+  <text class="sm" x="620" y="134" text-anchor="middle">域把它们排除了</text>
+
+  <rect class="bx-a" x="20" y="174" width="210" height="70" rx="10"/>
+  <text class="ttl on-a" x="125" y="200" text-anchor="middle">图书馆经理</text>
+  <text class="sm" x="125" y="222" text-anchor="middle">许可之间是「或」：命中任意一条即可</text>
+
+  <rect class="bx-g" x="250" y="174" width="490" height="70" rx="10"/>
+  <text class="ttl on-g" x="495" y="202" text-anchor="middle">创建 · 读 · 改 · 删，全部记录</text>
+  <text class="sm" x="495" y="224" text-anchor="middle">经理也是用户（隐含），两条许可取「或」，结果就是不受限的那条</text>
+</svg>
+<figcaption>图 3-7　两条许可规则叠加后的效果</figcaption>
+</figure>
+
+<div class="box ver">
+  <div class="t">&#8682; 一个文件代替两套机制</div>
+  <p>书里用了两样东西来实现同样的效果：</p>
+  <ul>
+    <li><code>security/ir.model.access.csv</code>：列是 <code>perm_read,perm_write,perm_create,perm_unlink</code>，用 1/0 表示允许与否 —— 这是<strong>模型级</strong>权限；</li>
+    <li>XML 里的 <code>ir.rule</code> 记录，用 <code>domain_force</code> 限制「用户只能看有效的书」—— 这是<strong>记录级</strong>规则。</li>
+  </ul>
+  <p>
+    Odoo 20 把它们合并成了 <code>ir.access</code>，上面两行 CSV 就完整表达了书里的全部意图。
+    Odoo 自带的升级工具 <code>odoo-bin upgrade_code</code> 有一个脚本 <code>19.4-00-ir-access.py</code>，可以把旧的两套配置自动转换成新格式。
+  </p>
+</div>
+
+<p>别忘了在清单里声明它（放在组定义之后）：</p>
+
+<div class="code" data-lang="py" data-file="__manifest__.py（片段）">
+<pre>
+    "data": [
+        "security/library_security.xml",
+        "security/ir.access.csv",
+        "views/library_menu.xml",
+    ],
+</pre>
+</div>
+
+<p>升级模块，警告消失。再跑一次测试，<code>test_book_create</code> 应该通过了，<code>test_check_isbn</code> 仍然失败（方法还没写）。</p>
+
+<div class="box tip">
+  <div class="t">&#128161; 也可以用 XML 写访问规则</div>
+  <p>当规则需要比较长的域，或者希望它在升级时不被覆盖（<code>noupdate="1"</code>，第 5 章讲）时，用 XML 写更方便：</p>
+  <div class="code" data-lang="xml"><pre>
+&lt;record id="access_book_user" model="ir.access"&gt;
+    &lt;field name="name"&gt;Book: user&lt;/field&gt;
+    &lt;field name="model_id" ref="model_library_book"/&gt;
+    &lt;field name="group_id" ref="library_group_user"/&gt;
+    &lt;field name="operation"&gt;cru&lt;/field&gt;
+    &lt;field name="domain"&gt;[('active', '=', True)]&lt;/field&gt;
+&lt;/record&gt;
+</pre></div>
+  <p>这里 <code>model_library_book</code> 是 ORM 为每个模型自动生成的 XML ID：<code>model_</code> + 模型名（点换成下划线）。</p>
+</div>
+
+<h2 id="step6">第 6 步：视图层</h2>
+
+<p>
+  视图层描述用户界面。视图用 XML 定义，Web 客户端根据它动态生成页面。菜单项执行窗口动作，窗口动作再渲染视图 —— 第 1 章已经在界面上见过这个链条，现在用代码来写。
+</p>
+
+<div class="box tip">
+  <div class="t">&#128161; 升级时 XML 报错别慌</div>
+  <p>
+    仔细读服务器日志里的错误信息，它通常会指出出错的文件和行。实在找不到，就把最近改的 XML 注释掉，或者暂时从清单的 <code>data</code> 里拿掉那个文件，
+    先让服务器能启动起来，再逐步排查。
+  </p>
+</div>
+
+<h3>菜单和窗口动作</h3>
+
+<p>在 <code>views/library_menu.xml</code> 里，顶级菜单下面添加一个窗口动作和一个子菜单：</p>
+
+<div class="code" data-lang="xml" data-file="library_app/views/library_menu.xml">
+<pre>
+&lt;odoo&gt;
+    &lt;menuitem id="menu_library"
+              name="Library"
+              web_icon="library_app,static/description/icon.png"/&gt;
+
+    &lt;!-- 打开书目列表的动作 --&gt;
+    &lt;record id="action_library_book" model="ir.actions.act_window"&gt;
+        &lt;field name="name"&gt;Library Books&lt;/field&gt;
+        &lt;field name="res_model"&gt;library.book&lt;/field&gt;
+        &lt;field name="view_mode"&gt;list,form&lt;/field&gt;
+    &lt;/record&gt;
+
+    &lt;!-- 子菜单：点它就执行上面的动作 --&gt;
+    &lt;menuitem id="menu_library_book"
+              name="Books"
+              parent="menu_library"
+              action="action_library_book"/&gt;
+&lt;/odoo&gt;
+</pre>
+</div>
+
+<ul>
+  <li><code>&lt;record model="ir.actions.act_window"&gt;</code>：一个窗口动作，打开 <code>library.book</code> 模型，依次启用列表和表单视图。</li>
+  <li><code>&lt;menuitem&gt;</code> 通过 <code>parent</code> 挂到顶级菜单下，通过 <code>action</code> 指定要执行的动作。</li>
+</ul>
+
+<p>升级后刷新浏览器，「Library → Books」菜单出现了。即使还没写视图，Odoo 也会自动生成简易的列表和表单。不过它们不太好看，我们自己写。</p>
+
+<h3>表单视图</h3>
+
+<p>视图也是数据库里的记录，存在 <code>ir.ui.view</code> 模型里。新建 <code>views/book_view.xml</code>：</p>
+
+<div class="code" data-lang="xml" data-file="library_app/views/book_view.xml">
+<pre>
+&lt;odoo&gt;
+    &lt;record id="view_form_book" model="ir.ui.view"&gt;
+        &lt;field name="name"&gt;Book Form&lt;/field&gt;
+        &lt;field name="model"&gt;library.book&lt;/field&gt;
+        &lt;field name="arch" type="xml"&gt;
+            &lt;form string="Book"&gt;
+                &lt;group&gt;
+                    &lt;field name="name"/&gt;
+                    &lt;field name="author_ids" widget="many2many_tags"/&gt;
+                    &lt;field name="publisher_id"/&gt;
+                    &lt;field name="date_published"/&gt;
+                    &lt;field name="isbn"/&gt;
+                    &lt;field name="active"/&gt;
+                    &lt;field name="image" widget="image"/&gt;
+                &lt;/group&gt;
+            &lt;/form&gt;
+        &lt;/field&gt;
+    &lt;/record&gt;
+&lt;/odoo&gt;
+</pre>
+</div>
+
+<p>视图记录设置了三个字段：</p>
+<ul>
+  <li><code>name</code>：视图名称，仅供识别，不必唯一，甚至可以省略（会根据模型和视图类型自动生成）。</li>
+  <li><code>model</code>：这是哪个模型的视图。</li>
+  <li><code>arch</code>：最重要的部分，视图的结构（architecture）。<code>type="xml"</code> 表示里面直接写 XML。</li>
+</ul>
+
+<p>
+  <code>arch</code> 的根元素 <code>&lt;form&gt;</code> 声明了视图类型。<code>&lt;group&gt;</code> 创建一个看不见的两列网格：
+  每个字段默认占两格，一格放标签，一格放输入框，正好竖着排下来。
+  字段会根据类型自动选择合适的<strong>组件（widget）</strong>，比如日期字段用日期选择器；也可以用 <code>widget</code> 属性指定，
+  这里作者用标签样式，封面用图片组件。
+</p>
+
+<p>在清单里加上这个文件（视图放在安全文件之后、菜单之前）：</p>
+
+<div class="code" data-lang="py" data-file="__manifest__.py（片段）">
+<pre>
+    "data": [
+        "security/library_security.xml",
+        "security/ir.access.csv",
+        "views/book_view.xml",
+        "views/library_menu.xml",
+    ],
+</pre>
+</div>
+
+<h3>「单据」风格的表单</h3>
+
+<p>
+  对于单据类的模型，Odoo 有一种模仿纸张的表单样式：顶部 <code>&lt;header&gt;</code> 放操作按钮（和状态条），下面一张 <code>&lt;sheet&gt;</code> 放数据字段。
+  再用嵌套的 <code>&lt;group&gt;</code> 把字段分成左右两栏：
+</p>
+
+<div class="code" data-lang="xml" data-file="book_view.xml 中的 &lt;form&gt;">
+<pre>
+&lt;form string="Book"&gt;
+    &lt;header&gt;
+        &lt;button name="button_check_isbn" type="object" string="Check ISBN"/&gt;
+    &lt;/header&gt;
+    &lt;sheet&gt;
+        &lt;group name="group_top"&gt;
+            &lt;group name="group_left"&gt;
+                &lt;field name="name"/&gt;
+                &lt;field name="author_ids" widget="many2many_tags"/&gt;
+                &lt;field name="publisher_id"/&gt;
+                &lt;field name="date_published"/&gt;
+            &lt;/group&gt;
+            &lt;group name="group_right"&gt;
+                &lt;field name="isbn"/&gt;
+                &lt;field name="active"/&gt;
+                &lt;field name="image" widget="image"/&gt;
+            &lt;/group&gt;
+        &lt;/group&gt;
+    &lt;/sheet&gt;
+&lt;/form&gt;
+</pre>
+</div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 320" role="img" aria-label="表单视图的 header、sheet 和左右两栏 group 的布局">
+  <rect class="bx-p" x="20" y="16" width="720" height="48" rx="8"/>
+  <text class="sm on-p" x="34" y="34">&lt;header&gt;</text>
+  <rect class="bx-a" x="34" y="38" width="110" height="20" rx="4"/>
+  <text class="sm on-a" x="89" y="52" text-anchor="middle">Check ISBN</text>
+
+  <rect class="bx" x="40" y="80" width="680" height="224" rx="8"/>
+  <text class="sm" x="54" y="98">&lt;sheet&gt;　像一张纸</text>
+  <rect class="bx-d" x="54" y="108" width="652" height="182" rx="6"/>
+  <text class="sm" x="64" y="124">&lt;group name="group_top"&gt;</text>
+
+  <rect class="bx-b" x="66" y="132" width="306" height="148" rx="6"/>
+  <text class="sm on-b" x="76" y="148">group_left</text>
+  <text class="lbl" x="80" y="172">Title</text><rect class="bx" x="180" y="160" width="180" height="18" rx="3"/>
+  <text class="lbl" x="80" y="200">Authors</text><rect class="bx" x="180" y="188" width="180" height="18" rx="3"/>
+  <text class="lbl" x="80" y="228">Publisher</text><rect class="bx" x="180" y="216" width="180" height="18" rx="3"/>
+  <text class="lbl" x="80" y="256">Date Published</text><rect class="bx" x="180" y="244" width="180" height="18" rx="3"/>
+
+  <rect class="bx-g" x="388" y="132" width="306" height="148" rx="6"/>
+  <text class="sm on-g" x="398" y="148">group_right</text>
+  <text class="lbl" x="402" y="172">ISBN</text><rect class="bx" x="500" y="160" width="180" height="18" rx="3"/>
+  <text class="lbl" x="402" y="200">Active?</text><rect class="bx" x="500" y="188" width="18" height="18" rx="3"/>
+  <text class="lbl" x="402" y="228">Cover</text><rect class="bx-d" x="500" y="216" width="70" height="56" rx="3"/>
+</svg>
+<figcaption>图 3-8　一个 group 套两个 group，就得到左右两栏</figcaption>
+</figure>
+
+<p>
+  给 <code>&lt;group&gt;</code> 加 <code>name</code> 属性不是必须的，但强烈推荐 —— 这样别的模块在扩展这个视图时，能精确地定位到它（第 4 章）。
+</p>
+
+<p>按钮的几个基本属性：</p>
+<ul>
+  <li><code>string</code>：按钮上显示的文字。</li>
+  <li><code>type</code>：按钮执行的动作类型。<code>object</code> 表示调用模型的 Python 方法；<code>action</code> 表示执行一个动作记录。</li>
+  <li><code>name</code>：<code>type="object"</code> 时是方法名；<code>type="action"</code> 时是动作的 XML ID。</li>
+  <li><code>class</code>：可选的 CSS 类，比如 <code>oe_highlight</code> 让按钮显示为主色调。</li>
+</ul>
+
+<h3>列表视图和搜索视图</h3>
+
+<p>继续在 <code>book_view.xml</code> 的 <code>&lt;odoo&gt;</code> 里添加：</p>
+
+<div class="code" data-lang="xml" data-file="book_view.xml（续）">
+<pre>
+    &lt;record id="view_list_book" model="ir.ui.view"&gt;
+        &lt;field name="name"&gt;Book List&lt;/field&gt;
+        &lt;field name="model"&gt;library.book&lt;/field&gt;
+        &lt;field name="arch" type="xml"&gt;
+            &lt;list&gt;
+                &lt;field name="name"/&gt;
+                &lt;field name="author_ids" widget="many2many_tags"/&gt;
+                &lt;field name="publisher_id"/&gt;
+                &lt;field name="date_published"/&gt;
+            &lt;/list&gt;
+        &lt;/field&gt;
+    &lt;/record&gt;
+
+    &lt;record id="view_search_book" model="ir.ui.view"&gt;
+        &lt;field name="name"&gt;Book Filters&lt;/field&gt;
+        &lt;field name="model"&gt;library.book&lt;/field&gt;
+        &lt;field name="arch" type="xml"&gt;
+            &lt;search&gt;
+                &lt;field name="publisher_id"/&gt;
+                &lt;filter name="filter_active"
+                        string="Active"
+                        domain="[('active', '=', True)]"/&gt;
+                &lt;filter name="filter_inactive"
+                        string="Inactive"
+                        domain="[('active', '=', False)]"/&gt;
+            &lt;/search&gt;
+        &lt;/field&gt;
+    &lt;/record&gt;
+</pre>
+</div>
+
+<ul>
+  <li><code>&lt;list&gt;</code> 里的每个字段是一列。</li>
+  <li>搜索视图里的 <code>&lt;field&gt;</code>：用户在搜索框打字时，可以选择按这些字段搜索。这里加了出版社。</li>
+  <li><code>&lt;filter&gt;</code>：预定义的筛选条件，点一下即可开关，条件用域表达式写。<code>name</code> 属性是必需的。</li>
+</ul>
+
+<div class="box ver">
+  <div class="t">&#8682; 两处修改</div>
+  <p>
+    书里的列表视图用 <code>&lt;tree&gt;</code>、动作用 <code>tree,form</code>，Odoo 18 起统一改为 <code>&lt;list&gt;</code> 和 <code>list,form</code>。
+    另外书中搜索视图的两个筛选把域写反了（「Inactive」配了 <code>active = True</code>），这里已改正。
+  </p>
+</div>
+
+<h2 id="step7">第 7 步：业务逻辑</h2>
+
+<p>
+  现在让「Check ISBN」按钮真正工作起来。现代 ISBN 有 13 位，最后一位是根据前 12 位计算出的<strong>校验位</strong>：
+  前 12 位依次乘以 1、3、1、3……求和，对 10 取余；余数为 0 则校验位为 0，否则为 10 减余数。
+</p>
+
+<p>在 <code>models/library_book.py</code> 的类里添加两个方法：</p>
+
+<div class="code" data-lang="py" data-file="library_app/models/library_book.py">
+<pre>
+from odoo import fields, models
+from odoo.exceptions import ValidationError
+
+
+class LibraryBook(models.Model):
+    _name = "library.book"
+    _description = "Book"
+
+    name = fields.Char("Title", required=True)
+    isbn = fields.Char("ISBN")
+    active = fields.Boolean("Active?", default=True)
+    date_published = fields.Date()
+    image = fields.Binary("Cover")
+    publisher_id = fields.Many2one("res.partner", string="Publisher")
+    author_ids = fields.Many2many("res.partner", string="Authors")
+
+    def _check_isbn(self):
+        self.ensure_one()
+        digits = [int(x) for x in self.isbn if x.isdigit()]
+        if len(digits) == 13:
+            ponderations = [1, 3] * 6
+            terms = [a * b for a, b in zip(digits[:12], ponderations)]
+            remain = sum(terms) % 10
+            check = 10 - remain if remain != 0 else 0
+            return digits[-1] == check
+        return False
+
+    def button_check_isbn(self):
+        for book in self:
+            if not book.isbn:
+                raise ValidationError(
+                    self.env._("Please provide an ISBN for %s", book.name))
+            if not book._check_isbn():
+                raise ValidationError(
+                    self.env._("%s ISBN is invalid", book.isbn))
+        return True
+</pre>
+</div>
+
+<h3>理解 <code>self</code>：它是一个记录集</h3>
+
+<p>
+  Odoo 模型方法里的 <code>self</code> 不是「一条记录」，而是一个<strong>记录集（recordset）</strong>：零条、一条或多条记录的集合。
+  所以 <code>button_check_isbn</code> 用 <code>for book in self</code> 逐条处理。表单按钮调用时 <code>self</code> 通常只有一条，
+  但用循环写，将来在列表里批量选中多本书调用也照样能用。
+</p>
+
+<p>
+  <code>_check_isbn</code> 选择了另一种风格：开头调用 <code>self.ensure_one()</code>，如果 <code>self</code> 不是恰好一条记录就立刻报错。
+  这适合那些「只对单条记录有意义」的辅助方法。方法名以下划线开头，表示它是<strong>私有</strong>的，不能从外部（比如按钮或 API）调用。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 260" role="img" aria-label="点击表单按钮后，浏览器调用服务器上的模型方法，抛出的异常显示为对话框">
+  <rect class="bx-g" x="20" y="30" width="170" height="70" rx="10"/>
+  <text class="ttl on-g" x="105" y="58" text-anchor="middle">浏览器</text>
+  <text class="sm" x="105" y="80" text-anchor="middle">点击 Check ISBN</text>
+
+  <rect class="bx-a" x="290" y="20" width="200" height="90" rx="10"/>
+  <text class="ttl on-a" x="390" y="46" text-anchor="middle">Odoo 服务器</text>
+  <text class="sm mono" x="390" y="68" text-anchor="middle">library.book(7,)</text>
+  <text class="sm mono" x="390" y="88" text-anchor="middle">.button_check_isbn()</text>
+
+  <rect class="bx-b" x="580" y="30" width="160" height="70" rx="10"/>
+  <text class="ttl on-b" x="660" y="58" text-anchor="middle">_check_isbn()</text>
+  <text class="sm" x="660" y="80" text-anchor="middle">计算校验位</text>
+
+  <path class="ln-g" d="M192 60 H286" marker-end="url(#ar-g)"/>
+  <text class="sm" x="240" y="52" text-anchor="middle">RPC</text>
+  <path class="ln-a" d="M492 60 H576" marker-end="url(#ar-a)"/>
+
+  <rect class="bx-g" x="290" y="150" width="200" height="50" rx="10"/>
+  <text class="lbl on-g" x="390" y="180" text-anchor="middle">合法 → return True</text>
+  <rect class="bx-r" x="520" y="150" width="220" height="50" rx="10"/>
+  <text class="lbl on-r" x="630" y="180" text-anchor="middle">非法 → raise ValidationError</text>
+
+  <path class="ln-g" d="M370 112 V146" marker-end="url(#ar-g)"/>
+  <path class="ln-r" d="M460 112 L560 146" marker-end="url(#ar-r)"/>
+
+  <rect class="bx-r" x="20" y="150" width="200" height="70" rx="10"/>
+  <text class="ttl on-r" x="120" y="178" text-anchor="middle">浏览器弹出对话框</text>
+  <text class="sm" x="120" y="200" text-anchor="middle">「xxx ISBN is invalid」</text>
+  <path class="ln-r" d="M630 202 V236 H120 V224" marker-end="url(#ar-r)"/>
+</svg>
+<figcaption>图 3-9　按钮 → RPC → 模型方法。抛出的 <code>ValidationError</code> 会在用户界面上显示为一个提示对话框</figcaption>
+</figure>
+
+<ul>
+  <li><code>ValidationError</code> 是 Odoo 的异常类型之一，抛出它会中止操作并把消息展示给用户，同时回滚这次请求里的数据库修改。</li>
+  <li><code>self.env._("...")</code> 把消息标记为<strong>可翻译</strong>，参数用 <code>%s</code> 占位，翻译后再填入。</li>
+  <li>方法最后 <code>return True</code>：按钮方法不需要返回值，但有些外部 API 客户端处理不了 <code>None</code>，所以惯例返回 <code>True</code>。</li>
+</ul>
+
+<div class="box ver">
+  <div class="t">&#8682; 翻译函数的新写法</div>
+  <p>
+    书里的消息没有做翻译。Odoo 一直用 <code>from odoo import _</code> 再 <code>_("...")</code> 标记可翻译文本；
+    Odoo 18 起推荐 <code>self.env._("...")</code>，它直接使用当前环境的语言，参数也可以直接传进去而不是先格式化。旧写法仍然可用。
+  </p>
+</div>
+
+<p>
+  现在重启并升级模块，带上 <code>--test-enable</code>，两个测试都应该通过了。也可以在界面上打开一本书，分别填入合法和非法的 ISBN 试试按钮。
+</p>
+
+<h2 id="step8">第 8 步：网页</h2>
+
+<p>
+  Odoo 还自带一个 Web 开发框架，可以做出和后台数据紧密集成的网页。我们做一个最简单的页面：在 <code>/library/books</code> 列出书目。
+</p>
+
+<p>
+  生成网页的组件叫<strong>控制器（controller）</strong>：它是 <code>http.Controller</code> 子类里的一个方法，用 <code>@http.route</code> 装饰器绑定到 URL。
+  有人访问这个 URL 时，方法被调用，返回要显示的 HTML —— 通常用 QWeb 模板渲染。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 230" role="img" aria-label="访问 /library/books 时控制器查询数据并渲染 QWeb 模板">
+  <rect class="bx-g" x="20" y="80" width="140" height="70" rx="10"/>
+  <text class="ttl on-g" x="90" y="108" text-anchor="middle">浏览器</text>
+  <text class="sm mono" x="90" y="130" text-anchor="middle">GET /library/books</text>
+
+  <rect class="bx-p" x="210" y="70" width="190" height="90" rx="10"/>
+  <text class="ttl on-p" x="305" y="96" text-anchor="middle">控制器</text>
+  <text class="sm mono" x="305" y="118" text-anchor="middle">@http.route(...)</text>
+  <text class="sm mono" x="305" y="138" text-anchor="middle">def list(self, **kw)</text>
+
+  <rect class="bx-b" x="450" y="20" width="150" height="70" rx="10"/>
+  <text class="ttl on-b" x="525" y="48" text-anchor="middle">ORM</text>
+  <text class="sm mono" x="525" y="70" text-anchor="middle">Book.search([])</text>
+
+  <rect class="bx-a" x="450" y="140" width="150" height="70" rx="10"/>
+  <text class="ttl on-a" x="525" y="166" text-anchor="middle">QWeb 模板</text>
+  <text class="sm mono" x="525" y="188" text-anchor="middle">book_list_template</text>
+
+  <rect class="bx-g" x="640" y="140" width="100" height="70" rx="10"/>
+  <text class="ttl on-g" x="690" y="180" text-anchor="middle">HTML</text>
+
+  <path class="ln-g" d="M162 115 H206" marker-end="url(#ar-g)"/>
+  <path class="ln-b" d="M402 95 L446 64" marker-end="url(#ar-b)"/>
+  <text class="sm" x="414" y="70">① 查数据</text>
+  <path class="ln-a" d="M402 135 L446 166" marker-end="url(#ar-a)"/>
+  <text class="sm" x="380" y="186">② render(模板, {books})</text>
+  <path class="ln-a" d="M602 175 H636" marker-end="url(#ar-a)"/>
+  <path class="ln-g" d="M690 212 V222 H90 V152" marker-end="url(#ar-g)"/>
+  <text class="sm" x="390" y="218" text-anchor="middle">③ 返回给浏览器</text>
+</svg>
+<figcaption>图 3-10　一个网页请求的旅程</figcaption>
+</figure>
+
+<h3>控制器</h3>
+
+<p>控制器代码放在 <code>controllers/</code> 目录。确认模块的 <code>__init__.py</code> 已经导入了 <code>controllers</code>，然后：</p>
+
+<div class="code" data-lang="py" data-file="library_app/controllers/__init__.py">
+<pre>
+from . import main
+</pre>
+</div>
+
+<div class="code" data-lang="py" data-file="library_app/controllers/main.py">
+<pre>
+from odoo import http
+from odoo.http import request
+
+
+class Books(http.Controller):
+
+    @http.route("/library/books")
+    def list(self, **kwargs):
+        Book = request.env["library.book"]
+        books = Book.search([])
+        return request.render(
+            "library_app.book_list_template",
+            {"books": books},
+        )
+</pre>
+</div>
+
+<ul>
+  <li>类名和方法名可以随便取，起作用的是 <code>@http.route</code> 声明的 URL。</li>
+  <li>默认 <code>auth="user"</code>，即必须登录才能访问；第 13 章会做公开的页面。</li>
+  <li><code>request.env</code> 是当前请求的运行环境，用它访问模型。<code>search([])</code> 用空的域查询全部（有权限看到的）书。</li>
+  <li><code>request.render()</code> 用指定的 QWeb 模板生成 HTML，第二个参数是传给模板的变量。</li>
+</ul>
+
+<p>这时重启服务器访问 <code>/library/books</code>，日志会报错 <code>External ID not found in the system: library_app.book_list_template</code> —— 很正常，模板还没写。</p>
+
+<h3>QWeb 模板</h3>
+
+<div class="code" data-lang="xml" data-file="library_app/views/book_list_template.xml">
+<pre>
+&lt;odoo&gt;
+    &lt;template id="book_list_template" name="Book List"&gt;
+        &lt;div id="wrap" class="container"&gt;
+            &lt;h1&gt;Books&lt;/h1&gt;
+            &lt;t t-foreach="books" t-as="book"&gt;
+                &lt;div class="row"&gt;
+                    &lt;span t-field="book.name"/&gt;,
+                    &lt;span t-field="book.date_published"/&gt;,
+                    &lt;span t-field="book.publisher_id"/&gt;
+                &lt;/div&gt;
+            &lt;/t&gt;
+        &lt;/div&gt;
+    &lt;/template&gt;
+&lt;/odoo&gt;
+</pre>
+</div>
+
+<ul>
+  <li><code>&lt;template&gt;</code> 声明一个 QWeb 模板。它其实是 <code>ir.ui.view</code> 记录的快捷写法，模板和后台视图存在同一个模型里。</li>
+  <li><code>t-foreach="books" t-as="book"</code>：遍历控制器传进来的 <code>books</code>，每次循环把当前项叫做 <code>book</code>。</li>
+  <li><code>t-field="book.name"</code>：输出记录的字段值，并按字段类型正确格式化（日期按语言习惯、多对一显示名称等）。</li>
+</ul>
+
+<p>把它加到清单的 <code>data</code> 里，升级模块，登录后访问 <code>http://localhost:8069/library/books</code>，就能看到书目列表了。</p>
+
+<h2 id="final">完整的模块</h2>
+
+<p>本章结束时，<code>library_app</code> 的完整结构和清单如下：</p>
+
+<div class="code" data-lang="text">
+<pre>
+library_app/
+├── __init__.py
+├── __manifest__.py
+├── controllers/
+│   ├── __init__.py
+│   └── main.py
+├── models/
+│   ├── __init__.py
+│   └── library_book.py
+├── security/
+│   ├── ir.access.csv
+│   └── library_security.xml
+├── static/description/icon.png
+├── tests/
+│   ├── __init__.py
+│   └── test_book.py
+└── views/
+    ├── book_list_template.xml
+    ├── book_view.xml
+    └── library_menu.xml
+</pre>
+</div>
+
+<div class="code" data-lang="py" data-file="library_app/__manifest__.py">
+<pre>
+{
+    "name": "Library Management",
+    "summary": "Manage library catalog and book lending.",
+    "author": "Daniel Reis",
+    "license": "AGPL-3",
+    "website": "https://github.com/PacktPublishing/Odoo-15-Development-Essentials",
+    "version": "20.0.1.0.0",
+    "category": "Services/Library",
+    "depends": ["base"],
+    "data": [
+        "security/library_security.xml",
+        "security/ir.access.csv",
+        "views/book_view.xml",
+        "views/library_menu.xml",
+        "views/book_list_template.xml",
+    ],
+    "application": True,
+}
+</pre>
+</div>
+
+<h2 id="reference">速查：安全相关</h2>
+
+<div class="tw"><table>
+  <tr><th>模型</th><th>是什么</th><th>主要字段</th></tr>
+  <tr><td><code>res.groups</code></td><td>用户组</td><td><code>name</code>、<code>privilege_id</code>、<code>implied_ids</code>、<code>user_ids</code></td></tr>
+  <tr><td><code>res.groups.privilege</code></td><td>组的作用域（Odoo 19+）</td><td><code>name</code>、<code>category_id</code></td></tr>
+  <tr><td><code>res.users</code></td><td>用户</td><td><code>name</code>、<code>login</code>、<code>group_ids</code></td></tr>
+  <tr><td><code>ir.access</code></td><td>访问规则（Odoo 20）</td><td><code>name</code>、<code>model_id</code>、<code>group_id</code>、<code>operation</code>、<code>domain</code></td></tr>
+</table></div>
+
+<div class="tw"><table>
+  <tr><th>XML ID</th><th>是什么</th></tr>
+  <tr><td><code>base.group_user</code></td><td>Role / User：内部用户，所有后台用户都在这个组</td></tr>
+  <tr><td><code>base.group_system</code></td><td>Role / Administrator：设置权限，管理员属于这个组</td></tr>
+  <tr><td><code>base.group_no_one</code></td><td>Technical Features：技术功能，常用来隐藏只在开发者模式下显示的东西</td></tr>
+  <tr><td><code>base.group_portal</code></td><td>门户用户（外部客户）</td></tr>
+  <tr><td><code>base.group_public</code></td><td>公开用户（网站上未登录的访客）</td></tr>
+  <tr><td><code>base.user_root</code></td><td>超级用户 OdooBot</td></tr>
+  <tr><td><code>base.user_admin</code></td><td>默认管理员</td></tr>
+  <tr><td><code>base.public_user</code></td><td>网站匿名访问时使用的公开用户</td></tr>
+</table></div>
+
+<h2 id="summary">小结</h2>
+
+<ul>
+  <li>模块 = 一个目录 + <code>__manifest__.py</code> + <code>__init__.py</code>。目录名就是技术名。</li>
+  <li>改 Python 要重启，改模型结构和数据文件要升级（<code>-u</code>）；最省心的是两样一起做。</li>
+  <li>数据文件必须在清单 <code>data</code> 里声明，按顺序加载，只能引用之前加载过的 XML ID。</li>
+  <li>模型是 Python 类，<code>_name</code> 决定一切；ORM 把它映射成表，多对多会多一张中间表。</li>
+  <li>新模型必须配访问规则才能用。Odoo 20 用一个 <code>ir.access.csv</code> 同时表达「哪些操作」和「哪些记录」。</li>
+  <li>视图、菜单、动作、网页模板都是数据库里的记录，用 XML 数据文件定义。</li>
+  <li>模型方法里的 <code>self</code> 是记录集；按钮用 <code>type="object"</code> 调用方法，抛出 <code>ValidationError</code> 给用户提示。</li>
+  <li>控制器把 URL 绑定到 Python 方法，用 QWeb 模板生成 HTML。</li>
+</ul>
+
+<div class="exercise">
+  <h3>动手练习</h3>
+  <ol>
+    <li>按本章步骤从零写出 <code>library_app</code>，安装并通过两个测试。</li>
+    <li>给书加一个「页数」字段（<code>fields.Integer</code>），把它放进表单右栏和列表视图。想一想：需要重启、升级，还是两者都要？</li>
+    <li>再写一个测试：给一本书设置非法 ISBN，断言 <code>button_check_isbn()</code> 会抛出 <code>ValidationError</code>。提示：<code>with self.assertRaises(ValidationError):</code>。</li>
+    <li>建一个只属于「图书馆用户」组的测试用户，登录后确认：能新建和修改书，删除按钮不可用，归档后的书看不到。</li>
+    <li>修改网页模板，把每本书的作者也显示出来。</li>
+  </ol>
+</div>
+<div id="pager"></div>
+</main>
+</div>
+<script src="assets/site.js"></script>
+</body>
+</html>

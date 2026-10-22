@@ -1,0 +1,1538 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 8 章 · 业务逻辑 — Odoo 20 开发入门</title>
+<meta name="description" content="借书模块 library_checkout：触发业务逻辑的各种方式、单据头/行与阶段模式、扩展 create/write、onchange 与可写计算字段、消息与活动、向导、异常、测试、日志与调试。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-chapter="8">
+<div id="app">
+<aside id="sidebar"></aside>
+<main>
+<span class="chapter-eyebrow">第 8 章</span>
+<h1>业务逻辑</h1>
+<p class="lede">
+  前面几章分别学了模型（数据长什么样）和记录集（怎么操作数据）。这一章把它们组合起来，实现真正的<strong>业务流程</strong>：
+  会员借书，借书单从「申请」走到「已借出」再到「已归还」，过程中自动记录日期、阻止非法操作、给借书人发消息……
+  同时学会写测试、打日志、调试代码 —— 这些是每天都要用的开发技能。
+</p>
+
+<div class="goals">
+  <h4>本章目标</h4>
+  <ul>
+    <li>知道业务逻辑可以挂在哪些地方触发，以及该选哪一种</li>
+    <li>掌握 ORM 方法装饰器：<code>@api.depends</code>、<code>@api.constrains</code>、<code>@api.model</code>、<code>@api.model_create_multi</code>、<code>@api.ondelete</code></li>
+    <li>实现「单据头 + 明细行」和「阶段 + 状态」两种常见的数据模式</li>
+    <li>正确地扩展 <code>create()</code>、<code>write()</code>、<code>unlink()</code></li>
+    <li>用 onchange 和「可写计算字段」实现界面联动</li>
+    <li>使用消息和活动；做一个向导（wizard）；抛出合适的异常</li>
+    <li>写单元测试、记日志、用调试器排查问题</li>
+  </ul>
+</div>
+
+<div id="chapter-toc"></div>
+
+<h2 id="project">学习项目：借书模块</h2>
+
+<p>
+  书目和会员这些<strong>主数据</strong>已经有了，现在要加上<strong>业务单据</strong>：会员借书。每张借书单都有自己的生命周期，从创建到书被归还。
+  这个流程很适合用看板来展示 —— 每个阶段是一列，单据从左往右移动直到完成。本章专注于数据模型和业务逻辑，界面在第 10、11 章完善。
+</p>
+
+<p>我们新建模块 <code>library_checkout</code>，它依赖 <code>library_member</code>。借书单的数据模型如下：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 330" role="img" aria-label="借书模块的数据模型：借书单、明细行、阶段、会员、书">
+  <rect class="bx-a" x="250" y="20" width="260" height="190" rx="12"/>
+  <text class="ttl on-a" x="380" y="44" text-anchor="middle">library.checkout　借书单</text>
+  <text class="sm mono" x="266" y="70">member_id　　→ 会员（必填）</text>
+  <text class="sm mono" x="266" y="90">user_id　　　→ 经手的图书管理员</text>
+  <text class="sm mono" x="266" y="110">request_date　申请日期（默认今天）</text>
+  <text class="sm mono" x="266" y="130">stage_id　　 → 阶段</text>
+  <text class="sm mono" x="266" y="150">state　　　　 阶段对应的状态</text>
+  <text class="sm mono" x="266" y="170">checkout_date 借出日期</text>
+  <text class="sm mono" x="266" y="190">close_date　　归还日期</text>
+
+  <rect class="bx-b" x="20" y="40" width="180" height="70" rx="10"/>
+  <text class="ttl on-b" x="110" y="66" text-anchor="middle">library.member</text>
+  <text class="sm" x="110" y="88" text-anchor="middle">会员（第 4 章）</text>
+
+  <rect class="bx-p" x="560" y="40" width="180" height="90" rx="10"/>
+  <text class="ttl on-p" x="650" y="64" text-anchor="middle">checkout.stage</text>
+  <text class="sm" x="650" y="86" text-anchor="middle">阶段：可配置</text>
+  <text class="sm" x="650" y="106" text-anchor="middle">每个阶段映射一个状态</text>
+
+  <rect class="bx-g" x="250" y="240" width="260" height="76" rx="10"/>
+  <text class="ttl on-g" x="380" y="264" text-anchor="middle">library.checkout.line　明细行</text>
+  <text class="sm mono" x="266" y="288">checkout_id → 所属借书单</text>
+  <text class="sm mono" x="266" y="306">book_id → 书 · note 备注</text>
+
+  <rect class="bx-b" x="560" y="250" width="180" height="56" rx="10"/>
+  <text class="ttl on-b" x="650" y="283" text-anchor="middle">library.book</text>
+
+  <path class="ln-b" d="M248 75 H204" marker-end="url(#ar-b)"/>
+  <path class="ln-p" d="M512 130 L556 98" marker-end="url(#ar-p)"/>
+  <path class="ln-g" d="M380 212 V236"/>
+  <text class="sm on-g" x="390" y="230">line_ids（一对多）</text>
+  <path class="ln-b" d="M512 278 H556" marker-end="url(#ar-b)"/>
+</svg>
+<figcaption>图 8-1　借书单是一个典型的「单据头 + 明细行 + 阶段」结构</figcaption>
+</figure>
+
+<h3>创建模块骨架</h3>
+
+<p>先建一个最小可用的版本（没有新知识，只是打地基）：</p>
+
+<div class="code" data-lang="py" data-file="library_checkout/__manifest__.py">
+<pre>
+{
+    "name": "Library Book Checkout",
+    "description": "Members can borrow books from the library.",
+    "author": "Daniel Reis",
+    "license": "AGPL-3",
+    "version": "20.0.1.0.0",
+    "depends": ["library_member", "mail"],
+    "data": [
+        "security/ir.access.csv",
+        "wizard/checkout_mass_message_wizard_view.xml",
+        "views/library_menu.xml",
+        "views/checkout_view.xml",
+        "data/library_checkout_stage.xml",
+    ],
+}
+</pre>
+</div>
+
+<div class="code" data-lang="py" data-file="library_checkout/__init__.py">
+<pre>
+from . import models
+from . import wizard
+</pre>
+</div>
+
+<div class="code" data-lang="py" data-file="library_checkout/models/__init__.py">
+<pre>
+from . import library_checkout_stage
+from . import library_checkout
+from . import library_checkout_line
+</pre>
+</div>
+
+<div class="code" data-lang="py" data-file="library_checkout/models/library_checkout.py（初始版本）">
+<pre>
+from odoo import fields, models
+
+
+class LibraryCheckout(models.Model):
+    _name = "library.checkout"
+    _description = "Checkout Request"
+
+    member_id = fields.Many2one("library.member", required=True)
+    user_id = fields.Many2one(
+        "res.users",
+        "Librarian",
+        default=lambda s: s.env.user,
+    )
+    request_date = fields.Date(default=lambda s: fields.Date.today())
+</pre>
+</div>
+
+<p>菜单、动作和简单的列表 / 表单视图：</p>
+
+<div class="code" data-lang="xml" data-file="library_checkout/views/library_menu.xml">
+<pre>
+&lt;odoo&gt;
+    &lt;record id="action_library_checkout" model="ir.actions.act_window"&gt;
+        &lt;field name="name"&gt;Checkouts&lt;/field&gt;
+        &lt;field name="res_model"&gt;library.checkout&lt;/field&gt;
+        &lt;field name="view_mode"&gt;list,form&lt;/field&gt;
+    &lt;/record&gt;
+    &lt;menuitem id="menu_library_checkout"
+              name="Checkout"
+              action="action_library_checkout"
+              parent="library_app.menu_library"/&gt;
+&lt;/odoo&gt;
+</pre>
+</div>
+
+<div class="code" data-lang="xml" data-file="library_checkout/views/checkout_view.xml（初始版本）">
+<pre>
+&lt;odoo&gt;
+    &lt;record id="view_list_checkout" model="ir.ui.view"&gt;
+        &lt;field name="name"&gt;Checkout List&lt;/field&gt;
+        &lt;field name="model"&gt;library.checkout&lt;/field&gt;
+        &lt;field name="arch" type="xml"&gt;
+            &lt;list&gt;
+                &lt;field name="request_date"/&gt;
+                &lt;field name="member_id"/&gt;
+            &lt;/list&gt;
+        &lt;/field&gt;
+    &lt;/record&gt;
+
+    &lt;record id="view_form_checkout" model="ir.ui.view"&gt;
+        &lt;field name="name"&gt;Checkout Form&lt;/field&gt;
+        &lt;field name="model"&gt;library.checkout&lt;/field&gt;
+        &lt;field name="arch" type="xml"&gt;
+            &lt;form&gt;
+                &lt;sheet&gt;
+                    &lt;group&gt;
+                        &lt;field name="member_id"/&gt;
+                        &lt;field name="request_date"/&gt;
+                        &lt;field name="user_id"/&gt;
+                    &lt;/group&gt;
+                &lt;/sheet&gt;
+            &lt;/form&gt;
+        &lt;/field&gt;
+    &lt;/record&gt;
+&lt;/odoo&gt;
+</pre>
+</div>
+
+<p>访问规则会在下面逐步补全，完整的文件见「向导」一节。</p>
+
+<h2 id="triggers">业务逻辑挂在哪里</h2>
+
+<p>业务逻辑可以由用户的动作直接触发（点按钮），也可以在某个事件发生时自动触发（写入记录）。下面是全部选项：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 380" role="img" aria-label="触发业务逻辑的各种方式分类">
+  <rect class="bx-b" x="20" y="20" width="230" height="200" rx="12"/>
+  <text class="ttl on-b" x="135" y="46" text-anchor="middle">跟着字段定义走</text>
+  <rect class="bx" x="36" y="62" width="198" height="40" rx="6"/><text class="sm" x="135" y="80" text-anchor="middle">校验规则</text><text class="sm mono" x="135" y="96" text-anchor="middle">@api.constrains</text>
+  <rect class="bx" x="36" y="110" width="198" height="40" rx="6"/><text class="sm" x="135" y="128" text-anchor="middle">自动计算</text><text class="sm mono" x="135" y="144" text-anchor="middle">compute + @api.depends</text>
+  <rect class="bx" x="36" y="158" width="198" height="40" rx="6"/><text class="sm" x="135" y="176" text-anchor="middle">动态默认值</text><text class="sm mono" x="135" y="192" text-anchor="middle">default=函数</text>
+
+  <rect class="bx-a" x="265" y="20" width="230" height="200" rx="12"/>
+  <text class="ttl on-a" x="380" y="46" text-anchor="middle">跟着记录事件走</text>
+  <rect class="bx" x="281" y="62" width="198" height="40" rx="6"/><text class="sm" x="380" y="80" text-anchor="middle">创建 / 修改时</text><text class="sm mono" x="380" y="96" text-anchor="middle">扩展 create() / write()</text>
+  <rect class="bx" x="281" y="110" width="198" height="40" rx="6"/><text class="sm" x="380" y="128" text-anchor="middle">删除前检查</text><text class="sm mono" x="380" y="144" text-anchor="middle">@api.ondelete</text>
+  <rect class="bx" x="281" y="158" width="198" height="40" rx="6"/><text class="sm" x="380" y="176" text-anchor="middle">界面上改了某字段</text><text class="sm mono" x="380" y="192" text-anchor="middle">@api.onchange</text>
+
+  <rect class="bx-g" x="510" y="20" width="230" height="200" rx="12"/>
+  <text class="ttl on-g" x="625" y="46" text-anchor="middle">用户主动发起</text>
+  <rect class="bx" x="526" y="62" width="198" height="40" rx="6"/><text class="sm" x="625" y="80" text-anchor="middle">按钮</text><text class="sm mono" x="625" y="96" text-anchor="middle">&lt;button type="object"&gt;</text>
+  <rect class="bx" x="526" y="110" width="198" height="40" rx="6"/><text class="sm" x="625" y="128" text-anchor="middle">「操作」菜单里的服务器动作</text><text class="sm mono" x="625" y="144" text-anchor="middle">ir.actions.server</text>
+  <rect class="bx" x="526" y="158" width="198" height="40" rx="6"/><text class="sm" x="625" y="176" text-anchor="middle">向导：先收集输入再执行</text><text class="sm mono" x="625" y="192" text-anchor="middle">TransientModel</text>
+
+  <rect class="bx-p" x="20" y="240" width="720" height="120" rx="12"/>
+  <text class="ttl on-p" x="380" y="266" text-anchor="middle">按时间或条件自动运行</text>
+  <rect class="bx" x="40" y="282" width="330" height="60" rx="6"/>
+  <text class="sm" x="205" y="306" text-anchor="middle">定时任务 ir.cron</text>
+  <text class="sm" x="205" y="326" text-anchor="middle">每天 / 每小时调用某个模型方法</text>
+  <rect class="bx" x="390" y="282" width="330" height="60" rx="6"/>
+  <text class="sm" x="555" y="306" text-anchor="middle">自动化规则（base_automation 模块）</text>
+  <text class="sm" x="555" y="326" text-anchor="middle">满足条件时触发服务器动作，可在界面配置</text>
+</svg>
+<figcaption>图 8-2　业务逻辑的四类触发方式</figcaption>
+</figure>
+
+<div class="box key">
+  <div class="t">&#9733; 选择的原则：越「声明式」越好</div>
+  <p>
+    能用约束解决的，不要在 <code>write()</code> 里检查；能用计算字段解决的，不要在 <code>create()</code> 里赋值。
+    声明式的写法（约束、计算、默认值）让 ORM 帮你处理「什么时候执行」这个问题，扩展起来也更容易；
+    扩展 <code>create()</code> / <code>write()</code> 是最后的手段。
+  </p>
+</div>
+
+<h2 id="decorators">ORM 方法装饰器</h2>
+
+<p>方法定义前的 <code>@...</code> 是装饰器，它们给方法附加特定的行为：</p>
+
+<div class="tw"><table>
+  <tr><th>装饰器</th><th>用途</th></tr>
+  <tr><td><code>@api.depends("f1", "f2.x")</code></td><td>计算字段的方法：声明依赖，依赖变化时重算（第 6 章）</td></tr>
+  <tr><td><code>@api.constrains("f1", ...)</code></td><td>校验方法：这些字段被写入时执行，失败时抛异常；方法里不应该写数据（第 6 章）</td></tr>
+  <tr><td><code>@api.onchange("f1", ...)</code></td><td>界面联动：表单上这些字段被修改时由客户端调用（本章）</td></tr>
+  <tr><td><code>@api.model</code></td><td>方法在「模型」层面工作，<code>self</code> 只是模型的引用，不包含记录。默认值函数常用它</td></tr>
+  <tr><td><code>@api.model_create_multi</code></td><td>专用于 <code>create()</code>：保证方法收到的总是字典<strong>列表</strong>，从而支持批量创建</td></tr>
+  <tr><td><code>@api.ondelete(at_uninstall=False)</code></td><td>删除前的检查，抛异常可阻止删除；卸载模块时不执行</td></tr>
+  <tr><td><code>@api.private</code></td><td>把一个公开方法标记为不能通过 RPC 调用（Odoo 18.2+）</td></tr>
+</table></div>
+
+<p>
+  不加装饰器的普通方法，<code>self</code> 是一个记录集，方法体里通常用 <code>for</code> 循环逐条处理。
+</p>
+
+<div class="box ver">
+  <div class="t">&#8682; 已经消失的装饰器</div>
+  <p>
+    在很老的代码里你会看到 <code>@api.multi</code>（声明 self 是记录集，现在这是默认行为）和 <code>@api.one</code>（自动替你循环）。它们在 Odoo 14 被移除，遇到直接删掉。
+    另外，方法名以下划线开头本身就意味着「不能从外部调用」；<code>@api.private</code> 是给那些名字不以下划线开头、但同样不该被外部调用的方法用的。
+  </p>
+</div>
+
+<h2 id="patterns">常用的数据模式</h2>
+
+<h3>单据头与明细行</h3>
+
+<p>
+  业务单据常常是「一个头 + 若干行」：销售订单有多行商品，发票有多行明细。在 Odoo 里实现很简单：明细模型用多对一字段指向头，头模型用一对多字段列出明细。
+  借书单也是这样：一张借书单可以借多本书。
+</p>
+
+<div class="code" data-lang="py" data-file="library_checkout/models/library_checkout_line.py">
+<pre>
+from odoo import fields, models
+
+
+class LibraryCheckoutLine(models.Model):
+    _name = "library.checkout.line"
+    _description = "Checkout Request Line"
+
+    checkout_id = fields.Many2one("library.checkout", required=True, ondelete="cascade")
+    book_id = fields.Many2one("library.book", required=True)
+    note = fields.Char("Notes")
+</pre>
+</div>
+
+<div class="code" data-lang="py" data-file="library_checkout/models/library_checkout.py（片段）">
+<pre>
+    line_ids = fields.One2many(
+        "library.checkout.line",
+        "checkout_id",
+        string="Borrowed Books",
+    )
+</pre>
+</div>
+
+<p>
+  明细行的 <code>checkout_id</code> 加了 <code>ondelete="cascade"</code>：删除借书单时，它的明细行跟着删除。
+  在表单里，用一个页签（notebook / page）放明细行，并在 <code>&lt;field&gt;</code> 内部嵌套一个可编辑的列表视图：
+</p>
+
+<div class="code" data-lang="xml" data-file="checkout_view.xml（表单的 &lt;sheet&gt; 内，group 之后）">
+<pre>
+&lt;notebook&gt;
+    &lt;page name="lines" string="Borrowed Books"&gt;
+        &lt;field name="line_ids"&gt;
+            &lt;list editable="bottom"&gt;
+                &lt;field name="book_id"/&gt;
+                &lt;field name="note"/&gt;
+            &lt;/list&gt;
+        &lt;/field&gt;
+    &lt;/page&gt;
+&lt;/notebook&gt;
+</pre>
+</div>
+
+<p>
+  一对多字段在表单里显示为一个嵌套的列表。默认情况下 Odoo 会去找明细模型的列表视图，找不到就自动生成；也可以像上面这样<strong>在字段内部直接声明</strong>要用的视图。
+  <code>editable="bottom"</code> 让用户直接在列表里编辑，新行加在底部。
+</p>
+
+<h3>阶段与状态</h3>
+
+<p>
+  销售订单、项目任务、招聘申请……这些「单据」都有生命周期。表示生命周期的步骤有两种做法：
+</p>
+
+<div class="vs">
+  <div class="new">
+    <div class="h">状态（state）：固定的选择列表</div>
+    <div style="padding:10px 14px;font-size:14px">
+      可选值在代码里写死，比如 草稿 / 已确认 / 已完成。<br>
+      ✔ 业务逻辑可以放心地判断 <code>if state == "done"</code><br>
+      ✘ 用户无法增加自己的步骤
+    </div>
+  </div>
+  <div class="new">
+    <div class="h">阶段（stage）：一个可配置的模型</div>
+    <div style="padding:10px 14px;font-size:14px">
+      阶段是另一个模型的记录，通常叫 <code>stage_id</code>，用户可以增删、排序、改名。<br>
+      ✔ 灵活，适配每家企业自己的流程<br>
+      ✘ 代码没法依赖某个具体阶段（ID 和名字都可能变）
+    </div>
+  </div>
+</div>
+
+<p>
+  两全其美的做法是：<strong>用阶段，但每个阶段映射到一个固定的状态</strong>。用户随便配置阶段，业务逻辑只看状态。借书模块就采用这种方式：
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 240" role="img" aria-label="可配置的阶段映射到固定的状态，业务逻辑只依赖状态">
+  <text class="ttl" x="20" y="28">阶段（用户可配置）</text>
+  <rect class="bx-p" x="20" y="40" width="120" height="44" rx="8"/><text class="lbl on-p" x="80" y="67" text-anchor="middle">草稿</text>
+  <rect class="bx-p" x="160" y="40" width="120" height="44" rx="8"/><text class="lbl on-p" x="220" y="67" text-anchor="middle">待审核</text>
+  <rect class="bx-p" x="300" y="40" width="120" height="44" rx="8"/><text class="lbl on-p" x="360" y="67" text-anchor="middle">已借出</text>
+  <rect class="bx-p" x="440" y="40" width="120" height="44" rx="8"/><text class="lbl on-p" x="500" y="67" text-anchor="middle">已归还</text>
+  <rect class="bx-p" x="580" y="40" width="160" height="44" rx="8"/><text class="lbl on-p" x="660" y="67" text-anchor="middle">已取消</text>
+
+  <text class="ttl" x="20" y="150">状态（代码里固定）</text>
+  <rect class="bx-a" x="90" y="162" width="140" height="44" rx="8"/><text class="mono on-a" x="160" y="189" text-anchor="middle">new</text>
+  <rect class="bx-a" x="300" y="162" width="120" height="44" rx="8"/><text class="mono on-a" x="360" y="189" text-anchor="middle">open</text>
+  <rect class="bx-a" x="440" y="162" width="120" height="44" rx="8"/><text class="mono on-a" x="500" y="189" text-anchor="middle">done</text>
+  <rect class="bx-a" x="600" y="162" width="120" height="44" rx="8"/><text class="mono on-a" x="660" y="189" text-anchor="middle">cancel</text>
+
+  <path class="ln" d="M80 86 L140 160" marker-end="url(#ar)"/>
+  <path class="ln" d="M220 86 L180 160" marker-end="url(#ar)"/>
+  <path class="ln" d="M360 86 V160" marker-end="url(#ar)"/>
+  <path class="ln" d="M500 86 V160" marker-end="url(#ar)"/>
+  <path class="ln" d="M660 86 V160" marker-end="url(#ar)"/>
+  <text class="sm" x="380" y="230" text-anchor="middle">多个阶段可以映射到同一个状态；业务逻辑写 if checkout.state == "open"，不受阶段改动影响</text>
+</svg>
+<figcaption>图 8-3　阶段面向用户，状态面向代码</figcaption>
+</figure>
+
+<p>阶段模型：</p>
+
+<div class="code" data-lang="py" data-file="library_checkout/models/library_checkout_stage.py">
+<pre>
+from odoo import fields, models
+
+
+class LibraryCheckoutStage(models.Model):
+    _name = "library.checkout.stage"
+    _description = "Checkout Stage"
+    _order = "sequence"
+
+    name = fields.Char()
+    sequence = fields.Integer(default=10)
+    fold = fields.Boolean()              # 看板里默认折叠这一列（如「已完成」「已取消」）
+    active = fields.Boolean(default=True)
+    state = fields.Selection(
+        [("new", "Requested"),
+         ("open", "Borrowed"),
+         ("done", "Returned"),
+         ("cancel", "Canceled")],
+        default="new",
+    )
+</pre>
+</div>
+
+<p>
+  阶段属于配置数据，普通用户只读，经理才能修改（访问规则见后文）。我们需要一个「配置」菜单来放它。
+  <code>library_app</code> 还没有这个菜单，在 <code>library_app/views/library_menu.xml</code> 里加上：
+</p>
+
+<div class="code" data-lang="xml" data-file="library_app/views/library_menu.xml（追加）">
+<pre>
+&lt;menuitem id="menu_library_configuration"
+          name="Configuration"
+          parent="menu_library"/&gt;
+</pre>
+</div>
+
+<div class="code" data-lang="xml" data-file="library_checkout/views/library_menu.xml（追加）">
+<pre>
+&lt;record id="action_library_stage" model="ir.actions.act_window"&gt;
+    &lt;field name="name"&gt;Stages&lt;/field&gt;
+    &lt;field name="res_model"&gt;library.checkout.stage&lt;/field&gt;
+    &lt;field name="view_mode"&gt;list,form&lt;/field&gt;
+&lt;/record&gt;
+&lt;menuitem id="menu_library_stage"
+          name="Stages"
+          action="action_library_stage"
+          parent="library_app.menu_library_configuration"/&gt;
+</pre>
+</div>
+
+<p>再准备几个初始阶段（<code>noupdate="1"</code>，让用户后续的修改不被升级覆盖）：</p>
+
+<div class="code" data-lang="xml" data-file="library_checkout/data/library_checkout_stage.xml">
+<pre>
+&lt;odoo noupdate="1"&gt;
+    &lt;record id="stage_new" model="library.checkout.stage"&gt;
+        &lt;field name="name"&gt;Draft&lt;/field&gt;
+        &lt;field name="sequence"&gt;10&lt;/field&gt;
+        &lt;field name="state"&gt;new&lt;/field&gt;
+    &lt;/record&gt;
+    &lt;record id="stage_open" model="library.checkout.stage"&gt;
+        &lt;field name="name"&gt;Borrowed&lt;/field&gt;
+        &lt;field name="sequence"&gt;20&lt;/field&gt;
+        &lt;field name="state"&gt;open&lt;/field&gt;
+    &lt;/record&gt;
+    &lt;record id="stage_done" model="library.checkout.stage"&gt;
+        &lt;field name="name"&gt;Completed&lt;/field&gt;
+        &lt;field name="sequence"&gt;90&lt;/field&gt;
+        &lt;field name="fold"&gt;True&lt;/field&gt;
+        &lt;field name="state"&gt;done&lt;/field&gt;
+    &lt;/record&gt;
+    &lt;record id="stage_cancel" model="library.checkout.stage"&gt;
+        &lt;field name="name"&gt;Canceled&lt;/field&gt;
+        &lt;field name="sequence"&gt;95&lt;/field&gt;
+        &lt;field name="fold"&gt;True&lt;/field&gt;
+        &lt;field name="state"&gt;cancel&lt;/field&gt;
+    &lt;/record&gt;
+&lt;/odoo&gt;
+</pre>
+</div>
+
+<h3>给借书单加上阶段</h3>
+
+<p>还要处理好两点用户体验：新单据的默认阶段应该是第一个 <code>new</code> 状态的阶段；按阶段分组时，<strong>没有单据的阶段也要显示出来</strong>（否则看板会缺列）。</p>
+
+<div class="code" data-lang="py" data-file="library_checkout/models/library_checkout.py（片段）">
+<pre>
+from odoo import api, fields, models
+
+
+class LibraryCheckout(models.Model):
+    _name = "library.checkout"
+    # ...
+
+    @api.model
+    def _default_stage_id(self):
+        Stage = self.env["library.checkout.stage"]
+        return Stage.search([("state", "=", "new")], limit=1)
+
+    @api.model
+    def _group_expand_stage_id(self, stages, domain):
+        return stages.search([])
+
+    stage_id = fields.Many2one(
+        "library.checkout.stage",
+        default=_default_stage_id,
+        group_expand="_group_expand_stage_id",
+    )
+    state = fields.Selection(related="stage_id.state")
+</pre>
+</div>
+
+<ul>
+  <li><code>_default_stage_id</code> 找第一个状态为 <code>new</code> 的阶段。阶段模型按 <code>sequence</code> 排序，所以拿到的是序号最小的那个。</li>
+  <li>
+    <code>group_expand</code> 改变了按这个字段分组的行为。默认只显示「有记录的组」，指定了它之后，分组结果由这个方法决定 —— 这里返回所有有效的阶段。
+    它的值必须是<strong>方法名字符串</strong>（不像 <code>default</code> 那样可以直接引用函数）。
+  </li>
+  <li><code>state</code> 是一个关联字段，把阶段的状态「搬」到借书单上，方便在视图和代码里使用。</li>
+</ul>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 210" role="img" aria-label="有无 group_expand 时看板列的区别">
+  <text class="ttl" x="20" y="24">没有 group_expand</text>
+  <rect class="bx" x="20" y="36" width="160" height="150" rx="8"/>
+  <text class="lbl" x="100" y="58" text-anchor="middle">Draft</text>
+  <rect class="bx-a" x="34" y="70" width="132" height="30" rx="5"/><text class="sm" x="100" y="90" text-anchor="middle">借书单 #3</text>
+  <rect class="bx" x="190" y="36" width="160" height="150" rx="8"/>
+  <text class="lbl" x="270" y="58" text-anchor="middle">Borrowed</text>
+  <rect class="bx-a" x="204" y="70" width="132" height="30" rx="5"/><text class="sm" x="270" y="90" text-anchor="middle">借书单 #1</text>
+  <text class="sm on-r" x="185" y="204" text-anchor="middle">Completed、Canceled 没有单据 → 列不见了</text>
+
+  <text class="ttl on-g" x="400" y="24">有 group_expand</text>
+  <rect class="bx" x="400" y="36" width="82" height="150" rx="8"/><text class="sm" x="441" y="58" text-anchor="middle">Draft</text>
+  <rect class="bx-a" x="408" y="70" width="66" height="30" rx="5"/><text class="sm" x="441" y="90" text-anchor="middle">#3</text>
+  <rect class="bx" x="490" y="36" width="82" height="150" rx="8"/><text class="sm" x="531" y="58" text-anchor="middle">Borrowed</text>
+  <rect class="bx-a" x="498" y="70" width="66" height="30" rx="5"/><text class="sm" x="531" y="90" text-anchor="middle">#1</text>
+  <rect class="bx-d" x="580" y="36" width="76" height="150" rx="8"/><text class="sm" x="618" y="58" text-anchor="middle">Completed</text>
+  <rect class="bx-d" x="664" y="36" width="76" height="150" rx="8"/><text class="sm" x="702" y="58" text-anchor="middle">Canceled</text>
+  <text class="sm on-g" x="570" y="204" text-anchor="middle">所有阶段都在，可以把卡片拖进空列</text>
+</svg>
+<figcaption>图 8-4　<code>group_expand</code> 让看板总是显示完整的流程</figcaption>
+</figure>
+
+<div class="box ver">
+  <div class="t">&#8682; group_expand 方法少了一个参数</div>
+  <p>书里的签名是 <code>_group_expand_stage_id(self, stages, domain, order)</code>。Odoo 17 起去掉了 <code>order</code> 参数，变成 <code>(self, stages, domain)</code>。按老签名写会在分组时报参数错误。</p>
+</div>
+
+<h3>给界面用的 ORM 方法</h3>
+
+<p>下面这些方法主要由 Web 客户端调用，也是常见的扩展点：</p>
+
+<div class="tw"><table>
+  <tr><th>方法</th><th>作用</th></tr>
+  <tr><td><code>_compute_display_name()</code></td><td>计算记录的显示名称（取代了旧的 <code>name_get()</code>，第 6 章）</td></tr>
+  <tr><td><code>name_search(name, domain, operator, limit)</code></td><td>在关系字段里打字时，按显示名称搜索候选记录。通常设置 <code>_rec_names_search</code> 就够，不必重写</td></tr>
+  <tr><td><code>name_create(name)</code></td><td>只给一个名字就创建记录，用于关系字段里的「创建 xxx」和看板的快速创建</td></tr>
+  <tr><td><code>default_get(fields)</code></td><td>返回新记录的默认值字典。可以扩展它加入更多默认值（本章的向导会用到）</td></tr>
+  <tr><td><code>fields_get()</code></td><td>返回模型的字段定义</td></tr>
+  <tr><td><code>get_views(views)</code></td><td>返回要渲染的视图结构（取代了旧的 <code>fields_view_get()</code>）</td></tr>
+</table></div>
+
+<h2 id="crud">扩展 create、write 和 unlink</h2>
+
+<p>有些业务逻辑没法用声明式的方式表达，必须挂在记录的写操作上。ORM 的三个写方法：</p>
+<ul>
+  <li><code>Model.create(vals_list)</code>：创建记录，返回新记录。参数是字典或字典列表。</li>
+  <li><code>recordset.write(vals)</code>：用字典里的值更新记录集。</li>
+  <li><code>recordset.unlink()</code>：删除记录。</li>
+</ul>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 230" role="img" aria-label="扩展 create 和 write 时，super 调用之前与之后分别能做什么">
+  <rect class="bx-b" x="20" y="30" width="250" height="160" rx="12"/>
+  <text class="ttl on-b" x="145" y="56" text-anchor="middle">super() 之前</text>
+  <text class="sm" x="36" y="84">· 记录还没变（write 时 self 是旧值）</text>
+  <text class="sm" x="36" y="106">· create 时新记录还不存在</text>
+  <text class="sm" x="36" y="128">· 可以读、可以<strong>修改 vals</strong></text>
+  <text class="sm" x="36" y="150">· 适合：补充 / 调整要写入的值</text>
+  <text class="sm" x="36" y="172">· 改 vals 最安全，不会引起递归</text>
+
+  <rect class="bx-a" x="300" y="80" width="160" height="60" rx="30"/>
+  <text class="ttl on-a" x="380" y="116" text-anchor="middle">super().write()</text>
+
+  <rect class="bx-g" x="490" y="30" width="250" height="160" rx="12"/>
+  <text class="ttl on-g" x="615" y="56" text-anchor="middle">super() 之后</text>
+  <text class="sm" x="506" y="84">· 记录已经是新值</text>
+  <text class="sm" x="506" y="106">· create 返回了新记录，可以用点号</text>
+  <text class="sm" x="506" y="128">· 适合：基于结果的检查、联动操作</text>
+  <text class="sm" x="506" y="150">· 在这里再写本记录要防止无限递归</text>
+  <text class="sm" x="506" y="172">· 抛异常 → 整个操作回滚</text>
+
+  <path class="ln-b" d="M272 110 H296" marker-end="url(#ar-b)"/>
+  <path class="ln-g" d="M462 110 H486" marker-end="url(#ar-g)"/>
+</svg>
+<figcaption>图 8-5　扩展写方法的两个时机</figcaption>
+</figure>
+
+<h3>扩展 create()</h3>
+
+<p>
+  需求：不允许直接以「已借出」或「已归还」的状态创建借书单。这个检查和「创建」这个事件强相关，用普通约束不好表达，所以扩展 <code>create()</code>：
+</p>
+
+<div class="code" data-lang="py" data-file="library_checkout/models/library_checkout.py（片段）">
+<pre>
+from odoo import api, exceptions, fields, models
+
+    # （在 LibraryCheckout 类中）
+    @api.model_create_multi
+    def create(self, vals_list):
+        # super() 之前：只能使用 vals_list 里的值
+        new_records = super().create(vals_list)
+        # super() 之后：可以使用新建的记录
+        for checkout in new_records:
+            if checkout.stage_id.state in ("open", "done"):
+                raise exceptions.UserError(
+                    self.env._("State not allowed for new checkouts."))
+        return new_records
+</pre>
+</div>
+
+<p>
+  新记录由 <code>super().create()</code> 创建。在它之前，新记录还不存在，只能读取（甚至修改）<code>vals_list</code>；
+  在它之后，可以通过 <code>checkout.stage_id.state</code> 这样的点号链访问新记录的数据。状态是固定的、可以被代码信赖，所以检查状态而不是阶段。
+  抛出异常会让整个创建操作回滚。
+</p>
+
+<div class="box ver">
+  <div class="t">&#8682; create 必须是「批量」的</div>
+  <p>
+    书里写的是 <code>@api.model def create(self, vals)</code>，一次只处理一个字典。Odoo 12 起 <code>create()</code> 就支持批量，
+    现在的规范写法是 <code>@api.model_create_multi</code> + <code>vals_list</code>（无论调用方传入单个字典还是列表，方法里拿到的都是列表），
+    旧的单字典写法会在日志里产生废弃警告，并且会让批量创建退化成逐条创建。书中检查的状态值 <code>"close"</code> 也是个笔误，应为 <code>"done"</code>。
+  </p>
+</div>
+
+<h3>扩展 write()</h3>
+
+<p>
+  需求：记录借出日期和归还日期。这不能用计算字段做（它们是「某个时刻」的快照，不是能从当前数据推算出来的值），所以扩展 <code>write()</code>，在阶段变化时设置日期：
+</p>
+
+<div class="code" data-lang="py" data-file="library_checkout/models/library_checkout.py（片段）">
+<pre>
+    checkout_date = fields.Date(readonly=True)
+    close_date = fields.Date(readonly=True)
+
+    def write(self, vals):
+        # super() 之前：self 里还是旧值，通过修改 vals 来补充要写入的内容
+        if "stage_id" in vals:
+            Stage = self.env["library.checkout.stage"]
+            new_state = Stage.browse(vals["stage_id"]).state
+            if new_state == "open":
+                vals["checkout_date"] = fields.Date.today()
+            elif new_state == "done":
+                vals["close_date"] = fields.Date.today()
+        return super().write(vals)
+</pre>
+</div>
+
+<p>
+  这里在 <code>super()</code> <strong>之前</strong>检查 <code>vals</code>，就能知道「即将发生什么变化」。注意 <code>vals["stage_id"]</code> 是一个数字 ID，
+  需要 <code>browse()</code> 成记录才能读它的状态。只要可能，就像这样<strong>修改 vals</strong> 而不是直接给字段赋值 —— 原因见下一节。
+</p>
+
+<h3>在 write() 里给字段赋值：小心无限递归</h3>
+
+<p>
+  有时候必须在 <code>super()</code> 之后再写数据（比如需要对比每条记录写入前后的状态）。但在 <code>write()</code> 里给本记录赋值，会再次调用 <code>write()</code>，
+  进而再次赋值……直到 Python 抛出递归错误。解决办法是在<strong>上下文里放一个标记</strong>：
+</p>
+
+<div class="code" data-lang="py">
+<pre>
+    def write(self, vals):
+        old_states = {checkout.id: checkout.state for checkout in self}
+        result = super().write(vals)
+        # super() 之后：self 已经是新值
+        if not self.env.context.get("_checkout_write"):
+            for checkout in self:
+                old_state, new_state = old_states[checkout.id], checkout.state
+                if new_state != old_state and new_state == "open":
+                    checkout.with_context(_checkout_write=True).write(
+                        {"checkout_date": fields.Date.today()})
+                if new_state != old_state and new_state == "done":
+                    checkout.with_context(_checkout_write=True).write(
+                        {"close_date": fields.Date.today()})
+        return result
+</pre>
+</div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 220" role="img" aria-label="用上下文标记防止 write 方法无限递归">
+  <rect class="bx" x="20" y="80" width="140" height="56" rx="10"/>
+  <text class="lbl" x="90" y="104" text-anchor="middle">write(stage=open)</text>
+  <text class="sm" x="90" y="124" text-anchor="middle">上下文无标记</text>
+
+  <rect class="bx-a" x="210" y="70" width="220" height="76" rx="10"/>
+  <text class="ttl on-a" x="320" y="94" text-anchor="middle">我们的 write()</text>
+  <text class="sm" x="320" y="116" text-anchor="middle">super().write(vals)</text>
+  <text class="sm" x="320" y="134" text-anchor="middle">没有标记 → 执行附加逻辑</text>
+
+  <rect class="bx-g" x="480" y="70" width="260" height="76" rx="10"/>
+  <text class="ttl on-g" x="610" y="94" text-anchor="middle">with_context(标记).write(日期)</text>
+  <text class="sm" x="610" y="116" text-anchor="middle">再次进入我们的 write()</text>
+  <text class="sm" x="610" y="134" text-anchor="middle">有标记 → 只执行 super()，到此为止</text>
+
+  <path class="ln" d="M162 108 H206" marker-end="url(#ar)"/>
+  <path class="ln-a" d="M432 108 H476" marker-end="url(#ar-a)"/>
+  <path class="ln-r" d="M610 148 V190 H320 V150" marker-end="url(#ar-r)" stroke-dasharray="5 4"/>
+  <text class="sm on-r" x="465" y="206" text-anchor="middle">没有标记的话：这条回路会无限循环</text>
+</svg>
+<figcaption>图 8-6　上下文标记打破递归</figcaption>
+</figure>
+
+<h3>删除前检查：@api.ondelete</h3>
+
+<p>
+  如果要阻止某些记录被删除（比如还有书没还的借书单），不要重写 <code>unlink()</code>，而是用 <code>@api.ondelete</code> 装饰一个检查方法：
+</p>
+
+<div class="code" data-lang="py">
+<pre>
+    @api.ondelete(at_uninstall=False)
+    def _unlink_except_borrowed(self):
+        if any(checkout.state == "open" for checkout in self):
+            raise exceptions.UserError(
+                self.env._("You can't delete a checkout whose books are still borrowed."))
+</pre>
+</div>
+
+<p>
+  <code>at_uninstall=False</code> 的意思是：<strong>卸载模块</strong>时不执行这个检查。否则这种检查会让模块无法卸载（卸载需要删除模块的全部数据）。
+  这正是推荐它而不是重写 <code>unlink()</code> 的原因。
+</p>
+
+<h3>什么时候（不）该扩展 create 和 write</h3>
+
+<div class="tw"><table>
+  <tr><th>需求</th><th>更好的做法</th></tr>
+  <tr><td>某个字段的值可以根据其他字段算出来（比如单据总额）</td><td>计算字段</td></tr>
+  <tr><td>默认值不是固定的</td><td>默认值函数</td></tr>
+  <tr><td>改了 A 字段，B 字段跟着变（但 B 允许手动修改）</td><td>可写计算字段（下一节）</td></tr>
+  <tr><td>校验数据</td><td><code>@api.constrains</code></td></tr>
+  <tr><td>阻止删除</td><td><code>@api.ondelete</code></td></tr>
+  <tr><td>以上都不行，比如默认值依赖同一条新记录的其他字段</td><td>这时才扩展 <code>create()</code> / <code>write()</code></td></tr>
+</table></div>
+
+<h3>导入导出的 ORM 方法</h3>
+
+<p>第 5 章的导入导出功能，在 ORM 里对应两个方法：</p>
+<ul>
+  <li><code>load(fields, data)</code>：导入。<code>fields</code> 对应 CSV 的表头，<code>data</code> 是行的列表，每行是字符串值的列表。支持 XML ID 等全部导入特性。</li>
+  <li><code>export_data(fields)</code>：导出。字段名可以带 <code>/id</code>、<code>.id</code> 后缀，返回格式与可导入的 CSV 兼容。</li>
+</ul>
+
+<h2 id="onchange">界面联动：onchange 与可写计算字段</h2>
+
+<p>用户在表单上编辑时，常常希望「改了这个，那个自动跟着变」。Odoo 有两种实现方式。</p>
+
+<h3>经典 onchange</h3>
+
+<div class="code" data-lang="py">
+<pre>
+    @api.onchange("member_id")
+    def onchange_member_id(self):
+        today_date = fields.Date.today()
+        if self.request_date != today_date:
+            self.request_date = today_date
+            return {
+                "warning": {
+                    "title": "Changed Request Date",
+                    "message": "Request date changed to today!",
+                }
+            }
+</pre>
+</div>
+
+<ul>
+  <li><code>@api.onchange</code> 列出「触发字段」（不支持点号路径）。表单上这些字段一变，客户端就调用这个方法。</li>
+  <li>方法里的 <code>self</code> 是一条<strong>虚拟记录</strong>，包含表单当前的全部值（可能还没保存过）。给它赋值，不会写数据库，只会更新表单上显示的值。</li>
+  <li>可以返回一个带 <code>warning</code> 键的字典，在界面上弹出提示（不阻止操作）。</li>
+</ul>
+
+<div class="box ver">
+  <div class="t">&#8682; onchange 不能再返回 domain</div>
+  <p>
+    书里提到 onchange 还可以返回 <code>{"domain": {"user_id": [...]}}</code> 动态修改其他字段的可选范围。这个能力在 Odoo 17 被移除。
+    现在的做法是在视图里给字段写一个<strong>依赖其他字段的动态域</strong>，比如 <code>&lt;field name="book_id" domain="[('publisher_id', '=', publisher_id)]"/&gt;</code>，
+    或者用一个计算字段算出允许的记录，再在域里引用它。
+  </p>
+</div>
+
+<h3>经典 onchange 的局限</h3>
+
+<ul>
+  <li><strong>只在表单里生效。</strong>它由客户端触发，通过代码或 API 直接 <code>write()</code> 时根本不会执行，服务端逻辑得自己再调用一遍。</li>
+  <li><strong>挂在「触发字段」上，而不是「被影响的字段」上。</strong>逻辑一复杂，很难看出某个字段到底会被哪些 onchange 改动，也不好扩展。</li>
+</ul>
+
+<h3>可写计算字段：新式的 onchange</h3>
+
+<p>
+  Odoo 13 起，计算字段的能力被扩展来覆盖这个场景：给字段加上计算方法，同时 <code>store=True</code> 和 <code>readonly=False</code>。
+  依赖的字段变化时自动重算 —— 无论是在表单里还是通过代码写入；而用户也可以手动覆盖算出来的值。
+</p>
+
+<div class="code" data-lang="py">
+<pre>
+    request_date = fields.Date(
+        default=lambda s: fields.Date.today(),
+        compute="_compute_request_date",
+        store=True,
+        readonly=False,
+    )
+
+    @api.depends("member_id")
+    def _compute_request_date(self):
+        for checkout in self:
+            checkout.request_date = fields.Date.today()
+</pre>
+</div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 250" role="img" aria-label="经典 onchange 只在表单中触发，可写计算字段在任何写入时都触发">
+  <rect class="bx-g" x="20" y="30" width="170" height="56" rx="10"/>
+  <text class="lbl on-g" x="105" y="56" text-anchor="middle">表单上改会员</text>
+  <text class="sm" x="105" y="74" text-anchor="middle">（Web 客户端）</text>
+  <rect class="bx-b" x="20" y="150" width="170" height="56" rx="10"/>
+  <text class="lbl on-b" x="105" y="176" text-anchor="middle">代码 / API 写入</text>
+  <text class="sm mono" x="105" y="194" text-anchor="middle">rec.member_id = m</text>
+
+  <rect class="bx-a" x="280" y="30" width="200" height="56" rx="10"/>
+  <text class="ttl on-a" x="380" y="54" text-anchor="middle">@api.onchange</text>
+  <text class="sm" x="380" y="74" text-anchor="middle">只有表单会调用它</text>
+
+  <rect class="bx-p" x="280" y="150" width="200" height="56" rx="10"/>
+  <text class="ttl on-p" x="380" y="174" text-anchor="middle">compute + depends</text>
+  <text class="sm" x="380" y="194" text-anchor="middle">store=True, readonly=False</text>
+
+  <rect class="bx" x="560" y="90" width="180" height="56" rx="10"/>
+  <text class="lbl" x="650" y="116" text-anchor="middle">request_date 更新</text>
+  <text class="sm" x="650" y="134" text-anchor="middle">（用户仍可手动改）</text>
+
+  <path class="ln-g" d="M192 58 H276" marker-end="url(#ar-g)"/>
+  <path class="ln-r" d="M192 170 L276 76" stroke-dasharray="5 4"/>
+  <text class="sm on-r" x="236" y="118" text-anchor="middle">✕</text>
+  <path class="ln-g" d="M192 170 L276 170" marker-end="url(#ar-g)"/>
+  <path class="ln-g" d="M192 66 L276 160" marker-end="url(#ar-g)"/>
+  <path class="ln-a" d="M482 58 L556 110" marker-end="url(#ar-a)"/>
+  <path class="ln-p" d="M482 178 L556 128" marker-end="url(#ar-p)"/>
+  <text class="sm" x="380" y="236" text-anchor="middle">可写计算字段两条路都通；经典 onchange 只有表单那条</text>
+</svg>
+<figcaption>图 8-7　onchange vs 可写计算字段</figcaption>
+</figure>
+
+<p>
+  和普通计算方法相比，可写计算字段的方法可以<strong>只在满足条件时赋值</strong>（比如某个值为空时才填默认值），没赋值的记录保留原值。
+  但它<strong>不能弹提示</strong>：计算方法的返回值会被忽略。如果确实需要提示用户，那就还得用经典 onchange。
+</p>
+
+<div class="box warn">
+  <div class="t">&#9888; 书中示例的问题</div>
+  <p>
+    书里把 onchange 方法几乎原样改成了计算方法，包括 <code>return {"warning": ...}</code> 和直接使用 <code>self.request_date</code>（没有循环）。
+    这两点在计算方法里都不对：返回值不起作用；<code>self</code> 可能包含多条记录，必须循环处理。上面的写法已修正。
+  </p>
+</div>
+
+<h2 id="mail">消息与活动</h2>
+
+<p>
+  Odoo 的消息和活动功能由「讨论」应用（技术名 <code>mail</code>）提供：<code>mail.thread</code> 提供表单底部的消息墙（chatter），
+  可以记录备注、给他人发消息，并保存消息历史，自动流程也用它记录进度；<code>mail.activity.mixin</code> 提供活动的计划和跟踪。
+</p>
+
+<p>第 4 章已经给会员加过，借书单如法炮制：在 <code>depends</code> 里加上 <code>mail</code>（前面的清单已经加了），继承两个混入类，表单里放一个 <code>&lt;chatter/&gt;</code>：</p>
+
+<div class="code" data-lang="py">
+<pre>
+class LibraryCheckout(models.Model):
+    _name = "library.checkout"
+    _description = "Checkout Request"
+    _inherit = ["mail.thread", "mail.activity.mixin"]
+</pre>
+</div>
+
+<div class="code" data-lang="xml" data-file="checkout_view.xml（表单）">
+<pre>
+&lt;form&gt;
+    &lt;sheet&gt;
+        &lt;group&gt;
+            &lt;field name="member_id"/&gt;
+            &lt;field name="request_date"/&gt;
+            &lt;field name="user_id"/&gt;
+        &lt;/group&gt;
+        &lt;notebook&gt;
+            &lt;page name="lines" string="Borrowed Books"&gt;
+                &lt;field name="line_ids"&gt;
+                    &lt;list editable="bottom"&gt;
+                        &lt;field name="book_id"/&gt;
+                        &lt;field name="note"/&gt;
+                    &lt;/list&gt;
+                &lt;/field&gt;
+            &lt;/page&gt;
+        &lt;/notebook&gt;
+    &lt;/sheet&gt;
+    &lt;chatter/&gt;
+&lt;/form&gt;
+</pre>
+</div>
+
+<h3>消息、关注者、子类型</h3>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 300" role="img" aria-label="mail.thread 和 mail.activity.mixin 添加的字段和相关模型">
+  <rect class="bx-a" x="270" y="110" width="220" height="80" rx="12"/>
+  <text class="ttl on-a" x="380" y="138" text-anchor="middle">library.checkout</text>
+  <text class="sm" x="380" y="160" text-anchor="middle">继承 mail.thread</text>
+  <text class="sm" x="380" y="178" text-anchor="middle">+ mail.activity.mixin</text>
+
+  <rect class="bx-b" x="20" y="20" width="220" height="80" rx="10"/>
+  <text class="ttl on-b" x="130" y="44" text-anchor="middle">mail.followers</text>
+  <text class="sm mono" x="130" y="66" text-anchor="middle">message_follower_ids</text>
+  <text class="sm" x="130" y="86" text-anchor="middle">关注者：会收到通知的人</text>
+
+  <rect class="bx-b" x="20" y="200" width="220" height="80" rx="10"/>
+  <text class="ttl on-b" x="130" y="224" text-anchor="middle">mail.message</text>
+  <text class="sm mono" x="130" y="246" text-anchor="middle">message_ids</text>
+  <text class="sm" x="130" y="266" text-anchor="middle">这条记录的消息历史</text>
+
+  <rect class="bx-g" x="520" y="20" width="220" height="80" rx="10"/>
+  <text class="ttl on-g" x="630" y="44" text-anchor="middle">mail.activity</text>
+  <text class="sm mono" x="630" y="66" text-anchor="middle">activity_ids</text>
+  <text class="sm" x="630" y="86" text-anchor="middle">计划的活动（打电话、会议…）</text>
+
+  <rect class="bx-p" x="520" y="200" width="220" height="80" rx="10"/>
+  <text class="ttl on-p" x="630" y="224" text-anchor="middle">mail.message.subtype</text>
+  <text class="sm" x="630" y="246" text-anchor="middle">消息子类型：决定</text>
+  <text class="sm" x="630" y="266" text-anchor="middle">哪些消息通知哪些关注者</text>
+
+  <path class="ln-b" d="M268 130 L242 90" marker-end="url(#ar-b)"/>
+  <path class="ln-b" d="M268 170 L242 212" marker-end="url(#ar-b)"/>
+  <path class="ln-g" d="M492 130 L518 90" marker-end="url(#ar-g)"/>
+  <path class="ln-p" d="M242 240 H516" stroke-dasharray="5 4"/>
+</svg>
+<figcaption>图 8-8　混入类带来的字段，以及背后的支撑模型</figcaption>
+</figure>
+
+<p>
+  消息可以带一个<strong>子类型</strong>，用来区分事件、精细控制通知。子类型在 <strong>设置 → 技术 → 讨论 → 子类型</strong>里配置，基本的有：
+</p>
+
+<div class="tw"><table>
+  <tr><th>子类型</th><th>XML ID</th><th>用途</th></tr>
+  <tr><td>Discussions</td><td><code>mail.mt_comment</code></td><td>「发送消息」：关注者会收到通知</td></tr>
+  <tr><td>Note</td><td><code>mail.mt_note</code></td><td>「记录备注」：只记录，不通知</td></tr>
+  <tr><td>Activities</td><td><code>mail.mt_activities</code></td><td>计划活动产生的消息，不用于通知</td></tr>
+</table></div>
+
+<p>
+  应用还可以定义自己的子类型，比如销售应用有「报价单已发送」「销售订单已确认」。在关注者菜单里，可以为每个关注者单独勾选他要接收哪些子类型的通知。
+</p>
+
+<h3>发消息</h3>
+
+<div class="code" data-lang="py">
+<pre>
+# 记录一条备注（默认 mail.mt_note，不发通知）
+checkout.message_post(body="Hello!")
+
+# 发一条消息，通知所有关注者
+checkout.message_post(
+    body="Hello again!",
+    subject="Hello",
+    subtype_xmlid="mail.mt_comment",
+)
+
+# 消息正文是 HTML。普通字符串会被转义；要发 HTML，用 Markup 包装
+from markupsafe import Markup
+checkout.message_post(body=Markup("&lt;b&gt;请尽快归还&lt;/b&gt;"))
+</pre>
+</div>
+
+<div class="box ver">
+  <div class="t">&#8682; message_post 的参数变了</div>
+  <ul>
+    <li>Odoo 20 的 <code>message_post()</code> 只接受<strong>关键字参数</strong>，书里的 <code>self.message_post("Hello!")</code> 要写成 <code>message_post(body="Hello!")</code>。</li>
+    <li>指定子类型用 <code>subtype_xmlid="mail.mt_comment"</code>，书里的 <code>subtype=</code> 参数已不存在。</li>
+    <li>为了防止 XSS，普通字符串正文会被当作纯文本转义；需要 HTML 时用 <code>markupsafe.Markup</code>（Html 字段读出来的值本身就是 Markup）。</li>
+  </ul>
+</div>
+
+<h3>添加关注者</h3>
+
+<div class="code" data-lang="py">
+<pre>
+checkout.message_subscribe(partner_ids=checkout.member_id.partner_id.ids)   # 关注者是联系人
+checkout.message_subscribe(partner_ids=some_users.partner_id.ids)           # 要加用户，就加他的联系人
+</pre>
+</div>
+
+<p>新关注者会使用默认的子类型；也可以传入 <code>subtype_ids=[...]</code> 指定（会重置该关注者已有的订阅）。</p>
+
+<h2 id="wizard">向导</h2>
+
+<p>
+  <strong>向导（wizard）</strong>是一种交互模式：弹出一个对话框，让用户填一些信息，然后执行某个自动化操作。
+  我们做一个「群发消息」向导：图书管理员在借书单列表里选中若干单据（比如逾期未还的），从「操作」菜单打开向导，填写标题和正文，点「发送」，就给每张借书单发一条消息、通知借书人。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 270" role="img" aria-label="向导的完整流程：选中记录、打开向导、default_get 预填、点击按钮执行">
+  <rect class="bx-g" x="20" y="20" width="170" height="90" rx="10"/>
+  <text class="ttl on-g" x="105" y="46" text-anchor="middle">① 借书单列表</text>
+  <text class="sm" x="105" y="68" text-anchor="middle">勾选 3 条记录</text>
+  <text class="sm" x="105" y="88" text-anchor="middle">操作 → Send Messages</text>
+
+  <rect class="bx-p" x="230" y="20" width="230" height="90" rx="10"/>
+  <text class="ttl on-p" x="345" y="46" text-anchor="middle">② 窗口动作（target=new）</text>
+  <text class="sm" x="345" y="68" text-anchor="middle">binding_model_id → 出现在操作菜单</text>
+  <text class="sm mono" x="345" y="88" text-anchor="middle">context: active_ids=[1,4,7]</text>
+
+  <rect class="bx-a" x="500" y="20" width="240" height="90" rx="10"/>
+  <text class="ttl on-a" x="620" y="46" text-anchor="middle">③ default_get()</text>
+  <text class="sm" x="620" y="68" text-anchor="middle">从 active_ids 预填</text>
+  <text class="sm mono" x="620" y="88" text-anchor="middle">checkout_ids = [1,4,7]</text>
+
+  <rect class="bx" x="500" y="150" width="240" height="100" rx="10"/>
+  <text class="ttl" x="620" y="174" text-anchor="middle">④ 对话框（表单视图）</text>
+  <text class="sm" x="620" y="196" text-anchor="middle">用户填写标题、正文</text>
+  <rect class="bx-a" x="530" y="210" width="90" height="26" rx="5"/><text class="sm on-a" x="575" y="228" text-anchor="middle">Send</text>
+  <rect class="bx" x="630" y="210" width="80" height="26" rx="5"/><text class="sm" x="670" y="228" text-anchor="middle">Cancel</text>
+
+  <rect class="bx-b" x="230" y="150" width="230" height="100" rx="10"/>
+  <text class="ttl on-b" x="345" y="174" text-anchor="middle">⑤ button_send()</text>
+  <text class="sm" x="345" y="196" text-anchor="middle">此时向导记录才被创建</text>
+  <text class="sm" x="345" y="216" text-anchor="middle">对每张借书单 message_post</text>
+  <text class="sm" x="345" y="236" text-anchor="middle">返回后对话框关闭</text>
+
+  <rect class="bx-d" x="20" y="150" width="170" height="100" rx="10"/>
+  <text class="ttl" x="105" y="174" text-anchor="middle">⑥ 清理</text>
+  <text class="sm" x="105" y="196" text-anchor="middle">向导记录是临时的</text>
+  <text class="sm" x="105" y="216" text-anchor="middle">定时任务会自动删除</text>
+
+  <path class="ln" d="M192 65 H226" marker-end="url(#ar)"/>
+  <path class="ln" d="M462 65 H496" marker-end="url(#ar)"/>
+  <path class="ln" d="M620 112 V146" marker-end="url(#ar)"/>
+  <path class="ln-a" d="M528 236 L464 210" marker-end="url(#ar-a)"/>
+  <path class="ln-d" d="M228 200 H194" marker-end="url(#ar)"/>
+</svg>
+<figcaption>图 8-9　一个向导从打开到执行的全过程</figcaption>
+</figure>
+
+<h3>向导模型</h3>
+
+<p>
+  向导和普通功能一样用「模型 + 视图」实现，只是模型继承自 <code>models.TransientModel</code>。它的数据也存在数据库里，但只是临时的，定时任务会定期清掉。
+</p>
+
+<div class="code" data-lang="py" data-file="library_checkout/wizard/__init__.py">
+<pre>
+from . import checkout_mass_message
+</pre>
+</div>
+
+<div class="code" data-lang="py" data-file="library_checkout/wizard/checkout_mass_message.py">
+<pre>
+import logging
+
+from odoo import api, exceptions, fields, models
+from odoo.fields import Command
+
+_logger = logging.getLogger(__name__)
+
+
+class CheckoutMassMessage(models.TransientModel):
+    _name = "library.checkout.massmessage"
+    _description = "Send Message to Borrowers"
+
+    checkout_ids = fields.Many2many("library.checkout", string="Checkouts")
+    message_subject = fields.Char()
+    message_body = fields.Html()
+
+    @api.model
+    def default_get(self, field_names):
+        defaults_dict = super().default_get(field_names)
+        if "checkout_ids" in field_names and self.env.context.get("active_model") == "library.checkout":
+            checkout_ids = self.env.context.get("active_ids", [])
+            defaults_dict["checkout_ids"] = [Command.set(checkout_ids)]
+        return defaults_dict
+
+    def button_send(self):
+        self.ensure_one()
+        if not self.checkout_ids:
+            raise exceptions.UserError(self.env._("No Checkouts were selected."))
+        if not self.message_body:
+            raise exceptions.UserError(self.env._("A message body is required."))
+        for checkout in self.checkout_ids:
+            checkout.message_post(
+                body=self.message_body,
+                subject=self.message_subject,
+                subtype_xmlid="mail.mt_comment",
+            )
+            _logger.debug(
+                "Message on %d to followers: %s",
+                checkout.id,
+                checkout.message_follower_ids,
+            )
+        _logger.info(
+            "Posted %d messages to the Checkouts: %s",
+            len(self.checkout_ids),
+            self.checkout_ids.ids,
+        )
+        return True
+</pre>
+</div>
+
+<div class="box warn">
+  <div class="t">&#9888; 临时模型和普通模型之间别用一对多</div>
+  <p>
+    普通模型不应该有指向临时模型的关系字段。如果向导上有一个一对多字段指向普通模型，普通模型就得有一个指回向导的多对一字段 —— 向导记录被自动清理时就会出问题。
+    所以向导里关联普通记录用<strong>多对多</strong>：关系表里的行会随任意一边的删除而自动删除。
+  </p>
+</div>
+
+<h3>预填数据：default_get()</h3>
+
+<p>
+  向导表单刚打开时，只是一个<strong>空表单</strong>，向导记录还没有被创建（<code>create()</code> 要等到用户点按钮时才执行）。所以预填数据只能靠「默认值」。
+  <code>default_get()</code> 是 ORM 计算默认值的方法，扩展它就能加上自己的默认值。
+</p>
+
+<p>
+  那怎么知道用户在列表里选中了哪些记录？第 7 章讲过：从一个视图跳到另一个视图时，Web 客户端会把来源信息放进上下文 ——
+  <code>active_model</code>（来源模型）、<code>active_id</code>（当前记录）、<code>active_ids</code>（选中的记录列表）。
+  我们从 <code>active_ids</code> 拿到 ID，用 <code>Command.set()</code> 设给多对多字段。先检查 <code>active_model</code> 是一个好习惯，防止向导从别的地方被打开时用错 ID。
+</p>
+
+<h3>向导的按钮逻辑</h3>
+
+<p>
+  点击按钮时，<code>self</code> 就是刚刚根据表单数据创建出来的向导记录。方法只处理一条向导记录，用 <code>ensure_one()</code> 明确这一点。
+  方法遍历选中的借书单，给每一张发一条 <code>mail.mt_comment</code> 子类型的消息，这样关注者会收到邮件通知。
+  方法最后返回 <code>True</code>：有些 XML-RPC 客户端处理不了 Python 的 <code>None</code>，养成总是返回点什么的习惯。
+</p>
+
+<h3>向导的访问规则</h3>
+
+<p>临时模型和普通模型一样需要访问规则（Odoo 13 起）。推荐只给创建、读、改，不给删除。到这里，借书模块完整的访问规则文件是：</p>
+
+<div class="code" data-lang="csv" data-file="library_checkout/security/ir.access.csv">
+<pre>
+id,name,model_id,group_id/id,operation,domain
+access_checkout_user,Checkout: user,library.checkout,library_app.library_group_user,crud,
+access_checkout_line_user,Checkout line: user,library.checkout.line,library_app.library_group_user,crud,
+access_checkout_stage_user,Checkout stage: user,library.checkout.stage,library_app.library_group_user,r,
+access_checkout_stage_manager,Checkout stage: manager,library.checkout.stage,library_app.library_group_manager,crud,
+access_checkout_massmessage_user,Mass message wizard: user,library.checkout.massmessage,library_app.library_group_user,cru,
+</pre>
+</div>
+
+<h3>向导的视图和动作</h3>
+
+<p>向导的表单视图和普通表单基本相同，只多两个特殊元素：</p>
+<ul>
+  <li><code>&lt;footer&gt;</code>：放操作按钮，显示在对话框底部。</li>
+  <li><code>special="cancel"</code> 的按钮：关闭向导，不做任何事。</li>
+</ul>
+
+<div class="code" data-lang="xml" data-file="library_checkout/wizard/checkout_mass_message_wizard_view.xml">
+<pre>
+&lt;odoo&gt;
+    &lt;record id="view_form_checkout_message" model="ir.ui.view"&gt;
+        &lt;field name="name"&gt;Library Checkout Mass Message Wizard&lt;/field&gt;
+        &lt;field name="model"&gt;library.checkout.massmessage&lt;/field&gt;
+        &lt;field name="arch" type="xml"&gt;
+            &lt;form&gt;
+                &lt;group&gt;
+                    &lt;field name="message_subject"/&gt;
+                    &lt;field name="message_body"/&gt;
+                    &lt;field name="checkout_ids"/&gt;
+                &lt;/group&gt;
+                &lt;footer&gt;
+                    &lt;button type="object" name="button_send"
+                            string="Send Messages" class="btn-primary"/&gt;
+                    &lt;button special="cancel" string="Cancel" class="btn-secondary"/&gt;
+                &lt;/footer&gt;
+            &lt;/form&gt;
+        &lt;/field&gt;
+    &lt;/record&gt;
+
+    &lt;record id="action_checkout_message" model="ir.actions.act_window"&gt;
+        &lt;field name="name"&gt;Send Messages&lt;/field&gt;
+        &lt;field name="res_model"&gt;library.checkout.massmessage&lt;/field&gt;
+        &lt;field name="view_mode"&gt;form&lt;/field&gt;
+        &lt;field name="binding_model_id" ref="model_library_checkout"/&gt;
+        &lt;field name="binding_view_types"&gt;form,list&lt;/field&gt;
+        &lt;field name="target"&gt;new&lt;/field&gt;
+    &lt;/record&gt;
+&lt;/odoo&gt;
+</pre>
+</div>
+
+<ul>
+  <li><code>target="new"</code>：在弹出的对话框里打开，而不是替换当前页面。</li>
+  <li><code>binding_model_id</code>：把这个动作「绑定」到借书单模型上，它就会出现在借书单的 <strong>⚙ 操作</strong>菜单里。</li>
+  <li><code>binding_view_types</code>：在哪些视图类型的操作菜单里出现。</li>
+</ul>
+
+<p>别忘了把这个 XML 加进清单 —— 前面的清单里已经写好了，并且放在 <code>views/</code> 之前，因为后面第 10 章的列表视图会引用这个动作。</p>
+
+<h2 id="exceptions">抛出异常</h2>
+
+<p>当输入不合适、操作不该被执行时，代码要中断执行并告诉用户原因 —— 这就是抛出异常。Odoo 在 <code>odoo.exceptions</code> 里提供了专用的异常类：</p>
+
+<div class="tw"><table>
+  <tr><th>异常</th><th>什么时候用</th></tr>
+  <tr><td><code>UserError</code></td><td>操作违反了业务规则，告诉用户哪里不对。最常用</td></tr>
+  <tr><td><code>ValidationError</code></td><td>数据校验失败，用在 <code>@api.constrains</code> 方法里</td></tr>
+  <tr><td><code>AccessError</code></td><td>没有权限。ORM 会自动抛出，你一般不需要自己抛</td></tr>
+  <tr><td><code>MissingError</code></td><td>记录不存在（比如已被别人删除）</td></tr>
+  <tr><td><code>RedirectWarning</code></td><td>出错的同时给用户一个按钮，跳转到能解决问题的地方（比如「去配置」）</td></tr>
+</table></div>
+
+<p>
+  一次方法调用里所有的数据修改都在同一个数据库事务里，一旦抛出异常，<strong>之前所做的全部修改都会被撤销</strong>。
+  所以检查放在前面还是后面都不会留下半截数据，但尽早检查可以少做无用功。前面向导里的两个检查就是例子。
+</p>
+
+<h2 id="tests">单元测试</h2>
+
+<p>
+  自动化测试是公认的最佳实践。它不仅确认代码按预期工作，更重要的是为将来的修改和重构提供了一张<strong>安全网</strong>。
+  对 Python 这种没有编译步骤的语言，测试还能抓出拼写错误之类的低级问题。写测试有两个目标：<strong>覆盖率</strong>（每一行代码都至少被一个测试执行过）和<strong>正确性</strong>。
+</p>
+
+<h3>测试类</h3>
+
+<p>测试放在 <code>tests/</code> 子目录，不需要在模块的 <code>__init__.py</code> 里导入；<code>tests/__init__.py</code> 导入各个测试文件：</p>
+
+<div class="code" data-lang="py" data-file="library_checkout/tests/__init__.py">
+<pre>
+from . import test_checkout_mass_message
+</pre>
+</div>
+
+<p>Odoo 提供的主要测试基类：</p>
+<ul>
+  <li><code>TransactionCase</code>：每个测试方法在自己的保存点里运行，结束后回滚；测试之间互不影响。<code>setUpClass()</code> 里准备的数据对所有测试可见，最后统一回滚。</li>
+  <li><code>HttpCase</code>：在 <code>TransactionCase</code> 基础上能发起 HTTP 请求、驱动无头浏览器，用于测试网页和前端交互（「tour」测试）。</li>
+</ul>
+
+<div class="box ver">
+  <div class="t">&#8682; SingleTransactionCase 已被移除</div>
+  <p>
+    书里的测试用的是 <code>SingleTransactionCase</code>（所有测试共用一个事务、按名字顺序执行、相互依赖）。它在 Odoo 20 中已经不存在了。
+    改用 <code>TransactionCase</code>，并把共享的测试数据放在 <code>setUpClass()</code> 里 —— 既有接近的速度，又保持测试之间相互独立。
+    另外，Odoo 20 中模块测试默认带 <code>post_install</code> 标签：在所有模块安装完之后才运行。
+  </p>
+</div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 230" role="img" aria-label="TransactionCase 的执行过程：类级准备数据，每个测试在保存点中运行并回滚">
+  <rect class="bx-p" x="20" y="20" width="720" height="190" rx="12"/>
+  <text class="ttl on-p" x="40" y="44">事务（整个测试类）</text>
+  <rect class="bx-a" x="40" y="60" width="160" height="60" rx="8"/>
+  <text class="lbl on-a" x="120" y="86" text-anchor="middle">setUpClass()</text>
+  <text class="sm" x="120" y="106" text-anchor="middle">准备共享数据</text>
+
+  <rect class="bx-d" x="230" y="60" width="150" height="120" rx="8"/>
+  <text class="sm" x="305" y="80" text-anchor="middle">保存点</text>
+  <rect class="bx-g" x="245" y="90" width="120" height="40" rx="6"/>
+  <text class="sm on-g" x="305" y="115" text-anchor="middle">test_01_…</text>
+  <text class="sm on-r" x="305" y="160" text-anchor="middle">↺ 回滚到保存点</text>
+
+  <rect class="bx-d" x="400" y="60" width="150" height="120" rx="8"/>
+  <text class="sm" x="475" y="80" text-anchor="middle">保存点</text>
+  <rect class="bx-g" x="415" y="90" width="120" height="40" rx="6"/>
+  <text class="sm on-g" x="475" y="115" text-anchor="middle">test_02_…</text>
+  <text class="sm on-r" x="475" y="160" text-anchor="middle">↺ 回滚到保存点</text>
+
+  <rect class="bx-r" x="570" y="60" width="150" height="60" rx="8"/>
+  <text class="lbl on-r" x="645" y="86" text-anchor="middle">全部结束</text>
+  <text class="sm" x="645" y="106" text-anchor="middle">整个事务回滚</text>
+
+  <path class="ln" d="M202 90 H226" marker-end="url(#ar)"/>
+  <path class="ln" d="M382 110 H396" marker-end="url(#ar)"/>
+  <path class="ln" d="M552 110 L566 96" marker-end="url(#ar)"/>
+  <text class="sm" x="380" y="202" text-anchor="middle">测试不会在数据库里留下任何痕迹；每个测试看到的都是 setUpClass 之后的干净状态</text>
+</svg>
+<figcaption>图 8-10　TransactionCase 的隔离方式</figcaption>
+</figure>
+
+<h3>编写测试</h3>
+
+<div class="code" data-lang="py" data-file="library_checkout/tests/test_checkout_mass_message.py">
+<pre>
+from odoo import exceptions
+from odoo.tests import TransactionCase
+
+
+class TestWizard(TransactionCase):
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        # 以管理员身份运行，顺便检查访问规则
+        admin_user = cls.env.ref("base.user_admin")
+        cls.env = cls.env(user=admin_user)
+        cls.Checkout = cls.env["library.checkout"]
+        cls.Wizard = cls.env["library.checkout.massmessage"]
+        a_member = cls.env["library.member"].create(
+            {"partner_id": admin_user.partner_id.id})
+        cls.checkout0 = cls.Checkout.create({"member_id": a_member.id})
+
+    def test_01_button_send(self):
+        """Send 按钮应在借书单上生成一条消息"""
+        count_before = len(self.checkout0.message_ids)
+        Wizard0 = self.Wizard.with_context(
+            active_model="library.checkout",
+            active_ids=self.checkout0.ids,
+        )
+        wizard0 = Wizard0.create({
+            "message_subject": "Hello",
+            "message_body": "This is a message.",
+        })
+        wizard0.button_send()
+        count_after = len(self.checkout0.message_ids)
+        self.assertEqual(
+            count_before + 1,
+            count_after,
+            "Expected one additional message in the Checkout.",
+        )
+
+    def test_02_button_send_empty_body(self):
+        """正文为空时 Send 按钮应报错"""
+        Wizard0 = self.Wizard.with_context(
+            active_model="library.checkout",
+            active_ids=self.checkout0.ids,
+        )
+        wizard0 = Wizard0.create({})
+        with self.assertRaises(exceptions.UserError):
+            wizard0.button_send()
+</pre>
+</div>
+
+<ul>
+  <li>测试方法名以 <code>test_</code> 开头才会被发现；方法的 docstring 会在运行时打印到日志，用来描述这个测试在测什么。</li>
+  <li>
+    发消息的方法没有返回值可以检查，所以换个思路：<strong>数一数</strong>执行前后借书单上的消息数，应该多一条。
+    <code>assertEqual</code> 的最后一个参数是测试失败时显示的说明，强烈建议写上。其他断言方法见 <a href="https://docs.python.org/3/library/unittest.html#test-cases">unittest 文档</a>。
+  </li>
+  <li>运行向导需要模拟界面的流程：用 <code>with_context()</code> 放入 <code>active_ids</code>，<code>create()</code> 出向导记录（相当于用户填好表单），再调用按钮方法。</li>
+  <li>测试「应该抛异常」的情况，把代码放进 <code>with self.assertRaises(异常类):</code> 块里：没有抛出这个异常，测试就失败。</li>
+</ul>
+
+<div class="box tip">
+  <div class="t">&#128161; 用 Form 模拟真实表单</div>
+  <p>
+    <code>odoo.tests.Form</code> 能像用户一样操作一个表单：设置字段会触发 onchange 和计算字段，保存时走正常的创建流程。测试界面联动逻辑时特别有用：
+  </p>
+  <div class="code" data-lang="py"><pre>
+from odoo.tests import Form
+
+with Form(self.env["library.checkout"]) as f:
+    f.member_id = a_member          # 会触发 request_date 的重算
+checkout = f.record                 # 退出 with 时自动保存
+</pre></div>
+</div>
+
+<h3>运行测试</h3>
+
+<div class="code" data-lang="bash">
+<pre>
+# 升级模块并运行它的测试
+(env20) $ odoo -c library.conf -d library -u library_checkout --test-enable --stop-after-init
+
+# 用标签精确选择要跑的测试：只跑 library_checkout 模块的
+(env20) $ odoo -c library.conf -d library -u library_checkout --test-tags /library_checkout --stop
+</pre>
+</div>
+
+<p>
+  只有被安装或升级的模块的测试会运行（如果它的依赖需要被安装，依赖的测试也会跑）。日志里会看到类似
+  <code>INFO library odoo.modules.module: odoo.addons.library_checkout.tests.test_checkout_mass_message running tests.</code> 的信息，失败的测试会以 ERROR 级别报告。
+</p>
+
+<h2 id="logging">日志</h2>
+
+<p>写日志对监控和审计运行中的系统很有用，也方便日后排查问题而不必改代码。在文件顶部准备一个日志对象：</p>
+
+<div class="code" data-lang="py">
+<pre>
+import logging
+
+_logger = logging.getLogger(__name__)
+
+_logger.debug("一条 DEBUG 消息")
+_logger.info("一条 INFO 消息")
+_logger.warning("一条 WARNING 消息")
+_logger.error("一条 ERROR 消息")
+</pre>
+</div>
+
+<p>
+  <code>__name__</code> 是当前 Python 模块的名字（如 <code>odoo.addons.library_checkout.wizard.checkout_mass_message</code>），这样日志会标明消息来自哪个文件。
+  向导里的 <code>_logger.info(...)</code> 会在日志里输出：
+</p>
+
+<div class="code" data-lang="text">
+<pre>
+INFO library odoo.addons.library_checkout.wizard.checkout_mass_message: Posted 2 messages to the Checkouts: [3, 4]
+</pre>
+</div>
+
+<div class="box key">
+  <div class="t">&#9733; 不要自己格式化日志字符串</div>
+  <p>
+    写 <code>_logger.info("Hello %s", name)</code>，不要写 <code>_logger.info("Hello %s" % name)</code> 或 f-string。
+    把参数交给日志模块，它只在这条消息真的要输出时才格式化，被过滤掉的 debug 消息就不会白白消耗时间。
+  </p>
+</div>
+
+<p>
+  <code>debug</code> 级别的消息默认不输出（默认级别是 INFO）。用第 2 章讲过的选项打开：<code>--log-level=debug</code> 打开全部；
+  更精确地只打开某个文件的：
+</p>
+
+<div class="code" data-lang="bash">
+<pre>
+odoo -c library.conf --log-handler=odoo.addons.library_checkout.wizard.checkout_mass_message:DEBUG
+</pre>
+</div>
+
+<h2 id="debug">调试</h2>
+
+<h3>服务器开发选项</h3>
+
+<p>回顾第 2 章：开发时用 <code>--dev=all</code> 启动，Python 代码保存后自动重载（需要 <code>pip install watchdog</code>），视图直接从 XML 文件读取。改了模型结构仍然需要升级模块。</p>
+
+<h3>Python 调试器</h3>
+
+<p>
+  Odoo 是一个服务器：等待请求、执行 Python 代码、返回结果。所以断点是设在<strong>服务器端</strong>的，程序在断点处暂停时，要在<strong>运行服务器的那个终端</strong>里操作调试器。
+  设置断点只需在代码里加一行：
+</p>
+
+<div class="code" data-lang="py">
+<pre>
+    def button_send(self):
+        breakpoint()          # Python 3.7+ 内置；等价于 import pdb; pdb.set_trace()
+        self.ensure_one()
+        # ...
+</pre>
+</div>
+
+<p>重启服务器，打开向导点「发送」，浏览器会一直转圈，而服务器终端里出现调试提示符：</p>
+
+<div class="code" data-lang="text">
+<pre>
+&gt; /home/you/work20/library/library_checkout/wizard/checkout_mass_message.py(35)button_send()
+-&gt; self.ensure_one()
+(Pdb) self.checkout_ids
+library.checkout(1,)
+(Pdb) n
+</pre>
+</div>
+
+<p>第一行是文件、行号和函数名，第二行是下一行要执行的代码。最常用的命令：</p>
+
+<div class="tw"><table>
+  <tr><th>命令</th><th>作用</th><th>命令</th><th>作用</th></tr>
+  <tr><td><code>h</code></td><td>帮助</td><td><code>l</code></td><td>列出当前位置附近的代码</td></tr>
+  <tr><td><code>p 表达式</code></td><td>打印表达式的值</td><td><code>pp 表达式</code></td><td>美化打印（字典、列表）</td></tr>
+  <tr><td><code>n</code></td><td>执行到下一行（不进入函数）</td><td><code>s</code></td><td>进入当前行调用的函数</td></tr>
+  <tr><td><code>c</code></td><td>继续运行到下一个断点</td><td><code>q</code></td><td>退出（中断执行）</td></tr>
+  <tr><td><code>u</code> / <code>d</code></td><td>在调用栈里上移 / 下移</td><td><code>bt</code></td><td>显示完整调用栈</td></tr>
+</table></div>
+
+<p>
+  调试提示符里可以执行任意 Python 表达式，甚至修改变量。直接回车会重复上一条命令。
+</p>
+
+<div class="box tip">
+  <div class="t">&#128161; 调试时的小麻烦</div>
+  <ul>
+    <li>调试期间日志会不断插进来。用 <code>--log-handler=odoo.http.server:WARNING</code> 关掉请求日志，或 <code>--log-level=warn</code> 降低整体日志级别。</li>
+    <li>退出调试器后终端如果「失灵」（输入不显示），盲打 <code>reset</code> 回车即可恢复。</li>
+    <li>更好用的调试器：<code>pip install ipdb</code>（带补全和高亮）或 <code>pudb</code>（全屏的终端界面）。设置环境变量 <code>PYTHONBREAKPOINT=ipdb.set_trace</code> 后，<code>breakpoint()</code> 就会使用它。</li>
+    <li>VS Code、PyCharm 等编辑器也可以直接附加到 Odoo 进程做图形化调试：用编辑器的 Python 调试配置运行 <code>odoo-bin</code> 即可。</li>
+  </ul>
+</div>
+
+<div class="box ver">
+  <div class="t">&#8682; --dev 不再自动进入调试器</div>
+  <p>书里的 <code>--dev=all</code> 会在出现未处理异常时自动进入 pdb，并支持 <code>--dev=ipdb</code> 等选项。Odoo 20 的 <code>--dev</code> 不再包含这些功能，需要断点时用 <code>breakpoint()</code>。</p>
+</div>
+
+<h3>print 与日志</h3>
+
+<p>
+  有时只想看看某个变量的值，或确认某段代码有没有执行到，<code>print()</code> 就够了，它不会暂停程序。但打印内容只输出到标准输出，日志写文件时不会记录。
+  <code>print</code> 只能作为开发时的辅助手段，不要带进正式代码；如果它对排查生产环境的问题也有帮助，就改成 debug 级别的日志。
+</p>
+
+<h3>检查运行中的进程</h3>
+
+<p>先找到 Odoo 进程的 PID（每条日志时间戳后面的数字就是，也可以用 <code>ps ax | grep odoo</code>），然后可以给它发信号：</p>
+
+<div class="code" data-lang="bash">
+<pre>
+kill -3 &lt;PID&gt;       # SIGQUIT：在日志里打印所有线程当前的调用栈（不会停止服务）
+kill -HUP &lt;PID&gt;     # 重启服务器（重新加载代码和配置）
+kill -TERM &lt;PID&gt;    # 正常关闭
+</pre>
+</div>
+
+<p>
+  <code>kill -3</code> 在服务器「卡住」时特别有用：它告诉你每个线程此刻正在执行哪一行代码。
+  更系统的性能分析可以用 Odoo 自带的<strong>性能分析器</strong>：开发者模式下的调试菜单里可以开启 profiling，结果在 <strong>设置 → 技术 → 数据库结构 → Profiling</strong> 里查看。
+</p>
+
+<h2 id="summary">小结</h2>
+
+<ul>
+  <li>业务逻辑可以挂在字段定义（约束、计算、默认值）、记录事件（create / write / ondelete / onchange）、用户动作（按钮、服务器动作、向导）以及定时任务和自动化规则上。优先选择声明式的方式。</li>
+  <li>「单据头 + 明细行」用一对多 + 多对一实现；「阶段 + 状态」兼顾了可配置性和代码的可靠性；<code>group_expand</code> 让空阶段也显示出来。</li>
+  <li>扩展 <code>create()</code> 用 <code>@api.model_create_multi</code>；扩展 <code>write()</code> 优先修改 <code>vals</code>，需要在 super 之后写入时用上下文标记防递归；阻止删除用 <code>@api.ondelete</code>。</li>
+  <li>界面联动：经典 <code>@api.onchange</code> 只在表单里生效、可以弹提示；可写计算字段在任何写入时都生效，是更推荐的方式。</li>
+  <li><code>mail.thread</code> / <code>mail.activity.mixin</code> 提供消息、关注者和活动；<code>message_post(body=..., subtype_xmlid=...)</code> 发消息。</li>
+  <li>向导 = 临时模型 + 表单视图 + 带 <code>binding_model_id</code> 和 <code>target="new"</code> 的窗口动作；用 <code>default_get</code> 读取 <code>active_ids</code> 预填数据。</li>
+  <li><code>UserError</code> 告诉用户操作不合法，异常会回滚整个事务。</li>
+  <li>测试用 <code>TransactionCase</code> + <code>setUpClass</code>；日志用 <code>logging</code> 并把参数交给日志模块格式化；调试用 <code>breakpoint()</code>。</li>
+</ul>
+
+<div class="exercise">
+  <h3>动手练习</h3>
+  <ol>
+    <li>按本章写出 <code>library_checkout</code> 模块，安装后创建几张借书单，把它们在阶段之间移动，确认借出日期和归还日期被正确设置。</li>
+    <li>给借书单加一个存储的计算字段 <code>num_books</code>（借了几本书），依赖 <code>line_ids</code>。</li>
+    <li>加一个约束：同一张借书单里不能出现重复的书。</li>
+    <li>给借书单加一个「Return Books」按钮（<code>type="object"</code>），把单据移到第一个 <code>done</code> 状态的阶段。</li>
+    <li>借书单创建时，自动把借书会员的联系人加为关注者（扩展 <code>create()</code>，在 super 之后调用 <code>message_subscribe</code>）。</li>
+    <li>为 <code>create()</code> 里的状态检查、<code>@api.ondelete</code> 的删除检查各写一个测试。</li>
+    <li>在 <code>write()</code> 里放一个 <code>breakpoint()</code>，在界面上拖动看板卡片换阶段，用调试器观察 <code>vals</code> 的内容。</li>
+  </ol>
+</div>
+<div id="pager"></div>
+</main>
+</div>
+<script src="assets/site.js"></script>
+</body>
+</html>

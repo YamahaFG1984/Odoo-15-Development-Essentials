@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>附录 · 15 → 20 变化速查 — Odoo 20 开发入门</title>
+<meta name="description" content="从 Odoo 15 到 Odoo 20 的开发变化速查表：环境与命令行、安全、ORM、视图、看板与前端、报表、Web 控制器与 API、部署，以及用 upgrade_code 自动迁移代码的方法。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-chapter="16">
+<div id="app">
+<aside id="sidebar"></aside>
+<main>
+<span class="chapter-eyebrow">附录</span>
+<h1>15 → 20 变化速查</h1>
+<p class="lede">
+  原书基于 Odoo 15，本教程按 Odoo 20 讲解，每一章里都用紫色的「Odoo 20 变化」提示框标出了差异。
+  这个附录把它们集中到一起，按主题排成对照表。当你在网上看到旧教程、旧代码，或者要把老模块迁移到新版本时，可以在这里快速查到「现在该怎么写」。
+</p>
+
+<div id="chapter-toc"></div>
+
+<h2 id="timeline">五个大版本，一张时间线</h2>
+
+<p>Odoo 每年秋天发布一个大版本。从 15 到 20 的五年里，对开发者影响最大的变化分布如下：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 330" role="img" aria-label="Odoo 15 到 20 的版本时间线与主要变化">
+  <path class="ln-d" d="M40 70 H720"/>
+  <circle class="bx-d" cx="60" cy="70" r="14"/><text class="lbl" x="60" y="75" text-anchor="middle">15</text>
+  <circle class="bx-b" cx="190" cy="70" r="14"/><text class="lbl on-b" x="190" y="75" text-anchor="middle">16</text>
+  <circle class="bx-b" cx="320" cy="70" r="14"/><text class="lbl on-b" x="320" y="75" text-anchor="middle">17</text>
+  <circle class="bx-a" cx="450" cy="70" r="14"/><text class="lbl on-a" x="450" y="75" text-anchor="middle">18</text>
+  <circle class="bx-p" cx="580" cy="70" r="14"/><text class="lbl on-p" x="580" y="75" text-anchor="middle">19</text>
+  <circle class="bx-g" cx="700" cy="70" r="16"/><text class="lbl on-g" x="700" y="75" text-anchor="middle">20</text>
+  <text class="sm" x="60" y="40" text-anchor="middle">2021 · 原书</text>
+  <text class="sm" x="190" y="40" text-anchor="middle">2022</text>
+  <text class="sm" x="320" y="40" text-anchor="middle">2023</text>
+  <text class="sm" x="450" y="40" text-anchor="middle">2024</text>
+  <text class="sm" x="580" y="40" text-anchor="middle">2025</text>
+  <text class="sm" x="700" y="40" text-anchor="middle">2026 · 本教程</text>
+
+  <rect class="bx-b" x="125" y="100" width="130" height="210" rx="10"/>
+  <text class="sm on-b" x="190" y="124" text-anchor="middle">表单始终可编辑</text>
+  <text class="sm on-b" x="190" y="146" text-anchor="middle">Bootstrap 5</text>
+  <text class="sm on-b" x="190" y="168" text-anchor="middle">WebSocket 取代</text>
+  <text class="sm on-b" x="190" y="186" text-anchor="middle">长轮询</text>
+  <text class="sm on-b" x="190" y="208" text-anchor="middle">assets_common</text>
+  <text class="sm on-b" x="190" y="226" text-anchor="middle">拆分</text>
+  <text class="sm on-b" x="190" y="248" text-anchor="middle">缓存 API 改名</text>
+
+  <rect class="bx-b" x="265" y="100" width="110" height="210" rx="10"/>
+  <text class="sm on-b" x="320" y="124" text-anchor="middle">attrs / states</text>
+  <text class="sm on-b" x="320" y="142" text-anchor="middle">移除</text>
+  <text class="sm on-b" x="320" y="164" text-anchor="middle">name_get 废弃</text>
+  <text class="sm on-b" x="320" y="186" text-anchor="middle">any 运算符</text>
+  <text class="sm on-b" x="320" y="208" text-anchor="middle">onchange 不能</text>
+  <text class="sm on-b" x="320" y="226" text-anchor="middle">返回 domain</text>
+  <text class="sm on-b" x="320" y="248" text-anchor="middle">aggregator</text>
+
+  <rect class="bx-a" x="385" y="100" width="130" height="210" rx="10"/>
+  <text class="sm on-a" x="450" y="124" text-anchor="middle">tree → list</text>
+  <text class="sm on-a" x="450" y="146" text-anchor="middle">看板 card 模板</text>
+  <text class="sm on-a" x="450" y="168" text-anchor="middle">&lt;chatter/&gt;</text>
+  <text class="sm on-a" x="450" y="190" text-anchor="middle">/odoo 网址</text>
+  <text class="sm on-a" x="450" y="212" text-anchor="middle">ir.property 移除</text>
+  <text class="sm on-a" x="450" y="234" text-anchor="middle">self.env._()</text>
+
+  <rect class="bx-p" x="525" y="100" width="110" height="210" rx="10"/>
+  <text class="sm on-p" x="580" y="124" text-anchor="middle">JSON-2 API</text>
+  <text class="sm on-p" x="580" y="146" text-anchor="middle">jsonrpc 路由</text>
+  <text class="sm on-p" x="580" y="168" text-anchor="middle">Domain 类</text>
+  <text class="sm on-p" x="580" y="190" text-anchor="middle">动态日期</text>
+  <text class="sm on-p" x="580" y="212" text-anchor="middle">二进制值对象</text>
+  <text class="sm on-p" x="580" y="234" text-anchor="middle">ir.access</text>
+  <text class="sm on-p" x="580" y="256" text-anchor="middle">Material 图标</text>
+  <text class="sm on-p" x="580" y="278" text-anchor="middle">演示数据默认关</text>
+
+  <rect class="bx-g" x="645" y="100" width="105" height="210" rx="10"/>
+  <text class="sm on-g" x="697" y="124" text-anchor="middle">OWL 3</text>
+  <text class="sm on-g" x="697" y="146" text-anchor="middle">RPC db 服务</text>
+  <text class="sm on-g" x="697" y="164" text-anchor="middle">移除</text>
+  <text class="sm on-g" x="697" y="186" text-anchor="middle">日期筛选范围</text>
+  <text class="sm on-g" x="697" y="204" text-anchor="middle">属性移除</text>
+</svg>
+<figcaption>图 16-1　从 15 到 20 的部分主要变化。季度版本（如 18.3）引入的变化归入下一个大版本（19）</figcaption>
+</figure>
+
+<div class="box note">
+  <div class="t">怎么读下面的表</div>
+  <p>
+    「版本」一列是该变化<strong>首次出现</strong>的版本（季度版本如 18.3、19.4 只在 Odoo Online 上发布，随后并入下一个大版本）。
+    标「—」的表示与 Odoo 版本无关（书中笔误、Nginx 等外部变化），或者具体从哪个版本开始没有逐一核实。
+    无论哪种情况，「Odoo 20」一列的写法都已对照 Odoo 20 源码核实过。「章」一列指向本教程中详细讲解的章节。很多旧写法在新版本里仍然兼容但会产生弃用警告；表中标「移除」的则会直接报错。
+  </p>
+</div>
+
+<h2 id="env">环境与命令行</h2>
+
+<div class="tw"><table>
+  <tr><th>Odoo 15（书中）</th><th>Odoo 20</th><th>版本</th><th>章</th></tr>
+  <tr><td>Ubuntu 20.04 · Python 3.8 · PostgreSQL 12</td><td>Ubuntu 24.04 · <strong>Python 3.12–3.14</strong> · <strong>PostgreSQL 16+</strong></td><td>20</td><td><a href="ch02.html">2</a></td></tr>
+  <tr><td>新库默认装演示数据，用 <code>--without-demo=all</code> 关闭</td><td>默认<strong>不装</strong>，需要时加 <code>--with-demo</code></td><td>18.3</td><td><a href="ch02.html">2</a></td></tr>
+  <tr><td>后台网址 <code>/web#...</code>、<code>/web?debug=1</code></td><td><code>/odoo/...</code>、<code>/odoo?debug=1</code>（旧地址自动跳转）</td><td>18</td><td><a href="ch01.html">1</a></td></tr>
+  <tr><td><code>--dev=all</code> 包含 pdb，自动进入调试器</td><td><code>--dev</code> 只有 access、qweb、reload、xml（和 replica）；断点用 <code>breakpoint()</code></td><td>—</td><td><a href="ch02.html">2</a>、<a href="ch08.html">8</a></td></tr>
+  <tr><td>请求日志来自 <code>werkzeug</code></td><td>新 HTTP 服务器，日志记录器 <code>odoo.http.server</code></td><td>19.4</td><td><a href="ch02.html">2</a></td></tr>
+  <tr><td>用 <code>pg_dump</code>、<code>createdb</code>、手动复制 filestore 管理数据库</td><td><code>odoo db init / dump / load / duplicate / rename / drop</code>，连同 filestore 一起处理</td><td>—</td><td><a href="ch02.html">2</a>、<a href="ch15.html">15</a></td></tr>
+  <tr><td><code>-i</code> / <code>-u</code> 安装升级模块</td><td>仍然可用；另有 <code>odoo module install / upgrade / uninstall</code></td><td>—</td><td><a href="ch02.html">2</a>、<a href="ch15.html">15</a></td></tr>
+  <tr><td>预发布库要手写 SQL 停用邮件、定时任务</td><td><code>odoo neutralize</code> 或 <code>odoo db duplicate --neutralize</code></td><td>16</td><td><a href="ch15.html">15</a></td></tr>
+</table></div>
+
+<h2 id="security">模块结构与访问安全</h2>
+
+<div class="tw"><table>
+  <tr><th>Odoo 15（书中）</th><th>Odoo 20</th><th>版本</th><th>章</th></tr>
+  <tr><td><code>ir.model.access.csv</code>（perm_read…）+ XML 里的 <code>ir.rule</code></td><td>一个 <code>security/ir.access.csv</code>：<code>id,name,model_id,group_id/id,operation,domain</code></td><td>19.4</td><td><a href="ch03.html">3</a></td></tr>
+  <tr><td>菜单「访问权限」和「记录规则」两处</td><td>「设置 → 技术 → 安全 → 访问权限」一处</td><td>19.4</td><td><a href="ch01.html">1</a></td></tr>
+  <tr><td>组的 <code>category_id</code></td><td>组的 <code>privilege_id</code> → <code>res.groups.privilege</code>（其上再有 <code>category_id</code>）</td><td>19</td><td><a href="ch03.html">3</a></td></tr>
+  <tr><td>组的 <code>users</code>、用户的 <code>groups_id</code></td><td><code>user_ids</code>、<code>group_ids</code></td><td>19</td><td><a href="ch03.html">3</a></td></tr>
+  <tr><td>缺少访问规则时日志警告「has no access rules」</td><td>不再提示，需要自己记得写</td><td>—</td><td><a href="ch03.html">3</a></td></tr>
+  <tr><td><code>&lt;act_window&gt;</code> 快捷标签</td><td><code>&lt;record model="ir.actions.act_window"&gt;</code></td><td>移除</td><td><a href="ch04.html">4</a></td></tr>
+  <tr><td>XML 中 <code>type="base64" file="..."</code></td><td><code>type="bytes" file="..."</code></td><td>19.3</td><td><a href="ch05.html">5</a></td></tr>
+  <tr><td>清单 <code>assets</code> 写成集合 <code>{...}</code>（书中错误）</td><td>列表 <code>[...]</code>，保证顺序</td><td>—</td><td><a href="ch11.html">11</a></td></tr>
+</table></div>
+
+<h2 id="orm">模型与 ORM</h2>
+
+<div class="tw"><table>
+  <tr><th>Odoo 15（书中）</th><th>Odoo 20</th><th>版本</th><th>章</th></tr>
+  <tr><td><code>_sql_constraints = [...]</code></td><td><code>_name_uniq = models.Constraint("UNIQUE(name)", "...")</code>；索引用 <code>models.Index</code> / <code>models.UniqueIndex</code></td><td>18.1</td><td><a href="ch06.html">6</a></td></tr>
+  <tr><td>字段属性 <code>states=</code>、<code>deprecated=</code></td><td>移除；只读等条件改写在视图里</td><td>17</td><td><a href="ch06.html">6</a></td></tr>
+  <tr><td><code>group_operator=</code></td><td><code>aggregator=</code></td><td>17.2</td><td><a href="ch06.html">6</a></td></tr>
+  <tr><td><code>auto_join=True</code></td><td><code>bypass_search_access=True</code></td><td>19</td><td><a href="ch06.html">6</a></td></tr>
+  <tr><td><code>name_get()</code>、重写 <code>_name_search()</code></td><td><code>_compute_display_name()</code>、<code>_rec_names_search = [...]</code></td><td>17</td><td><a href="ch06.html">6</a></td></tr>
+  <tr><td><code>self._cr</code>、<code>self._uid</code>、<code>self._context</code></td><td><code>self.env.cr</code>、<code>self.env.uid</code>、<code>self.env.context</code></td><td>19</td><td><a href="ch07.html">7</a></td></tr>
+  <tr><td><code>from odoo.osv import expression</code>、<code>expression.AND</code></td><td><code>from odoo.fields import Domain</code>、<code>Domain.AND</code>、<code>Domain(...) &amp; Domain(...)</code></td><td>19</td><td><a href="ch07.html">7</a></td></tr>
+  <tr><td>点号路径表达关联条件</td><td>还可以用 <code>any</code> / <code>not any</code> 运算符</td><td>17</td><td><a href="ch07.html">7</a></td></tr>
+  <tr><td>在 Python 里先算好日期再放进域</td><td>域里直接写 <code>'today -1y'</code>、<code>'now +3d'</code> 等动态日期</td><td>18.5</td><td><a href="ch07.html">7</a></td></tr>
+  <tr><td><code>read_group(domain, fields, groupby, lazy=False)</code> 返回字典</td><td><code>_read_group(domain, groupby, aggregates)</code> 返回元组</td><td>18.2</td><td><a href="ch07.html">7</a></td></tr>
+  <tr><td>二进制字段赋值前 <code>base64.b64encode()</code></td><td><code>BinaryBytes(raw)</code> 赋值，读取用 <code>.content</code></td><td>19.3</td><td><a href="ch07.html">7</a></td></tr>
+  <tr><td><code>self.env.cache.invalidate()</code></td><td><code>invalidate_all / _model / _recordset</code>，<code>flush_all / _model / _recordset</code></td><td>16</td><td><a href="ch07.html">7</a></td></tr>
+  <tr><td><code>@api.model def create(self, vals)</code></td><td><code>@api.model_create_multi def create(self, vals_list)</code></td><td>—</td><td><a href="ch08.html">8</a></td></tr>
+  <tr><td><code>group_expand(self, stages, domain, order)</code></td><td><code>(self, stages, domain)</code></td><td>17</td><td><a href="ch08.html">8</a></td></tr>
+  <tr><td>onchange 返回 <code>{"domain": ...}</code></td><td>移除；在视图里写依赖其他字段的动态域</td><td>17</td><td><a href="ch08.html">8</a></td></tr>
+  <tr><td><code>message_post("Hello", subtype=...)</code></td><td><code>message_post(body=..., subtype_xmlid="mail.mt_comment")</code>，只接受关键字参数</td><td>—</td><td><a href="ch08.html">8</a></td></tr>
+  <tr><td><code>from odoo import _</code> + <code>_("...")</code></td><td>推荐 <code>self.env._("...")</code></td><td>18</td><td><a href="ch03.html">3</a></td></tr>
+  <tr><td><code>SingleTransactionCase</code></td><td>移除；用 <code>TransactionCase</code> + <code>setUpClass()</code>；测试默认 <code>post_install</code></td><td>—</td><td><a href="ch08.html">8</a></td></tr>
+  <tr><td><code>ir.config_parameter.get_param()</code> / <code>set_param()</code></td><td><code>get_str / get_int / get_float / get_bool</code> 及 <code>set_*</code></td><td>—</td><td><a href="ch14.html">14</a></td></tr>
+  <tr><td><code>ir.property</code> 存公司相关字段</td><td>表内 jsonb 列，后备默认值在 <code>ir.default</code></td><td>18</td><td><a href="ch14.html">14</a></td></tr>
+  <tr><td><code>res.bank</code> 模型</td><td>移除；银行信息在 <code>res.partner.bank</code> 上</td><td>—</td><td><a href="ch14.html">14</a></td></tr>
+  <tr><td><code>mail.tracking.value</code>（mail 模块）</td><td>变更直接写进消息正文；结构化记录需装 <code>mail_tracking</code></td><td>—</td><td><a href="ch14.html">14</a></td></tr>
+  <tr><td><code>mail.channel</code></td><td><code>discuss.channel</code></td><td>17</td><td><a href="ch14.html">14</a></td></tr>
+</table></div>
+
+<h2 id="views">后台视图</h2>
+
+<div class="tw"><table>
+  <tr><th>Odoo 15（书中）</th><th>Odoo 20</th><th>版本</th><th>章</th></tr>
+  <tr><td><code>&lt;tree&gt;</code>、<code>view_mode="tree,form"</code></td><td><code>&lt;list&gt;</code>、<code>view_mode="list,form"</code></td><td>18</td><td><a href="ch03.html">3</a>、<a href="ch10.html">10</a></td></tr>
+  <tr><td><code>attrs="{'invisible': [('state','=','done')]}"</code>、<code>states="open"</code></td><td><code>invisible="state == 'done'"</code>、<code>invisible="state != 'open'"</code></td><td>17</td><td><a href="ch10.html">10</a></td></tr>
+  <tr><td>为条件表达式额外放一个隐藏字段</td><td>不需要，表达式用到的字段会自动加载</td><td>17</td><td><a href="ch10.html">10</a></td></tr>
+  <tr><td><code>oe_edit_only</code> / <code>oe_read_only</code></td><td>表单始终可编辑，这两个类已无意义</td><td>16</td><td><a href="ch10.html">10</a></td></tr>
+  <tr><td><code>&lt;div class="oe_chatter"&gt;</code> 加三个字段</td><td><code>&lt;chatter/&gt;</code></td><td>18</td><td><a href="ch08.html">8</a></td></tr>
+  <tr><td><code>icon="fa-book"</code>、<code>&lt;i class="fa fa-book"/&gt;</code></td><td><code>icon="book"</code>、<code>&lt;i class="oi" data-icon="book"/&gt;</code>（Material Symbols）</td><td>19.5</td><td><a href="ch10.html">10</a></td></tr>
+  <tr><td>日期筛选上的 <code>start_month</code> 等属性</td><td>移除，只写 <code>date="字段名"</code></td><td>20</td><td><a href="ch10.html">10</a></td></tr>
+</table></div>
+
+<h2 id="frontend">看板、OWL 与前端</h2>
+
+<div class="tw"><table>
+  <tr><th>Odoo 15（书中）</th><th>Odoo 20</th><th>版本</th><th>章</th></tr>
+  <tr><td>看板模板 <code>t-name="kanban-box"</code> + 大量 CSS 类</td><td><code>t-name="card"</code>（必须），布局用 <code>&lt;main&gt;</code>、<code>&lt;aside&gt;</code>、<code>&lt;footer&gt;</code>；下拉菜单是单独的 <code>menu</code> 模板</td><td>18</td><td><a href="ch11.html">11</a></td></tr>
+  <tr><td><code>kanban_state_selection</code> 组件</td><td><code>state_selection</code></td><td>—</td><td><a href="ch11.html">11</a></td></tr>
+  <tr><td><code>kanban_image(...)</code></td><td>拼 <code>/web/image/模型/id/字段</code>，或用 <code>&lt;field widget="image"/&gt;</code></td><td>—</td><td><a href="ch11.html">11</a></td></tr>
+  <tr><td><code>t-esc</code>、<code>t-raw</code></td><td><code>t-out</code>（HTML 用 <code>Markup</code>）</td><td>15</td><td><a href="ch11.html">11</a></td></tr>
+  <tr><td><code>web.assets_common</code>；XML 继承资源模板</td><td>清单 <code>assets</code>：<code>web.assets_backend</code> / <code>web.assets_frontend</code> / <code>web.report_assets_common</code></td><td>16</td><td><a href="ch11.html">11</a>、<a href="ch13.html">13</a></td></tr>
+  <tr><td>OWL 1（老 Widget 系统并存）</td><td>OWL 3：组件模板中通过 <code>this.</code> 访问属性，<code>useProps()</code> 等新钩子</td><td>20</td><td><a href="ch11.html">11</a></td></tr>
+  <tr><td>前端 <code>publicWidget</code></td><td><code>Interaction</code> 类（<code>@web/public/interaction</code>）</td><td>—</td><td><a href="ch13.html">13</a></td></tr>
+  <tr><td>Bootstrap 4：<code>text-right</code>、<code>ml-2</code>、<code>badge-pill badge-info</code></td><td>Bootstrap 5.3：<code>text-end</code>、<code>ms-2</code>、<code>rounded-pill text-bg-info</code></td><td>16</td><td><a href="ch12.html">12</a>、<a href="ch13.html">13</a></td></tr>
+</table></div>
+
+<h2 id="reports">报表</h2>
+
+<div class="tw"><table>
+  <tr><th>Odoo 15（书中）</th><th>Odoo 20</th><th>版本</th><th>章</th></tr>
+  <tr><td>wkhtmltopdf 0.12.5，内置在 base 里</td><td>引擎拆成模块：<code>base_report_wkhtmltox</code>（默认，推荐 0.12.6.1 patched qt），可选 <code>base_report_paper_muncher</code></td><td>19.4</td><td><a href="ch12.html">12</a></td></tr>
+  <tr><td><code>&lt;t t-call="x"&gt;&lt;t t-set="limit" t-value="3"/&gt;&lt;/t&gt;</code></td><td><code>&lt;t t-call="x" limit="3"/&gt;</code>（属性传参）</td><td>19.1</td><td><a href="ch12.html">12</a></td></tr>
+</table></div>
+
+<h2 id="web-api">Web 控制器、门户与外部 API</h2>
+
+<div class="tw"><table>
+  <tr><th>Odoo 15（书中）</th><th>Odoo 20</th><th>版本</th><th>章</th></tr>
+  <tr><td>XML-RPC <code>/xmlrpc/2/...</code>、JSON-RPC <code>/jsonrpc</code></td><td>JSON-2：<code>POST /json/2/&lt;模型&gt;/&lt;方法&gt;</code> + <code>Authorization: bearer &lt;API 密钥&gt;</code>；旧端点已废弃，计划在 Odoo 22 移除</td><td>19</td><td><a href="ch09.html">9</a></td></tr>
+  <tr><td>RPC 的 <code>db</code> 服务（建库、删库）</td><td>移除</td><td>20</td><td><a href="ch09.html">9</a></td></tr>
+  <tr><td><code>@route(type="json")</code></td><td><code>@route(type="jsonrpc")</code></td><td>19</td><td><a href="ch13.html">13</a></td></tr>
+  <tr><td><code>auth</code>：user / public / none</td><td>新增 <code>bearer</code>（API 密钥认证）</td><td>19</td><td><a href="ch13.html">13</a></td></tr>
+  <tr><td><code>request.cr</code></td><td><code>request.env.cr</code></td><td>19</td><td><a href="ch13.html">13</a></td></tr>
+  <tr><td>继承 <code>portal.portal_my_home</code> 加卡片；重写 <code>_prepare_home_portal_values()</code></td><td><code>portal.entry</code> 数据记录；重写 <code>_prepare_portal_counter_values()</code></td><td>—</td><td><a href="ch13.html">13</a></td></tr>
+  <tr><td><code>portal.portal_record_layout</code></td><td>不存在了；在 <code>portal.portal_layout</code> 里自己用 Bootstrap 卡片排版</td><td>—</td><td><a href="ch13.html">13</a></td></tr>
+</table></div>
+
+<h2 id="deploy">部署</h2>
+
+<div class="tw"><table>
+  <tr><th>Odoo 15（书中）</th><th>Odoo 20</th><th>版本</th><th>章</th></tr>
+  <tr><td>Nginx 转发 <code>/longpolling</code> 到 8072</td><td>转发 <code>/websocket</code> 到 8072（<code>gevent_port</code>），并带 <code>Upgrade</code> / <code>Connection</code> 头</td><td>16</td><td><a href="ch15.html">15</a></td></tr>
+  <tr><td>配置项 <code>longpolling_port</code></td><td><code>gevent_port</code></td><td>16</td><td><a href="ch15.html">15</a></td></tr>
+  <tr><td>Nginx <code>ssl on;</code></td><td><code>listen 443 ssl;</code>（Nginx 本身的变化）</td><td>—</td><td><a href="ch15.html">15</a></td></tr>
+  <tr><td><code>without_demo = all</code></td><td>不再需要（默认不装演示数据）</td><td>18.3</td><td><a href="ch15.html">15</a></td></tr>
+</table></div>
+
+<h2 id="upgrade-code">让工具先帮你改：upgrade_code</h2>
+
+<p>
+  上面很多变化是机械性的（改个名字、换种写法），Odoo 自带了一个代码改写工具 <code>upgrade_code</code>，内置一系列迁移脚本（位于源码的 <code>odoo/upgrade_code/</code> 目录）。
+  Odoo 20 带的脚本包括：
+</p>
+
+<div class="cards">
+  <div class="card"><span class="ic">&#128221;</span><h4>17.5-01-tree-to-list</h4><p><code>&lt;tree&gt;</code> → <code>&lt;list&gt;</code>，<code>tree,form</code> → <code>list,form</code></p></div>
+  <div class="card"><span class="ic">&#128273;</span><h4>18.1-00-sql-constraint</h4><p><code>_sql_constraints</code> → <code>models.Constraint</code></p></div>
+  <div class="card"><span class="ic">&#128279;</span><h4>18.1-02-route-jsonrpc</h4><p><code>type='json'</code> → <code>type='jsonrpc'</code></p></div>
+  <div class="card"><span class="ic">&#128197;</span><h4>18.5-00-domain-dynamic-dates</h4><p>把视图里的日期表达式改写成动态日期</p></div>
+  <div class="card"><span class="ic">&#128222;</span><h4>19.1-00-t-call</h4><p><code>t-call</code> 内部的 <code>t-set</code> → 属性传参</p></div>
+  <div class="card"><span class="ic">&#128190;</span><h4>19.3-00-base64-in-xml</h4><p>XML 中的 <code>type="base64"</code> → <code>type="bytes"</code></p></div>
+  <div class="card"><span class="ic">&#128737;</span><h4>19.4-00-ir-access</h4><p><code>ir.model.access</code> + <code>ir.rule</code> → <code>ir.access</code></p></div>
+  <div class="card"><span class="ic">&#11088;</span><h4>19.5-00-material-symbols-icons</h4><p>Font Awesome 图标名 → Material Symbols</p></div>
+  <div class="card"><span class="ic">&#128269;</span><h4>20.0-00-search-date-filters</h4><p>去掉日期筛选上已移除的属性</p></div>
+  <div class="card"><span class="ic">&#9881;</span><h4>owl3-migration</h4><p>前端 OWL 组件迁移到 OWL 3</p></div>
+</div>
+
+<p>使用方法：在模块所在的 Git 仓库里运行，先演练、再执行、最后用 <code>git diff</code> 逐处检查：</p>
+
+<div class="code" data-lang="bash">
+<pre>
+cd ~/work20/library                       # 你的模块仓库，确保已提交、工作区干净
+odoo upgrade_code --addons-path=. --from 15.0 --dry-run    # 只列出会被改写的文件
+odoo upgrade_code --addons-path=. --from 15.0              # 真正改写
+git diff                                   # 逐处检查改动
+odoo upgrade_code --addons-path=. --script 19.4-00-ir-access   # 也可以只运行某一个脚本
+</pre>
+</div>
+
+<div class="box warn">
+  <div class="t">工具只做「体力活」</div>
+  <p>
+    这些脚本是尽力而为的文本改写，它们自己也这样声明：能帮你完成大量重复劳动，但不是银弹。
+    像看板模板从 <code>kanban-box</code> 到 <code>card</code> 的重写、<code>name_get</code> 改为 <code>_compute_display_name</code>、
+    <code>create</code> 改为批量、XML-RPC 客户端改为 JSON-2 这些需要理解业务含义的改动，仍然要你手工完成。
+    另外它只改代码，不迁移数据库；已有数据的大版本升级见第 15 章末尾的说明。
+  </p>
+</div>
+
+<h2 id="checklist">迁移书中模块的检查清单</h2>
+
+<p>如果你手上有按原书写的 Odoo 15 版图书馆模块，可以按下面的顺序把它迁移到 Odoo 20：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 140" role="img" aria-label="迁移步骤：自动改写、清单与安全、模型、视图、前端、测试">
+  <rect class="bx-b" x="20" y="40" width="105" height="60" rx="10"/><text class="lbl on-b" x="72" y="66" text-anchor="middle">① 自动改写</text><text class="sm" x="72" y="86" text-anchor="middle">upgrade_code</text>
+  <rect class="bx-p" x="145" y="40" width="105" height="60" rx="10"/><text class="lbl on-p" x="197" y="66" text-anchor="middle">② 安全</text><text class="sm" x="197" y="86" text-anchor="middle">ir.access · 组</text>
+  <rect class="bx-a" x="270" y="40" width="105" height="60" rx="10"/><text class="lbl on-a" x="322" y="66" text-anchor="middle">③ 模型</text><text class="sm" x="322" y="86" text-anchor="middle">ORM API</text>
+  <rect class="bx-g" x="395" y="40" width="105" height="60" rx="10"/><text class="lbl on-g" x="447" y="66" text-anchor="middle">④ 视图</text><text class="sm" x="447" y="86" text-anchor="middle">表达式 · 看板</text>
+  <rect class="bx-r" x="520" y="40" width="105" height="60" rx="10"/><text class="lbl on-r" x="572" y="66" text-anchor="middle">⑤ 前端</text><text class="sm" x="572" y="86" text-anchor="middle">门户 · 报表</text>
+  <rect class="bx-d" x="645" y="40" width="95" height="60" rx="10"/><text class="lbl" x="692" y="66" text-anchor="middle">⑥ 测试</text><text class="sm" x="692" y="86" text-anchor="middle">安装 · 运行</text>
+  <path class="ln" d="M127 70 H141" marker-end="url(#ar)"/>
+  <path class="ln" d="M252 70 H266" marker-end="url(#ar)"/>
+  <path class="ln" d="M377 70 H391" marker-end="url(#ar)"/>
+  <path class="ln" d="M502 70 H516" marker-end="url(#ar)"/>
+  <path class="ln" d="M627 70 H641" marker-end="url(#ar)"/>
+</svg>
+<figcaption>图 16-2　推荐的迁移顺序：先让工具做完机械改动，再按层次手工处理</figcaption>
+</figure>
+
+<ol class="steps">
+  <li><strong>清单</strong>：<code>version</code> 改为 <code>20.0.1.0.0</code> 这样的格式；<code>assets</code> 的值改成列表，CSS 放进正确的资源包；删掉 <code>views/assets.xml</code> 这类旧式资源文件。</li>
+  <li><strong>安全</strong>：运行 <code>19.4-00-ir-access</code> 脚本或手工改写为 <code>security/ir.access.csv</code>；组定义改用 <code>privilege_id</code>、<code>user_ids</code>、<code>group_ids</code>。</li>
+  <li><strong>模型</strong>：<code>_sql_constraints</code> → <code>models.Constraint</code>；去掉 <code>states=</code>；<code>name_get</code> → <code>_compute_display_name</code>；<code>create</code> 改为 <code>@api.model_create_multi</code>；
+      <code>group_expand</code> 去掉 <code>order</code> 参数；<code>message_post</code> 改用关键字参数；<code>self._cr</code> 之类改为 <code>self.env.cr</code>。</li>
+  <li><strong>视图</strong>：<code>tree</code> → <code>list</code>；<code>attrs</code> / <code>states</code> → 条件表达式；<code>oe_chatter</code> → <code>&lt;chatter/&gt;</code>；图标换成 Material Symbols；看板改写为 <code>card</code> 模板。</li>
+  <li><strong>前端</strong>：Bootstrap 4 类名换成 5；门户首页卡片改为 <code>portal.entry</code>，计数改为 <code>_prepare_portal_counter_values()</code>；<code>type="json"</code> 路由改为 <code>jsonrpc</code>；外部客户端改用 JSON-2 API。</li>
+  <li><strong>测试</strong>：<code>SingleTransactionCase</code> 改为 <code>TransactionCase</code>；在一个新数据库上用 <code>--test-enable</code> 安装全部模块，确认测试通过、日志里没有弃用警告。</li>
+</ol>
+
+<div class="box tip">
+  <div class="t">弃用警告是你的朋友</div>
+  <p>
+    很多旧写法在 Odoo 20 上「还能跑」，只是在日志里留下一条 <code>DeprecationWarning</code>。这些写法往往会在下一两个版本里被彻底移除。
+    迁移时把日志里的弃用警告也一并清理干净，下次升级会轻松得多。
+  </p>
+</div>
+
+<h2 id="summary">写在最后</h2>
+
+<p>
+  恭喜你读完了整本教程！从开发者模式里点点鼠标，到写模型、视图、业务逻辑、API、报表、门户，再到部署上线，你已经走完了一个 Odoo 应用从无到有的全过程。
+  Odoo 每年都在变，但模型、视图、动作、安全、继承这些核心概念十几年来一直没变——掌握了它们，再看新版本的变化就只是「换个写法」。
+</p>
+
+<ul>
+  <li>官方文档：<a href="https://www.odoo.com/documentation/master/developer.html">odoo.com/documentation</a>（选择对应版本），其中的开发者教程和参考手册是最权威的资料。</li>
+  <li>源码就是最好的文档：遇到不确定的地方，到 Odoo 源码里搜一搜官方模块是怎么写的，本教程的很多细节就是这样核实的。</li>
+  <li>社区：<a href="https://odoo-community.org/">Odoo 社区协会（OCA）</a>维护着大量高质量的开源模块，参与其中是学习和结识同行的好方法。</li>
+</ul>
+<div id="pager"></div>
+</main>
+</div>
+<script src="assets/site.js"></script>
+</body>
+</html>

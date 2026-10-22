@@ -1,0 +1,1038 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 7 章 · 记录集：操作模型数据 — Odoo 20 开发入门</title>
+<meta name="description" content="用 odoo shell 交互式探索 ORM：执行环境与上下文、search 与 Domain 表达式、读取与写入记录、日期时间处理、记录集运算、事务与原始 SQL。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-chapter="7">
+<div id="app">
+<aside id="sidebar"></aside>
+<main>
+<span class="chapter-eyebrow">第 7 章</span>
+<h1>记录集：操作模型数据</h1>
+<p class="lede">
+  模型定义好了，数据也装进去了。接下来要学的是：<strong>怎么用代码去查数据、读数据、改数据</strong>。
+  业务逻辑的绝大部分工作，归根结底就是「查询、变换、写回」。这一章我们打开一个交互式的 Odoo 命令行，边敲边学 ORM 的全部基本操作。
+</p>
+
+<div class="goals">
+  <h4>本章目标</h4>
+  <ul>
+    <li>用 <code>odoo shell</code> 交互式地探索 ORM</li>
+    <li>理解执行环境 <code>env</code> 和上下文 <code>context</code>，学会切换用户、公司和上下文</li>
+    <li>用 <code>search()</code>、<code>browse()</code> 和域表达式查询记录；用 <code>_read_group()</code> 做分组统计</li>
+    <li>读取字段值、沿关系导航，处理日期时间</li>
+    <li>创建、修改、复制、删除记录；对记录集做过滤、映射、排序和集合运算</li>
+    <li>理解事务，在必要时安全地执行原始 SQL</li>
+  </ul>
+</div>
+
+<div id="chapter-toc"></div>
+
+<h2 id="shell">odoo shell：交互式实验场</h2>
+
+<p>Python 自带交互式命令行，Odoo 也提供了一个类似的：<code>shell</code> 子命令，后面跟上平时启动 Odoo 用的选项：</p>
+
+<div class="code" data-lang="bash">
+<pre>
+(env20) $ odoo shell -c ~/work20/library.conf -d library
+</pre>
+</div>
+
+<p>
+  它会像平常一样启动 Odoo、加载数据库，但不启动 HTTP 服务，而是给你一个 Python 提示符。这里预先准备好了两个变量：
+  <code>env</code>（执行环境）和 <code>self</code>（超级用户 OdooBot 的用户记录），效果就像你正身处某个模型方法之中。
+</p>
+
+<div class="code" data-lang="py" data-file="odoo shell">
+<pre>
+&gt;&gt;&gt; self
+res.users(1,)
+&gt;&gt;&gt; self._name
+'res.users'
+&gt;&gt;&gt; self.name
+'OdooBot'
+&gt;&gt;&gt; self.login
+'__system__'
+</pre>
+</div>
+
+<ul>
+  <li><code>self</code> 是一个 <code>res.users</code> 记录集，包含 ID 为 1 的一条记录。</li>
+  <li>它的模型名是 <code>res.users</code>，名字是 OdooBot，登录名 <code>__system__</code>。</li>
+</ul>
+
+<p>按 <kbd>Ctrl</kbd>+<kbd>D</kbd> 退出。下面所有以 <code>&gt;&gt;&gt;</code> 开头的例子都可以在 shell 里直接试。</p>
+
+<div class="box warn">
+  <div class="t">&#9888; shell 里的修改默认不保存</div>
+  <p>shell 模拟的是「一个方法正在执行」的环境：你做的写操作都在一个事务里，<strong>退出时不会自动提交</strong>。想让修改真正写进数据库，要显式执行 <code>env.cr.commit()</code>。这反倒让 shell 成了安全的实验场。</p>
+</div>
+
+<div class="box tip">
+  <div class="t">&#128161; 更好用的 shell</div>
+  <p>如果虚拟环境里装了 <code>ipython</code>（<code>pip install ipython</code>），<code>odoo shell</code> 会自动用它，带语法高亮和 Tab 补全。也可以用 <code>--shell-interface=ipython</code> 指定。</p>
+</div>
+
+<h2 id="env">执行环境</h2>
+
+<p>
+  记录集总是在一个<strong>执行环境</strong>里工作，环境携带着「这次操作是在什么情况下发生的」：用哪个数据库游标、当前用户是谁、语言和时区是什么……
+  在模型方法里通过 <code>self.env</code> 访问它。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 300" role="img" aria-label="执行环境 env 的组成：游标、用户、上下文、公司，以及模型注册表">
+  <rect class="bx-a" x="20" y="110" width="170" height="80" rx="12"/>
+  <text class="ttl on-a" x="105" y="140" text-anchor="middle">记录集</text>
+  <text class="sm mono" x="105" y="164" text-anchor="middle">library.book(3, 7)</text>
+  <path class="ln-a" d="M192 150 H246" marker-end="url(#ar-a)"/>
+  <text class="sm" x="219" y="140" text-anchor="middle">.env</text>
+
+  <rect class="bx-p" x="250" y="20" width="490" height="260" rx="14"/>
+  <text class="ttl on-p" x="495" y="46" text-anchor="middle">Environment</text>
+
+  <rect class="bx" x="270" y="60" width="140" height="56" rx="8"/>
+  <text class="mono" x="340" y="84" text-anchor="middle">env.cr</text>
+  <text class="sm" x="340" y="104" text-anchor="middle">数据库游标</text>
+
+  <rect class="bx" x="425" y="60" width="140" height="56" rx="8"/>
+  <text class="mono" x="495" y="84" text-anchor="middle">env.user / uid</text>
+  <text class="sm" x="495" y="104" text-anchor="middle">当前用户</text>
+
+  <rect class="bx" x="580" y="60" width="140" height="56" rx="8"/>
+  <text class="mono" x="650" y="84" text-anchor="middle">env.context</text>
+  <text class="sm" x="650" y="104" text-anchor="middle">lang、tz、……</text>
+
+  <rect class="bx" x="270" y="130" width="140" height="56" rx="8"/>
+  <text class="mono" x="340" y="154" text-anchor="middle">env.company</text>
+  <text class="sm" x="340" y="174" text-anchor="middle">当前公司</text>
+
+  <rect class="bx" x="425" y="130" width="140" height="56" rx="8"/>
+  <text class="mono" x="495" y="154" text-anchor="middle">env.companies</text>
+  <text class="sm" x="495" y="174" text-anchor="middle">允许的公司</text>
+
+  <rect class="bx" x="580" y="130" width="140" height="56" rx="8"/>
+  <text class="mono" x="650" y="154" text-anchor="middle">env.lang / env.su</text>
+  <text class="sm" x="650" y="174" text-anchor="middle">语言 / 是否超级模式</text>
+
+  <rect class="bx-b" x="270" y="200" width="450" height="64" rx="8"/>
+  <text class="ttl on-b" x="495" y="224" text-anchor="middle">模型注册表</text>
+  <text class="sm mono" x="495" y="248" text-anchor="middle">env["res.partner"]  env.ref("base.user_admin")</text>
+</svg>
+<figcaption>图 7-1　每个记录集都带着一个执行环境</figcaption>
+</figure>
+
+<div class="tw"><table>
+  <tr><th>属性</th><th>含义</th></tr>
+  <tr><td><code>env.cr</code></td><td>当前使用的数据库游标</td></tr>
+  <tr><td><code>env.user</code></td><td>当前用户的记录</td></tr>
+  <tr><td><code>env.uid</code></td><td>当前用户的 ID，等于 <code>env.user.id</code></td></tr>
+  <tr><td><code>env.context</code></td><td>上下文：一个<strong>不可变</strong>的字典</td></tr>
+  <tr><td><code>env.company</code></td><td>当前活动的公司</td></tr>
+  <tr><td><code>env.companies</code></td><td>用户当前选中的（允许的）公司</td></tr>
+  <tr><td><code>env.lang</code></td><td>当前语言代码</td></tr>
+  <tr><td><code>env.su</code></td><td>是否处于超级用户模式（跳过权限检查）</td></tr>
+</table></div>
+
+<div class="box ver">
+  <div class="t">&#8682; 别再用 self._cr、self._uid、self._context</div>
+  <p>
+    老代码里常见 <code>self._cr</code>、<code>self._uid</code>、<code>self._context</code> 这种写法，Odoo 19 起它们被标记为废弃。
+    统一使用 <code>self.env.cr</code>、<code>self.env.uid</code>、<code>self.env.context</code>。
+  </p>
+</div>
+
+<p>环境同时也是访问模型注册表的入口：</p>
+
+<div class="code" data-lang="py">
+<pre>
+&gt;&gt;&gt; env["res.partner"].search([("display_name", "like", "Azure")])
+res.partner(14, 26, 33, 27)
+</pre>
+</div>
+
+<p>注意结果不是按 ID 排的，而是按模型的默认排序（联系人的 <code>_order</code> 是按显示名称）。</p>
+
+<h3>上下文（context）</h3>
+
+<p>
+  上下文是一个字典，在客户端界面和服务端逻辑之间传递「附加信息」。Web 客户端发来的初始上下文大致是这样：
+</p>
+
+<div class="code" data-lang="py">
+<pre>
+&gt;&gt;&gt; env.context
+{'lang': 'zh_CN', 'tz': 'Asia/Shanghai', 'uid': 2, 'allowed_company_ids': [1]}
+</pre>
+</div>
+
+<p>上下文里的一些键会影响服务端的行为：</p>
+<ul>
+  <li><code>lang</code>：决定可翻译字段读出哪种语言的值。</li>
+  <li><code>tz</code>：时区。服务端存的时间都是 UTC，返回给客户端显示时按这个时区换算。</li>
+  <li><code>active_test</code>：设为 <code>False</code> 时，<code>search()</code> 不再自动排除已归档（<code>active=False</code>）的记录。</li>
+</ul>
+
+<p>从一个视图通过链接或按钮打开另一个视图时，Web 客户端会自动往上下文里加入来源信息，向导最常用到它们：</p>
+<ul>
+  <li><code>active_model</code>：来源记录的模型名</li>
+  <li><code>active_id</code>：来源记录的 ID</li>
+  <li><code>active_ids</code>：在列表里选中的多条记录的 ID 列表</li>
+</ul>
+
+<p>还有两种特殊前缀，第 1 章已经见过：</p>
+<ul>
+  <li><code>default_字段名</code>：在目标视图里给这个字段设默认值，如 <code>{'default_user_id': uid}</code>。</li>
+  <li><code>search_default_筛选名</code>：在目标视图里默认启用这个筛选，如 <code>{'search_default_filter_my_books': 1}</code>。</li>
+</ul>
+
+<h3>修改环境</h3>
+
+<p>
+  有时需要以「另一种身份」或「另一种上下文」操作记录。下面这些方法都<strong>返回一个新的记录集</strong>（同样的记录，换了环境），原记录集不变：
+</p>
+
+<div class="tw"><table>
+  <tr><th>方法</th><th>效果</th></tr>
+  <tr><td><code>rs.with_context(key=value, ...)</code></td><td>在现有上下文上增加 / 修改几个键</td></tr>
+  <tr><td><code>rs.with_context(字典)</code></td><td>用这个字典<strong>整个替换</strong>上下文</td></tr>
+  <tr><td><code>rs.sudo()</code></td><td>进入超级用户模式，跳过访问权限检查（用户本身不变）。<code>sudo(False)</code> 退出</td></tr>
+  <tr><td><code>rs.with_user(user)</code></td><td>换成另一个用户的身份（参数为用户记录或 ID）</td></tr>
+  <tr><td><code>rs.with_company(company)</code></td><td>切换当前公司</td></tr>
+  <tr><td><code>rs.with_env(env)</code></td><td>整个换成另一个环境</td></tr>
+</table></div>
+
+<div class="code" data-lang="py">
+<pre>
+&gt;&gt;&gt; Book = env["library.book"]
+&gt;&gt;&gt; Book.with_context(active_test=False).search([])   # 连归档的书也查出来
+&gt;&gt;&gt; Book.with_context(lang="zh_CN").browse(1).name     # 读中文名
+&gt;&gt;&gt; demo = env.ref("base.user_demo")
+&gt;&gt;&gt; Book.with_user(demo).search([])                    # 以 Demo 用户身份查询（受其权限约束）
+</pre>
+</div>
+
+<div class="box warn">
+  <div class="t">&#9888; sudo() 要克制</div>
+  <p>
+    <code>sudo()</code> 绕过所有访问规则。它适合那些「用户本身无权、但业务上必须做」的内部操作（比如普通用户下单时要读一下他看不到的价格表），
+    用的时候要把范围控制到最小，用完不要把 sudo 过的记录集到处传。滥用 sudo 是 Odoo 模块最常见的安全漏洞来源。
+  </p>
+</div>
+
+<p>环境还提供 <code>env.ref()</code>，根据 XML ID 取记录，不存在会抛出 <code>ValueError</code>：</p>
+
+<div class="code" data-lang="py">
+<pre>
+&gt;&gt;&gt; env.ref("base.user_root")
+res.users(1,)
+&gt;&gt;&gt; env.ref("library_app.nonexistent", raise_if_not_found=False)   # 不存在时返回 None
+</pre>
+</div>
+
+<h2 id="query">查询数据</h2>
+
+<h3>search、search_count、browse</h3>
+
+<p>先从环境里拿到模型，再调用查询方法得到记录集：</p>
+
+<div class="code" data-lang="py">
+<pre>
+&gt;&gt;&gt; Partner = env["res.partner"]
+&gt;&gt;&gt; Partner.search([("display_name", "like", "Lumber")])
+res.partner(15, 34)
+&gt;&gt;&gt; Partner.search([("is_company", "=", True)], order="name desc", limit=5, offset=10)
+&gt;&gt;&gt; Partner.search_count([("is_company", "=", True)])
+12
+&gt;&gt;&gt; Partner.browse([15, 34])
+res.partner(15, 34)
+</pre>
+</div>
+
+<ul>
+  <li><code>search(domain, offset=0, limit=None, order=None)</code>：返回满足域条件的记录集。如果模型有 <code>active</code> 字段，默认只返回有效记录。
+    <code>order</code> 是排序字符串（字段名可跟 <code>desc</code>）；<code>limit</code> 和 <code>offset</code> 用于分页。</li>
+  <li><code>search_count(domain)</code>：只返回数量，比 <code>len(search(...))</code> 高效得多。</li>
+  <li><code>browse(ids)</code>：已经知道 ID 时直接构造记录集，<strong>不查询数据库</strong>，也不检查这些记录是否存在（需要时用 <code>.exists()</code>）。</li>
+</ul>
+
+<h3>域表达式详解</h3>
+
+<p>
+  域（domain）是 Odoo 的筛选条件语法，ORM 把它翻译成 SQL 的 WHERE 子句。一个域是一个条件列表，每个条件是一个 <code>(字段, 运算符, 值)</code> 三元组；
+  空列表 <code>[]</code> 表示没有条件，匹配全部记录。
+</p>
+
+<p>
+  域在两种地方被求值：<strong>客户端</strong>（窗口动作、视图里的属性）和<strong>服务端</strong>（访问规则、Python 代码）。两边能用的东西略有不同，下面会指出来。
+</p>
+
+<h4>字段</h4>
+
+<p>
+  第一个元素是字段名。可以用点号沿关系往下走，比如 <code>"publisher_id.country_id.name"</code>。
+  （较老的版本里客户端域不支持点号，那时的变通办法是在模型上加一个关联字段。现在两边都支持了。）
+</p>
+
+<h4>运算符</h4>
+
+<div class="tw"><table>
+  <tr><th>运算符</th><th>含义</th><th>示例</th></tr>
+  <tr><td><code>=</code>　<code>!=</code></td><td>等于 / 不等于</td><td><code>('state', '=', 'done')</code></td></tr>
+  <tr><td><code>&gt;</code>　<code>&gt;=</code>　<code>&lt;</code>　<code>&lt;=</code></td><td>大小比较</td><td><code>('copies', '&gt;', 2)</code></td></tr>
+  <tr><td><code>in</code>　<code>not in</code></td><td>值在 / 不在列表里</td><td><code>('book_type', 'in', ['paper', 'hard'])</code></td></tr>
+  <tr><td><code>like</code>　<code>not like</code></td><td>包含子串（区分大小写），自动在两边加通配符</td><td><code>('name', 'like', 'Odoo')</code></td></tr>
+  <tr><td><code>ilike</code>　<code>not ilike</code></td><td>同上，不区分大小写</td><td><code>('name', 'ilike', 'odoo')</code></td></tr>
+  <tr><td><code>=like</code>　<code>=ilike</code></td><td>SQL LIKE 原样匹配，自己写 <code>%</code> 和 <code>_</code></td><td><code>('isbn', '=like', '978%')</code></td></tr>
+  <tr><td><code>=?</code></td><td>值为空（False / None）时条件恒真，否则等同于 <code>=</code></td><td><code>('user_id', '=?', uid)</code></td></tr>
+  <tr><td><code>child_of</code></td><td>是某记录的后代（含自身），需要层级结构</td><td><code>('category_id', 'child_of', 4)</code></td></tr>
+  <tr><td><code>parent_of</code></td><td>是某记录的祖先（含自身）</td><td><code>('category_id', 'parent_of', 7)</code></td></tr>
+  <tr><td><code>any</code>　<code>not any</code></td><td>关联记录中有 / 没有满足子域的</td><td><code>('author_ids', 'any', [('country_id.code', '=', 'BR')])</code></td></tr>
+</table></div>
+
+<div class="box ver">
+  <div class="t">&#8682; any 运算符</div>
+  <p>
+    书里没有 <code>any</code> / <code>not any</code>，它们是 Odoo 17 加入的：在关系字段上嵌套一个子域。
+    比如「至少有一位巴西作者的书」写成 <code>[('author_ids', 'any', [('country_id.code', '=', 'BR')])]</code>，
+    比用点号的写法语义更清晰，尤其在需要对同一条关联记录同时满足多个条件时（点号写法会把多个条件分散到不同的关联记录上）。
+  </p>
+</div>
+
+<h4>值</h4>
+
+<p>
+  第三个元素是一个 Python 表达式，可以是字面量（数字、布尔、字符串、列表），也可以引用求值上下文里的变量。
+  <strong>不接受记录对象</strong>，要用 ID：写 <code>[('user_id', '=', user.id)]</code>，而不是 <code>[('user_id', '=', user)]</code>。
+</p>
+
+<p>在访问规则（<code>ir.access</code> 的 domain）里，可以使用这些变量：</p>
+<ul>
+  <li><code>user</code>：当前用户记录，用 <code>user.id</code> 取 ID</li>
+  <li><code>company_id</code>：当前公司的 ID</li>
+  <li><code>company_ids</code>：允许的公司 ID 列表。多公司规则的标准写法是 <code>[('company_id', 'in', company_ids + [False])]</code></li>
+  <li><code>time</code>：Python 的 <code>time</code> 模块</li>
+</ul>
+
+<p>日期字段的值还可以写成<strong>相对日期</strong>，Odoo 会在执行时换算：</p>
+
+<div class="code" data-lang="py">
+<pre>
+[('date_published', '&gt;=', 'today -1y')]   # 一年以内出版的
+[('create_date', '&gt;=', 'today =1d')]      # 本月 1 日以来创建的
+[('request_date', '&lt;', 'today')]          # 今天以前的
+</pre>
+</div>
+
+<div class="box ver">
+  <div class="t">&#8682; 动态日期</div>
+  <p>
+    以前要在 Python 里先算好日期再放进域，或者在 XML 里用 <code>context_today()</code> 拼表达式。Odoo 19 起，域里的日期值可以直接写
+    <code>'today'</code>、<code>'now'</code> 加上偏移量（<code>+3d</code>、<code>-1m</code>、<code>=1d</code> 等），这对写在视图和访问规则里的静态域尤其方便。
+  </p>
+</div>
+
+<h4>对多字段上的条件</h4>
+
+<p>
+  当字段是一对多或多对多时，条件作用于它的<strong>每一个</strong>值，只要<strong>有任何一个</strong>满足，记录就会被选中。
+  所以 <code>=</code> 和 <code>in</code> 在这里的含义是「包含」；<code>!=</code> 和 <code>not in</code> 的含义是「一个都不包含」。
+</p>
+
+<h4>组合条件：前缀表示法</h4>
+
+<p>
+  一个域里有多个条件时，默认用「且」（AND）连接。也可以显式使用逻辑运算符：<code>'&amp;'</code>（且）、<code>'|'</code>（或）、<code>'!'</code>（非）。
+  域使用<strong>前缀表示法</strong>（也叫波兰表示法）：运算符写在它要作用的条件<strong>前面</strong>。<code>&amp;</code> 和 <code>|</code> 作用于紧随其后的两项，<code>!</code> 作用于紧随其后的一项。
+</p>
+
+<p>看一个访问规则里常见的例子：</p>
+
+<div class="code" data-lang="py">
+<pre>
+['|',
+    ('message_follower_ids', 'in', [user.partner_id.id]),
+    '|',
+        ('user_id', '=', user.id),
+        ('user_id', '=', False)
+]
+</pre>
+</div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 260" role="img" aria-label="前缀表示法的域表达式对应的语法树">
+  <rect class="bx-a" x="330" y="20" width="100" height="40" rx="20"/>
+  <text class="ttl on-a" x="380" y="45" text-anchor="middle">| 或</text>
+
+  <rect class="bx-b" x="40" y="110" width="290" height="44" rx="8"/>
+  <text class="sm mono on-b" x="185" y="137" text-anchor="middle">我是关注者</text>
+
+  <rect class="bx-a" x="500" y="110" width="100" height="40" rx="20"/>
+  <text class="ttl on-a" x="550" y="135" text-anchor="middle">| 或</text>
+
+  <rect class="bx-b" x="380" y="200" width="170" height="44" rx="8"/>
+  <text class="sm mono on-b" x="465" y="227" text-anchor="middle">负责人是我</text>
+  <rect class="bx-b" x="570" y="200" width="170" height="44" rx="8"/>
+  <text class="sm mono on-b" x="655" y="227" text-anchor="middle">没有负责人</text>
+
+  <path class="ln" d="M360 62 L200 108"/>
+  <path class="ln" d="M400 62 L540 108"/>
+  <path class="ln" d="M535 152 L470 198"/>
+  <path class="ln" d="M565 152 L645 198"/>
+
+  <text class="sm" x="40" y="200">等价的中缀写法：</text>
+  <text class="sm mono" x="40" y="222">关注者 OR (负责人是我</text>
+  <text class="sm mono" x="40" y="242">         OR 没有负责人)</text>
+</svg>
+<figcaption>图 7-2　前缀表示法的域就是一棵语法树：运算符是节点，条件是叶子</figcaption>
+</figure>
+
+<p>它筛选出：当前用户是关注者的，<strong>或</strong>负责人是当前用户的，<strong>或</strong>还没有负责人的记录。</p>
+
+<div class="box tip">
+  <div class="t">&#128161; 读前缀表达式的窍门</div>
+  <p>
+    从左往右读，遇到运算符就记住「它要吃掉后面两项」，遇到条件就把它喂给最近一个还没吃饱的运算符。
+    多个条件默认用 AND 连接，所以 <code>[A, B, C]</code> 等于 <code>['&amp;', '&amp;', A, B, C]</code>；而 N 个条件全部用 OR，需要 N-1 个 <code>'|'</code> 放在最前面：<code>['|', '|', A, B, C]</code>。
+  </p>
+</div>
+
+<h4>特殊条件</h4>
+<p>
+  <code>(1, '=', 1)</code> 表示恒真，<code>(0, '=', 1)</code> 表示恒假。在老版本的访问规则里，常用恒真条件让高级别的组看到全部记录；
+  在 Odoo 20 的 <code>ir.access</code> 里，域留空就表示「全部记录」，这种写法已不太需要了。
+</p>
+
+<h3>Domain 对象：用代码组合条件</h3>
+
+<p>
+  在 Python 代码里拼接域列表很容易出错（尤其是 OR）。Odoo 18 起提供了 <code>Domain</code> 类，用 <code>&amp;</code>、<code>|</code>、<code>~</code> 组合条件：
+</p>
+
+<div class="code" data-lang="py">
+<pre>
+from odoo.fields import Domain
+
+active = Domain("active", "=", True)
+has_publisher = Domain("publisher_id", "!=", False)
+recent = Domain("date_published", "&gt;=", "today -5y")
+
+domain = active &amp; (has_publisher | recent)      # 且、或
+not_recent = ~recent                             # 非
+domain = Domain.AND([active, has_publisher])     # 多个一起
+books = env["library.book"].search(domain)       # search 直接接受 Domain
+books = env["library.book"].search(domain &amp; [("copies", "&gt;", 1)])   # 也可以和列表混用
+</pre>
+</div>
+
+<div class="box ver">
+  <div class="t">&#8682; odoo.osv.expression 已废弃</div>
+  <p>老代码里组合域用的是 <code>from odoo.osv import expression</code> 的 <code>expression.AND([...])</code> / <code>expression.OR([...])</code>。Odoo 19 起 <code>odoo.osv</code> 被废弃，改用 <code>Domain.AND</code> / <code>Domain.OR</code>。</p>
+</div>
+
+<h3>分组统计：_read_group</h3>
+
+<p>
+  有时需要按字段分组并做汇总（计数、求和、平均……），类似 SQL 的 GROUP BY。在服务端代码里用 <code>_read_group()</code>：
+</p>
+
+<div class="code" data-lang="py">
+<pre>
+&gt;&gt;&gt; env["res.partner"]._read_group(
+...     domain=[("display_name", "like", "Azure")],
+...     groupby=["country_id"],
+...     aggregates=["state_id:count_distinct", "__count"],
+... )
+[(res.country(233,), 1, 4)]
+</pre>
+</div>
+
+<ul>
+  <li><code>domain</code>：先用域筛选记录。</li>
+  <li><code>groupby</code>：分组字段列表。日期字段可以带粒度，如 <code>"date_published:year"</code>、<code>"create_date:month"</code>。</li>
+  <li><code>aggregates</code>：汇总列表，格式为 <code>"字段:函数"</code>，函数可以是 PostgreSQL 支持的 <code>sum</code>、<code>avg</code>、<code>min</code>、<code>max</code>、<code>count</code>，
+      以及 <code>count_distinct</code>；<code>"__count"</code> 表示每组的记录数；<code>"字段:recordset"</code> 把该组的关联记录聚成一个记录集。</li>
+  <li>还支持 <code>having</code>（对汇总结果再筛选）、<code>offset</code>、<code>limit</code>、<code>order</code>。</li>
+</ul>
+
+<p>
+  返回值是一个<strong>元组列表</strong>，每个元组依次是分组值和汇总值。分组值如果是关联字段，会直接是一个记录集（上例的 <code>res.country(233,)</code>），可以继续 <code>.name</code>。
+  上例的意思是：在美国（233）有 4 位名字含 Azure 的联系人，他们分布在 1 个州。
+</p>
+
+<div class="box ver">
+  <div class="t">&#8682; read_group 变了样</div>
+  <p>
+    书里用的 <code>read_group(domain, fields=["state_id:count_distinct"], groupby=["country_id"], lazy=False)</code> 返回的是带
+    <code>__count</code>、<code>__domain</code> 等键的字典列表。Odoo 18.2 起这个旧接口被废弃：服务端代码用 <code>_read_group()</code>（返回元组，分组值为记录集），
+    给 Web 客户端用的格式化版本叫 <code>formatted_read_group()</code>。在 Odoo 20 里公开的 <code>read_group()</code> 也已改成和 <code>_read_group()</code> 相同的参数，只是把记录集换成了 ID。
+  </p>
+</div>
+
+<h2 id="read">读取记录集中的数据</h2>
+
+<h3>单条记录</h3>
+
+<p>只包含一条记录的记录集叫<strong>单例（singleton）</strong>。单例可以直接用点号读字段：</p>
+
+<div class="code" data-lang="py">
+<pre>
+&gt;&gt;&gt; print(self.name)
+OdooBot
+&gt;&gt;&gt; for rec in self:         # 单例也是记录集，也能遍历
+...     print(rec.name)
+OdooBot
+</pre>
+</div>
+
+<p>
+  对包含多条记录的记录集用点号读字段会报错。要批量取值，用 <code>mapped()</code>：<code>rs.mapped("name")</code> 返回所有记录的 name 组成的列表。
+  只对单条记录有意义的方法，在开头调用 <code>self.ensure_one()</code>，它会在 <code>self</code> 不是恰好一条记录时报错（空记录集也算错）。
+</p>
+
+<h3>空记录集也能读</h3>
+
+<p>
+  一个很方便的特性：<strong>空记录集</strong>读任何字段都不会报错，而是返回 <code>False</code>（关系字段则返回一个空记录集）。
+  所以沿着关系一路点下去，中间某一环为空也没关系：
+</p>
+
+<div class="code" data-lang="py">
+<pre>
+&gt;&gt;&gt; self.company_id
+res.company(1,)
+&gt;&gt;&gt; self.company_id.name
+'YourCompany'
+&gt;&gt;&gt; self.company_id.currency_id.name
+'EUR'
+&gt;&gt;&gt; self.company_id.parent_id          # 没有上级公司
+res.company()
+&gt;&gt;&gt; self.company_id.parent_id.name     # 不报错，返回 False
+False
+</pre>
+</div>
+
+<p>所以不需要写 <code>if record: print(record.name)</code>，直接 <code>print(record.name or "（无）")</code> 即可。</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 200" role="img" aria-label="沿关系字段导航，中间遇到空值时返回空记录集而不是报错">
+  <rect class="bx-a" x="20" y="70" width="130" height="56" rx="10"/>
+  <text class="mono on-a" x="85" y="102" text-anchor="middle">self</text>
+  <rect class="bx" x="200" y="70" width="150" height="56" rx="10"/>
+  <text class="mono" x="275" y="94" text-anchor="middle">.company_id</text>
+  <text class="sm" x="275" y="114" text-anchor="middle">res.company(1,)</text>
+  <rect class="bx-d" x="400" y="70" width="150" height="56" rx="10"/>
+  <text class="mono" x="475" y="94" text-anchor="middle">.parent_id</text>
+  <text class="sm" x="475" y="114" text-anchor="middle">res.company()　空</text>
+  <rect class="bx-g" x="600" y="70" width="140" height="56" rx="10"/>
+  <text class="mono on-g" x="670" y="94" text-anchor="middle">.name</text>
+  <text class="sm" x="670" y="114" text-anchor="middle">False，不报错</text>
+  <path class="ln" d="M152 98 H196" marker-end="url(#ar)"/>
+  <path class="ln" d="M352 98 H396" marker-end="url(#ar)"/>
+  <path class="ln-g" d="M552 98 H596" marker-end="url(#ar-g)"/>
+  <text class="sm" x="380" y="170" text-anchor="middle">空记录集表现得像一个「所有字段都为空」的单例</text>
+</svg>
+<figcaption>图 7-3　点号导航是「空值安全」的</figcaption>
+</figure>
+
+<h3>日期和时间</h3>
+
+<p>日期和日期时间字段的值就是 Python 原生的 <code>date</code> / <code>datetime</code> 对象，可以直接做运算：</p>
+
+<div class="code" data-lang="py">
+<pre>
+&gt;&gt;&gt; env["res.users"].browse(2).login_date
+datetime.datetime(2026, 10, 22, 8, 47, 57, 327756)
+</pre>
+</div>
+
+<p>
+  数据库里的日期时间一律以 <strong>UTC</strong> 存储，不带时区信息；记录集里读出来的也是 UTC。显示给用户时，由 Web 客户端按用户的时区（上下文里的 <code>tz</code>）换算；
+  用户输入时，再由客户端换算回 UTC 发给服务器。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 210" role="img" aria-label="日期时间在数据库中以 UTC 存储，由客户端按用户时区显示">
+  <rect class="bx-g" x="20" y="60" width="190" height="80" rx="10"/>
+  <text class="ttl on-g" x="115" y="88" text-anchor="middle">上海用户输入</text>
+  <text class="mono" x="115" y="114" text-anchor="middle">18:00（UTC+8）</text>
+
+  <rect class="bx-b" x="285" y="60" width="190" height="80" rx="10"/>
+  <text class="ttl on-b" x="380" y="88" text-anchor="middle">数据库 / 服务端</text>
+  <text class="mono" x="380" y="114" text-anchor="middle">10:00 UTC</text>
+
+  <rect class="bx-g" x="550" y="60" width="190" height="80" rx="10"/>
+  <text class="ttl on-g" x="645" y="88" text-anchor="middle">纽约用户看到</text>
+  <text class="mono" x="645" y="114" text-anchor="middle">06:00（UTC-4）</text>
+
+  <path class="ln-b" d="M212 100 H281" marker-end="url(#ar-b)"/>
+  <path class="ln-b" d="M477 100 H546" marker-end="url(#ar-b)"/>
+  <text class="sm" x="246" y="90" text-anchor="middle">客户端转换</text>
+  <text class="sm" x="512" y="90" text-anchor="middle">客户端转换</text>
+  <text class="sm" x="380" y="180" text-anchor="middle">服务器日志里的时间戳也是 UTC</text>
+</svg>
+<figcaption>图 7-4　「存 UTC，显示本地」</figcaption>
+</figure>
+
+<h2 id="write">写入记录</h2>
+
+<h3>直接赋值</h3>
+
+<p>记录集实现了「活动记录」（active record）模式：给字段赋值，修改就会被保存到数据库。多条记录的记录集也可以直接赋值，所有记录都会被修改。</p>
+
+<div class="code" data-lang="py">
+<pre>
+&gt;&gt;&gt; root = env["res.users"].browse(1)
+&gt;&gt;&gt; root.name = "Superuser"
+&gt;&gt;&gt; root.name
+'Superuser'
+</pre>
+</div>
+
+<p>各类字段的赋值规则：</p>
+<ul>
+  <li><strong>日期 / 日期时间</strong>：可以赋 Python 对象，也可以赋 Odoo 默认格式的字符串：<code>rec.date = date(2026, 12, 1)</code> 或 <code>rec.date = "2026-12-01"</code>。</li>
+  <li><strong>多对一</strong>：赋一个单例记录集（或空记录集 / <code>False</code> 清空）。</li>
+  <li><strong>对多字段</strong>：赋一个任意大小的记录集，<strong>整体替换</strong>原有关联。赋 <code>False</code> 或 <code>None</code> 清空。</li>
+  <li><strong>二进制</strong>：见下面的版本提示。</li>
+</ul>
+
+<p>想在对多字段上追加或去掉记录，用记录集运算（后面详述）：</p>
+
+<div class="code" data-lang="py">
+<pre>
+&gt;&gt;&gt; mycompany_partner = self.company_id.partner_id
+&gt;&gt;&gt; myaddress = self.partner_id
+&gt;&gt;&gt; mycompany_partner.child_ids |= myaddress   # 追加
+&gt;&gt;&gt; mycompany_partner.child_ids -= myaddress   # 去掉
+</pre>
+</div>
+
+<div class="box ver">
+  <div class="t">&#8682; 二进制字段不再用 base64</div>
+  <p>
+    书里给二进制字段赋值要先 <code>base64.b64encode()</code>。Odoo 19.3 起二进制字段的值是一个 <code>BinaryValue</code> 对象：
+    读取时用 <code>rec.image_1920.content</code> 拿到原始字节；写入时用 <code>BinaryBytes</code> 包装原始字节（可以附带文件名）。
+    直接赋原始 <code>bytes</code> 会报 <code>TypeError</code>；为了兼容 RPC，赋 base64 <strong>字符串</strong>仍然可以。
+  </p>
+  <div class="code" data-lang="py"><pre>
+from odoo.tools.binary import BinaryBytes
+
+with open("/tmp/cover.png", "rb") as f:
+    book.image = BinaryBytes(f.read(), filename="cover.png")
+raw = book.image.content          # bytes
+</pre></div>
+</div>
+
+<h3>write()</h3>
+
+<p>
+  <code>write()</code> 是底层的写方法，接受一个「字段名 → 值」的字典。外部 API 和 XML 数据加载都用它；当值是先准备成字典再统一写入时，它也比逐个赋值更方便：
+</p>
+
+<div class="code" data-lang="py">
+<pre>
+&gt;&gt;&gt; recs = env["res.partner"].search([("name", "ilike", "Azure")])
+&gt;&gt;&gt; recs.write({"comment": "Hello!"})
+True
+&gt;&gt;&gt; self.write({"child_ids": address1 | address2})           # 关系字段可以直接用记录集
+&gt;&gt;&gt; self.write({"child_ids": [Command.set([address1.id, address2.id])]})   # 等价的命令写法
+</pre>
+</div>
+
+<div class="box note">
+  <div class="t">&#9432; 写操作什么时候真正进数据库？</div>
+  <p>
+    从 Odoo 13 起，ORM 的写操作先记在内存缓存里，并不立即生成 SQL；在需要时（比如要执行一次搜索、方法结束、事务提交前）才统一「冲刷」（flush）到数据库。
+    这避免了复杂依赖下对同一条记录的反复更新。大多数时候你感觉不到它的存在，但在执行原始 SQL 前要记得手动冲刷（见本章最后一节）。
+  </p>
+</div>
+
+<h3>创建、复制、删除</h3>
+
+<div class="code" data-lang="py">
+<pre>
+&gt;&gt;&gt; Partner = env["res.partner"]
+&gt;&gt;&gt; new = Partner.create({"name": "ACME", "is_company": True})
+&gt;&gt;&gt; new
+res.partner(59,)
+
+&gt;&gt;&gt; # 一次创建多条：传入字典列表，效率高得多
+&gt;&gt;&gt; Partner.create([{"name": "A"}, {"name": "B"}, {"name": "C"}])
+res.partner(60, 61, 62)
+
+&gt;&gt;&gt; # 复制：可以传入要覆盖的值
+&gt;&gt;&gt; demo = env.ref("base.user_demo")
+&gt;&gt;&gt; john = demo.copy({"name": "John", "login": "john@example.com"})
+
+&gt;&gt;&gt; # 删除
+&gt;&gt;&gt; Partner.search([("name", "=", "ACME")]).unlink()
+True
+</pre>
+</div>
+
+<ul>
+  <li><code>create()</code> 接受一个字典或字典列表，会自动应用字段的默认值，返回新记录。</li>
+  <li><code>copy()</code> 复制记录，<code>copy=False</code> 的字段不会被复制（对多字段默认不复制）。</li>
+  <li><code>unlink()</code> 删除记录集里的所有记录。删除时可能连带删除相关记录（比如 chatter 消息、关注者），日志里会看到相应的 INFO 信息。</li>
+</ul>
+
+<h2 id="dates">日期与时间运算</h2>
+
+<p>Odoo 的字段类提供了几个获取「现在」的辅助函数：</p>
+
+<div class="tw"><table>
+  <tr><th>函数</th><th>返回</th></tr>
+  <tr><td><code>fields.Date.today()</code></td><td>今天（以 UTC 为准）。可直接作默认值：<code>default=fields.Date.today</code></td></tr>
+  <tr><td><code>fields.Date.context_today(record)</code></td><td>按记录上下文中用户时区算出的「今天」。用户在 UTC+8 的凌晨，这两者会不同</td></tr>
+  <tr><td><code>fields.Datetime.now()</code></td><td>现在（UTC）。可直接作默认值：<code>default=fields.Datetime.now</code></td></tr>
+  <tr><td><code>fields.Datetime.context_timestamp(record, dt)</code></td><td>把一个 UTC 的 naive datetime 转成用户时区的、带时区信息的 datetime</td></tr>
+</table></div>
+
+<p>日期运算用 Python 标准库：</p>
+
+<div class="code" data-lang="py">
+<pre>
+&gt;&gt;&gt; from datetime import date, timedelta
+&gt;&gt;&gt; date(2026, 11, 3) + timedelta(days=7)
+datetime.date(2026, 11, 10)
+
+&gt;&gt;&gt; from dateutil.relativedelta import relativedelta      # timedelta 不支持「月」和「年」
+&gt;&gt;&gt; date(2026, 11, 3) + relativedelta(years=1, months=1)
+datetime.date(2027, 12, 3)
+</pre>
+</div>
+
+<p>Odoo 在 <code>odoo.tools.date_utils</code> 里还提供了几个顺手的函数（<code>fields.Date</code> 和 <code>fields.Datetime</code> 上也有同名方法）：</p>
+
+<div class="code" data-lang="py">
+<pre>
+&gt;&gt;&gt; from odoo.tools import date_utils
+&gt;&gt;&gt; from datetime import datetime
+&gt;&gt;&gt; now = datetime(2026, 11, 3)
+&gt;&gt;&gt; date_utils.start_of(now, "week")      # 本周开始；粒度可选 year/quarter/month/week/day/hour
+datetime.datetime(2026, 11, 2, 0, 0)
+&gt;&gt;&gt; date_utils.end_of(now, "week")
+datetime.datetime(2026, 11, 8, 23, 59, 59, 999999)
+&gt;&gt;&gt; date_utils.add(date(2026, 11, 3), months=2)
+datetime.date(2027, 1, 3)
+&gt;&gt;&gt; date_utils.subtract(date(2026, 11, 3), months=2)
+datetime.date(2026, 9, 3)
+</pre>
+</div>
+
+<h3>日期与文本互转</h3>
+
+<div class="code" data-lang="py">
+<pre>
+&gt;&gt;&gt; fields.Date.to_string(date(2026, 11, 3))        # → '2026-11-03'（Odoo 服务器格式）
+&gt;&gt;&gt; fields.Datetime.to_datetime("2026-11-21 23:11:55")
+datetime.datetime(2026, 11, 21, 23, 11, 55)
+&gt;&gt;&gt; date(2026, 11, 3).strftime("%d/%m/%Y")          # 其他格式用 strftime / strptime
+'03/11/2026'
+&gt;&gt;&gt; datetime.strptime("03/11/2026", "%d/%m/%Y")
+datetime.datetime(2026, 11, 3, 0, 0)
+</pre>
+</div>
+
+<p>
+  从外部拿到的时间文本通常是<strong>本地时间</strong>，存进 Odoo 之前要转成 UTC。比如上海用户的 2026-12-01 00:30 应该存成 2026-11-30 16:30 UTC：
+</p>
+
+<div class="code" data-lang="py">
+<pre>
+&gt;&gt;&gt; from datetime import datetime
+&gt;&gt;&gt; from zoneinfo import ZoneInfo
+&gt;&gt;&gt; naive = datetime(2026, 12, 1, 0, 30)
+&gt;&gt;&gt; local = naive.replace(tzinfo=ZoneInfo(env.context.get("tz") or "UTC"))
+&gt;&gt;&gt; utc = local.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)   # Odoo 存 naive 的 UTC
+&gt;&gt;&gt; utc
+datetime.datetime(2026, 11, 30, 16, 30)
+</pre>
+</div>
+
+<div class="box ver">
+  <div class="t">&#8682; pytz → zoneinfo</div>
+  <p>书里用第三方库 <code>pytz</code> 做时区转换。Python 3.9 起标准库自带 <code>zoneinfo</code>，在 Odoo 20 要求的 Python 3.12 上直接可用，写法更简单。</p>
+</div>
+
+<h2 id="recordsets">记录集运算</h2>
+
+<h3>常用方法</h3>
+
+<div class="tw"><table>
+  <tr><th>方法 / 属性</th><th>作用</th></tr>
+  <tr><td><code>rs.ids</code></td><td>ID 列表</td></tr>
+  <tr><td><code>rs.ensure_one()</code></td><td>确认恰好一条记录，否则报错</td></tr>
+  <tr><td><code>rs.exists()</code></td><td>只保留数据库里仍然存在的记录</td></tr>
+  <tr><td><code>rs.filtered(函数 或 "字段路径")</code></td><td>过滤，保留结果为真的记录</td></tr>
+  <tr><td><code>rs.filtered_domain(域)</code></td><td>用域表达式在内存里过滤（不查数据库），保持原顺序</td></tr>
+  <tr><td><code>rs.mapped(函数 或 "字段路径")</code></td><td>映射。字段路径的最后一段是关系字段时返回记录集，否则返回列表</td></tr>
+  <tr><td><code>rs.sorted(函数 或 "字段名", reverse=False)</code></td><td>排序，返回新记录集</td></tr>
+  <tr><td><code>rs.grouped("字段名")</code></td><td>按字段值分组，返回 <code>{值: 记录集}</code> 字典</td></tr>
+</table></div>
+
+<div class="code" data-lang="py">
+<pre>
+&gt;&gt;&gt; rs0 = env["res.partner"].search([("display_name", "like", "Azure")])
+&gt;&gt;&gt; len(rs0)
+4
+&gt;&gt;&gt; rs0.filtered(lambda r: r.name.startswith("Nicole"))
+res.partner(27,)
+&gt;&gt;&gt; rs0.filtered("is_company")
+res.partner(14,)
+&gt;&gt;&gt; rs0.mapped("name")
+['Azure Interior', 'Brandon Freeman', 'Colleen Diaz', 'Nicole Ford']
+&gt;&gt;&gt; rs0.mapped("parent_id")                  # 关系字段 → 记录集（自动去重）
+res.partner(14,)
+&gt;&gt;&gt; rs0.sorted("name", reverse=True).mapped("name")
+['Nicole Ford', 'Colleen Diaz', 'Brandon Freeman', 'Azure Interior']
+&gt;&gt;&gt; rs0.grouped("is_company")
+{True: res.partner(14,), False: res.partner(26, 33, 27)}
+</pre>
+</div>
+
+<h3>切片与集合运算</h3>
+
+<p>记录集是<strong>不可变</strong>的：所有运算都返回新的记录集，原记录集不变。可以像列表一样切片：</p>
+<ul>
+  <li><code>rs[0]</code>、<code>rs[-1]</code>：第一条、最后一条（空记录集时会报错）</li>
+  <li><code>rs[:1]</code>：第一条，空记录集时返回空记录集 —— <strong>更安全的「取第一条」写法</strong></li>
+  <li><code>rs[1:]</code>：除第一条外的其余记录</li>
+</ul>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 230" role="img" aria-label="记录集的并集、交集、差集运算">
+  <circle cx="110" cy="100" r="55" class="bx-b" style="fill-opacity:.6"/>
+  <circle cx="170" cy="100" r="55" class="bx-a" style="fill-opacity:.6"/>
+  <text class="ttl" x="140" y="190" text-anchor="middle">rs1 | rs2　并集</text>
+  <text class="sm" x="140" y="210" text-anchor="middle">两边全部，不重复</text>
+
+  <circle cx="360" cy="100" r="55" class="bx"/>
+  <circle cx="420" cy="100" r="55" class="bx"/>
+  <path d="M390 54 A55 55 0 0 1 390 146 A55 55 0 0 1 390 54 Z" style="fill:var(--green-bg);stroke:var(--green);stroke-width:1.5"/>
+  <text class="ttl" x="390" y="190" text-anchor="middle">rs1 &amp; rs2　交集</text>
+  <text class="sm" x="390" y="210" text-anchor="middle">两边都有的</text>
+
+  <circle cx="610" cy="100" r="55" class="bx-r"/>
+  <circle cx="670" cy="100" r="55" class="bx" style="fill:var(--bg)"/>
+  <text class="ttl" x="640" y="190" text-anchor="middle">rs1 - rs2　差集</text>
+  <text class="sm" x="640" y="210" text-anchor="middle">在 rs1 不在 rs2 的</text>
+  <text class="sm" x="96" y="104" text-anchor="middle">rs1</text>
+  <text class="sm" x="184" y="104" text-anchor="middle">rs2</text>
+</svg>
+<figcaption>图 7-5　记录集支持集合运算（并保持记录顺序）</figcaption>
+</figure>
+
+<p>它们都可以和赋值合写，常用于修改对多字段：</p>
+<ul>
+  <li><code>self.author_ids |= author1</code>：如果还没有，就加上 author1</li>
+  <li><code>self.author_ids -= author1</code>：如果有，就去掉 author1</li>
+  <li><code>self.author_ids &amp;= author1</code>：只保留也在 author1 里的</li>
+</ul>
+
+<div class="box warn">
+  <div class="t">&#9888; 用 | 而不是 +</div>
+  <p>记录集也支持 <code>+</code>，但它是「拼接」而不是「并集」，会产生重复：<code>env.user + env.user</code> 得到 <code>res.users(2, 2)</code>。几乎所有场景你要的都是 <code>|</code>。</p>
+</div>
+
+<h3>在循环里累积记录</h3>
+
+<p>
+  有时要在循环里逐个得到记录再汇总。最直观的做法是从一个空记录集开始，不断 <code>|=</code>：
+</p>
+
+<div class="code" data-lang="py">
+<pre>
+Partner = env["res.partner"]
+recs = env["res.partner"]          # 空记录集
+for i in range(3):
+    rec = Partner.create({"name": f"Partner {i}"})
+    recs |= rec
+</pre>
+</div>
+
+<p>
+  但记录集是不可变的，每次 <code>|=</code> 都会复制一份新的，记录越多越慢，所以<strong>大循环里应避免</strong>。更好的做法：
+</p>
+
+<div class="code" data-lang="py">
+<pre>
+# 1. 先收集数据，最后一次性 create（最快）
+values = [{"name": f"Partner {i}"} for i in range(3)]
+recs = env["res.partner"].create(values)
+
+# 2. 用 Python 列表收集记录，最后再转成记录集
+recs = []
+for i in range(3):
+    recs.append(Partner.create({"name": f"Partner {i}"}))
+recs = Partner.concat(recs)        # 在空记录集上调用，传入一个可迭代对象（Odoo 20 的写法）
+</pre>
+</div>
+
+<p>很多时候循环本身就不需要，<code>mapped()</code>、<code>filtered()</code> 往往能一行解决。</p>
+
+<h3>比较</h3>
+<ul>
+  <li><code>rec in rs</code> / <code>rec not in rs</code>：某条记录是否在记录集里</li>
+  <li><code>rs1 &lt;= rs2</code>：rs1 的所有记录都在 rs2 里（子集）；<code>&lt;</code> 是真子集</li>
+  <li><code>rs1 &gt;= rs2</code>、<code>rs1 &gt; rs2</code>：反过来</li>
+</ul>
+
+<h2 id="transactions">事务与原始 SQL</h2>
+
+<h3>事务</h3>
+
+<p>
+  客户端发起的每一次调用都在一个<strong>数据库事务</strong>里执行。方法顺利执行完，所有修改一起提交；中途出错（抛出异常），所有修改一起回滚，数据回到调用前的状态。
+  这由框架自动处理，一般不需要操心。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 230" role="img" aria-label="一次请求对应一个事务：成功则提交，异常则全部回滚">
+  <rect class="bx" x="20" y="90" width="120" height="50" rx="10"/>
+  <text class="lbl" x="80" y="120" text-anchor="middle">一次 RPC 调用</text>
+  <rect class="bx-p" x="180" y="40" width="300" height="150" rx="12"/>
+  <text class="ttl on-p" x="330" y="64" text-anchor="middle">事务</text>
+  <rect class="bx" x="200" y="80" width="80" height="34" rx="6"/><text class="sm" x="240" y="102" text-anchor="middle">write</text>
+  <rect class="bx" x="290" y="80" width="80" height="34" rx="6"/><text class="sm" x="330" y="102" text-anchor="middle">create</text>
+  <rect class="bx" x="380" y="80" width="80" height="34" rx="6"/><text class="sm" x="420" y="102" text-anchor="middle">write</text>
+  <text class="sm" x="330" y="146" text-anchor="middle">修改先在内存里累积</text>
+  <text class="sm" x="330" y="166" text-anchor="middle">需要时 flush 成 SQL</text>
+  <rect class="bx-g" x="540" y="40" width="200" height="60" rx="10"/>
+  <text class="ttl on-g" x="640" y="66" text-anchor="middle">成功 → COMMIT</text>
+  <text class="sm" x="640" y="86" text-anchor="middle">全部生效</text>
+  <rect class="bx-r" x="540" y="130" width="200" height="60" rx="10"/>
+  <text class="ttl on-r" x="640" y="156" text-anchor="middle">异常 → ROLLBACK</text>
+  <text class="sm" x="640" y="176" text-anchor="middle">全部撤销，如同没发生</text>
+  <path class="ln" d="M142 115 H176" marker-end="url(#ar)"/>
+  <path class="ln-g" d="M482 90 L536 72" marker-end="url(#ar-g)"/>
+  <path class="ln-r" d="M482 140 L536 158" marker-end="url(#ar-r)"/>
+</svg>
+<figcaption>图 7-6　「要么全做，要么全不做」</figcaption>
+</figure>
+
+<p>在少数高级场景里需要手动控制事务，可以使用游标：</p>
+<ul>
+  <li><code>env.cr.commit()</code>：提交到目前为止的修改。</li>
+  <li><code>env.cr.rollback()</code>：撤销自上次提交以来的修改。</li>
+  <li><code>with env.cr.savepoint():</code>：建一个保存点，块里出错只回滚这一块，外面的修改不受影响 —— 比手动 commit 安全得多。</li>
+</ul>
+
+<div class="code" data-lang="py">
+<pre>
+for book in books:
+    try:
+        with self.env.cr.savepoint():
+            book.do_something_risky()
+    except Exception:
+        _logger.exception("处理 %s 失败，跳过", book.name)
+</pre>
+</div>
+
+<div class="box warn">
+  <div class="t">&#9888; 在业务代码里别随便 commit</div>
+  <p>手动 <code>commit()</code> 会破坏「出错全部回滚」的保证：前半部分已经提交了，后半部分出错就只能留下半截数据。批处理里需要「单条失败不影响其他」时，优先用 <code>savepoint()</code>。</p>
+</div>
+
+<h3>执行原始 SQL</h3>
+
+<p>
+  极少数情况下（复杂报表、性能关键的批量操作），可以直接执行 SQL。Odoo 17 起提供了 <code>SQL</code> 包装对象，用它组装查询可以避免 SQL 注入：
+</p>
+
+<div class="code" data-lang="py">
+<pre>
+&gt;&gt;&gt; from odoo.tools import SQL
+&gt;&gt;&gt; query = SQL("SELECT id, login FROM res_users WHERE login = %s OR id = %s", "demo", 1)
+&gt;&gt;&gt; env.execute_query(query)                 # 返回元组列表
+[(6, 'demo'), (1, '__system__')]
+&gt;&gt;&gt; env.execute_query_dict(query)            # 返回字典列表
+[{'id': 6, 'login': 'demo'}, {'id': 1, 'login': '__system__'}]
+
+&gt;&gt;&gt; # 底层游标的写法也照样可用
+&gt;&gt;&gt; env.cr.execute("SELECT id, login FROM res_users WHERE login = %(login)s", {"login": "demo"})
+&gt;&gt;&gt; env.cr.fetchall()
+[(6, 'demo')]
+</pre>
+</div>
+
+<div class="box warn">
+  <div class="t">&#9888; 永远不要用字符串拼接 SQL</div>
+  <p>
+    <code>cr.execute("... WHERE login = '%s'" % login)</code> 这种写法会让用户输入直接变成 SQL 的一部分，就是教科书式的 <strong>SQL 注入</strong>漏洞。
+    值一律通过 <code>%s</code> 占位符作为参数传入，由数据库驱动负责转义。
+  </p>
+</div>
+
+<p>原始 SQL 绕开了 ORM，所以要自己处理两件事：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 220" role="img" aria-label="执行原始 SQL 前要冲刷 ORM 缓存，执行修改类 SQL 后要使缓存失效">
+  <rect class="bx-a" x="20" y="70" width="180" height="80" rx="10"/>
+  <text class="ttl on-a" x="110" y="98" text-anchor="middle">ORM 内存缓存</text>
+  <text class="sm" x="110" y="120" text-anchor="middle">可能有尚未写入</text>
+  <text class="sm" x="110" y="138" text-anchor="middle">数据库的修改</text>
+
+  <rect class="bx-b" x="560" y="70" width="180" height="80" rx="10"/>
+  <text class="ttl on-b" x="650" y="104" text-anchor="middle">PostgreSQL</text>
+  <text class="sm" x="650" y="126" text-anchor="middle">原始 SQL 直接读写这里</text>
+
+  <path class="ln-a" d="M202 90 H556" marker-end="url(#ar-a)"/>
+  <text class="sm on-a" x="380" y="80" text-anchor="middle">① 读之前：env.flush_all() / Model.flush_model()</text>
+  <path class="ln-b" d="M556 130 H202" marker-end="url(#ar-b)"/>
+  <text class="sm on-b" x="380" y="150" text-anchor="middle">② 改之后：env.invalidate_all() / Model.invalidate_model()</text>
+  <text class="sm" x="380" y="196" text-anchor="middle">否则：SQL 读到旧数据，或者 ORM 继续用缓存里的旧值</text>
+</svg>
+<figcaption>图 7-7　原始 SQL 与 ORM 缓存的协调</figcaption>
+</figure>
+
+<ul>
+  <li><strong>执行前冲刷</strong>：ORM 可能还有没写进数据库的修改，用 <code>env.flush_all()</code>，或针对某个模型 <code>env["library.book"].flush_model(["name"])</code>。</li>
+  <li><strong>修改后失效缓存</strong>：执行了 UPDATE / INSERT 之类的语句后，ORM 缓存里的值已经过时，用 <code>env.invalidate_all()</code>，或 <code>Model.invalidate_model([字段...])</code>、<code>records.invalidate_recordset([字段...])</code>。</li>
+</ul>
+
+<div class="box ver">
+  <div class="t">&#8682; 缓存 API 的新名字</div>
+  <p>书里的 <code>self.env.cache.invalidate(fnames, ids)</code> 在 Odoo 16 起被 <code>invalidate_all()</code> / <code>invalidate_model()</code> / <code>invalidate_recordset()</code> 取代；对应的冲刷方法是 <code>flush_all()</code> / <code>flush_model()</code> / <code>flush_recordset()</code>。</p>
+</div>
+
+<div class="box warn">
+  <div class="t">&#9888; 原始 SQL 是最后的手段</div>
+  <p>它绕过了访问权限、约束、计算字段的依赖重算和审计字段。只有在你非常清楚后果、并且 ORM 确实满足不了需求时才用。</p>
+</div>
+
+<h2 id="summary">小结</h2>
+
+<ul>
+  <li><code>odoo shell</code> 提供了 <code>env</code> 和 <code>self</code>，是探索 ORM 的最佳场所；修改需 <code>env.cr.commit()</code> 才会保存。</li>
+  <li>环境 <code>env</code> 携带游标、用户、上下文、公司；<code>with_context()</code>、<code>with_user()</code>、<code>with_company()</code>、<code>sudo()</code> 返回换了环境的新记录集。</li>
+  <li><code>search()</code> + 域表达式查询；<code>search_count()</code> 计数；<code>browse()</code> 按 ID 构造。域用前缀表示法组合，Python 里可用 <code>Domain</code> 对象。</li>
+  <li>分组统计用 <code>_read_group(domain, groupby, aggregates)</code>，返回元组列表。</li>
+  <li>点号读取对空记录集是安全的；日期时间以 UTC 存储、按用户时区显示。</li>
+  <li>写入：直接赋值或 <code>write()</code>；<code>create()</code> 支持批量；<code>copy()</code>、<code>unlink()</code>。二进制字段用 <code>BinaryBytes</code>。</li>
+  <li>记录集方法：<code>filtered</code>、<code>mapped</code>、<code>sorted</code>、<code>grouped</code>、<code>filtered_domain</code>；集合运算用 <code>| &amp; -</code>，不用 <code>+</code>。</li>
+  <li>每次调用是一个事务；需要局部回滚用 <code>savepoint()</code>；原始 SQL 用 <code>SQL</code> 对象，前冲刷、后失效。</li>
+</ul>
+
+<div class="exercise">
+  <h3>动手练习</h3>
+  <ol>
+    <li>在 <code>odoo shell</code> 里找出所有没有出版社的书，给它们统一设置一个出版社，然后 <code>env.cr.commit()</code>，到界面上确认。</li>
+    <li>写一个域：「出版于 2010 年以后，<strong>并且</strong>（作者中有人来自巴西 <strong>或</strong> 出版社在美国）」。分别用列表写法和 <code>Domain</code> 对象写法实现。</li>
+    <li>用 <code>_read_group</code> 统计每个出版社出版了多少本书，按数量从多到少排序。</li>
+    <li>用 Demo 用户的身份（<code>with_user</code>）尝试删除一本书，观察抛出的异常；再用 <code>sudo()</code> 试试。</li>
+    <li>用 <code>grouped()</code> 把所有书按出版年份分组，打印每年的书名列表。</li>
+    <li>用原始 SQL 查询每本书的作者人数，再用 ORM（<code>mapped</code> / <code>len</code>）实现同样的统计，比较两种写法。</li>
+  </ol>
+</div>
+<div id="pager"></div>
+</main>
+</div>
+<script src="assets/site.js"></script>
+</body>
+</html>

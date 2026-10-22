@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Odoo 20 开发入门 — 从开发者模式到生产部署</title>
+<meta name="description" content="面向初学者的 Odoo 20 开发教程，改编自《Odoo 15 Development Essentials》：模块、模型、视图、业务逻辑、外部 API、报表、门户与生产部署，配有大量图解。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-chapter="0">
+<div id="app">
+<aside id="sidebar"></aside>
+<main>
+<div class="hero">
+  <span class="chapter-eyebrow">面向初学者的 15 章教程 + 附录</span>
+  <h1>Odoo 20 开发入门：从开发者模式到生产部署</h1>
+  <p class="sub">
+    这套教程改编自 Daniel Reis 的《Odoo 15 Development Essentials》（第 5 版，Packt 出版）。
+    原书的知识骨架被完整保留 —— 模块、模型、记录集、业务逻辑、外部 API、视图、看板、报表、门户、部署 ——
+    但所有代码和界面都按 <strong>Odoo 20</strong>（2026 年 9 月发布）重新核对过：凡是和原书不一样的地方，都用紫色提示框标出，
+    书中的笔误也一并改正。每一章都配了大量示意图，帮你先看懂「为什么」，再动手写「怎么做」。
+  </p>
+  <p style="margin-top:14px">
+    <span class="pill">Odoo 20</span><span class="pill">Python 3.12</span><span class="pill">PostgreSQL 16</span>
+    <span class="pill">ORM</span><span class="pill">XML 视图</span><span class="pill">QWeb</span><span class="pill">OWL 3</span>
+    <span class="pill">JSON-2 API</span><span class="pill">Nginx</span>
+  </p>
+</div>
+
+<h2 id="why">Odoo 是什么，为什么值得学</h2>
+
+<p>
+  Odoo 是一套开源的企业管理软件（ERP）：销售、采购、库存、会计、项目、网站、电商……几十个应用共用一个数据库、一套界面。
+  对开发者来说，更重要的是它背后的<strong>框架</strong>：所有官方应用都是用同一套框架写出来的「模块」，你写的模块和它们地位完全平等，
+  可以新增功能，也可以修改任何已有功能。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 300" role="img" aria-label="Odoo 的三层架构与模块：数据层 PostgreSQL、逻辑层 Python ORM、表现层 Web 客户端与网站，模块横跨三层">
+  <rect class="bx-b" x="20" y="20" width="520" height="70" rx="10"/>
+  <text class="ttl on-b" x="280" y="48" text-anchor="middle">表现层</text>
+  <text class="sm" x="280" y="72" text-anchor="middle">后台 Web 客户端（OWL）· 网站与门户（QWeb）· PDF 报表 · 外部 API</text>
+
+  <rect class="bx-a" x="20" y="110" width="520" height="70" rx="10"/>
+  <text class="ttl on-a" x="280" y="138" text-anchor="middle">业务逻辑层</text>
+  <text class="sm" x="280" y="162" text-anchor="middle">Python 模型 · ORM · 计算字段 · 约束 · 自动化 · 访问控制</text>
+
+  <rect class="bx-g" x="20" y="200" width="520" height="70" rx="10"/>
+  <text class="ttl on-g" x="280" y="228" text-anchor="middle">数据层</text>
+  <text class="sm" x="280" y="252" text-anchor="middle">PostgreSQL 数据库 · filestore（附件文件）</text>
+
+  <path class="ln" d="M280 92 V106" marker-start="url(#ar)" marker-end="url(#ar)"/>
+  <path class="ln" d="M280 182 V196" marker-start="url(#ar)" marker-end="url(#ar)"/>
+
+  <rect class="bx-p" x="580" y="20" width="160" height="250" rx="12"/>
+  <text class="ttl on-p" x="660" y="48" text-anchor="middle">一个模块</text>
+  <text class="sm" x="660" y="80" text-anchor="middle">视图、菜单、模板</text>
+  <text class="sm" x="660" y="100" text-anchor="middle">（XML）</text>
+  <text class="sm" x="660" y="150" text-anchor="middle">模型、方法</text>
+  <text class="sm" x="660" y="170" text-anchor="middle">（Python）</text>
+  <text class="sm" x="660" y="220" text-anchor="middle">数据、权限</text>
+  <text class="sm" x="660" y="240" text-anchor="middle">（XML / CSV）</text>
+  <path class="ln-p" d="M578 55 H544" marker-end="url(#ar-p)"/>
+  <path class="ln-p" d="M578 145 H544" marker-end="url(#ar-p)"/>
+  <path class="ln-p" d="M578 235 H544" marker-end="url(#ar-p)"/>
+</svg>
+<figcaption>图 0-1　Odoo 的三层架构。一个模块可以同时往三层里添加东西</figcaption>
+</figure>
+
+<div class="cards">
+  <div class="card"><span class="ic">&#129513;</span><h4>一切皆模块</h4><p>官方应用和你写的代码是同一种东西。扩展、覆盖别人的功能，不用改别人的源码。</p></div>
+  <div class="card"><span class="ic">&#128451;</span><h4>强大的 ORM</h4><p>用 Python 类定义数据，表结构自动创建、自动升级；记录集让数据操作像写普通 Python。</p></div>
+  <div class="card"><span class="ic">&#9997;</span><h4>声明式界面</h4><p>表单、列表、看板用几行 XML 描述，不写一行前端代码就能得到完整的增删改查界面。</p></div>
+  <div class="card"><span class="ic">&#127760;</span><h4>开源 + 生态</h4><p>社区版开源（LGPL），还有 OCA 社区维护的上千个模块，以及庞大的实施和开发者网络。</p></div>
+</div>
+
+<h2 id="who">这套教程写给谁</h2>
+
+<ul>
+  <li><strong>会一点 Python，但没接触过 Odoo</strong>的开发者。每一章都从「这个东西是做什么的」讲起，而不是直接给 API。</li>
+  <li><strong>用过老版本 Odoo，想跟上新版本</strong>的人。大量章节里有「Odoo 15（书中写法）/ Odoo 20」的左右对照，附录还有一张完整的变化速查表。</li>
+  <li><strong>业务顾问、实施工程师</strong>：第 1 章不写代码，只用开发者模式就能做出一个应用；后面的章节帮你理解「界面背后发生了什么」。</li>
+</ul>
+
+<div class="box note">
+  <div class="t">&#9432; 需要什么前置知识</div>
+  <p>
+    会写 Python 函数和类、了解一点 HTML 和 XML 的样子就够了。数据库只需要知道「表、行、列」这些概念。
+    命令行只需要会 <code>cd</code> 和敲命令；第 2 章会一步步带你在 Ubuntu（或 Windows 的 WSL）上搭好开发环境。
+  </p>
+</div>
+
+<h2 id="example">贯穿全书的例子：图书馆管理</h2>
+
+<p>
+  和原书一样，我们一路建设同一个应用：一个<strong>图书馆管理系统</strong>。它由四个模块组成，一个依赖一个，正好演示了 Odoo 「用模块扩展模块」的思路：
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 250" role="img" aria-label="图书馆项目的四个模块及其依赖关系">
+  <rect class="bx-b" x="20" y="60" width="160" height="110" rx="12"/>
+  <text class="ttl mono on-b" x="100" y="88" text-anchor="middle">library_app</text>
+  <text class="sm" x="100" y="112" text-anchor="middle">图书、出版社、作者</text>
+  <text class="sm" x="100" y="132" text-anchor="middle">第 3、5、6、7 章</text>
+  <text class="sm" x="100" y="152" text-anchor="middle">+ 第 12 章</text>
+
+  <rect class="bx-a" x="210" y="60" width="160" height="110" rx="12"/>
+  <text class="ttl mono on-a" x="290" y="88" text-anchor="middle">library_member</text>
+  <text class="sm" x="290" y="112" text-anchor="middle">会员、扩展图书</text>
+  <text class="sm" x="290" y="132" text-anchor="middle">第 4 章</text>
+
+  <rect class="bx-p" x="400" y="60" width="160" height="110" rx="12"/>
+  <text class="ttl mono on-p" x="480" y="88" text-anchor="middle">library_checkout</text>
+  <text class="sm" x="480" y="112" text-anchor="middle">借书单、阶段、看板</text>
+  <text class="sm" x="480" y="132" text-anchor="middle">第 8、10、11 章</text>
+
+  <rect class="bx-g" x="590" y="60" width="150" height="110" rx="12"/>
+  <text class="ttl mono on-g" x="665" y="88" text-anchor="middle">library_portal</text>
+  <text class="sm" x="665" y="112" text-anchor="middle">公开书目、会员门户</text>
+  <text class="sm" x="665" y="132" text-anchor="middle">第 13 章</text>
+
+  <path class="ln" d="M208 115 H184" marker-end="url(#ar)"/>
+  <path class="ln" d="M398 115 H374" marker-end="url(#ar)"/>
+  <path class="ln" d="M588 115 H564" marker-end="url(#ar)"/>
+  <text class="sm" x="380" y="40" text-anchor="middle">箭头表示「依赖」：右边的模块建立在左边的模块之上</text>
+
+  <rect class="bx-d" x="20" y="196" width="720" height="40" rx="8"/>
+  <text class="sm" x="380" y="221" text-anchor="middle">另外：第 9 章写一个通过 JSON-2 API 操作图书的命令行客户端；第 15 章把整个系统部署到生产服务器</text>
+</svg>
+<figcaption>图 0-2　图书馆项目的四个模块，以及它们分别在哪些章节里登场</figcaption>
+</figure>
+
+<h2 id="roadmap">学习路线</h2>
+
+<p>全书分为五个部分，从「用鼠标」到「写代码」再到「上线运维」：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 210" role="img" aria-label="五个部分的学习路线">
+  <rect class="bx-b" x="20" y="40" width="130" height="120" rx="10"/>
+  <text class="ttl on-b" x="85" y="68" text-anchor="middle">入门</text>
+  <text class="sm" x="85" y="94" text-anchor="middle">第 1–4 章</text>
+  <text class="sm" x="85" y="116" text-anchor="middle">开发者模式</text>
+  <text class="sm" x="85" y="136" text-anchor="middle">环境 · 第一个模块</text>
+
+  <rect class="bx-a" x="170" y="40" width="130" height="120" rx="10"/>
+  <text class="ttl on-a" x="235" y="68" text-anchor="middle">模型</text>
+  <text class="sm" x="235" y="94" text-anchor="middle">第 5–7 章</text>
+  <text class="sm" x="235" y="116" text-anchor="middle">数据文件 · 字段</text>
+  <text class="sm" x="235" y="136" text-anchor="middle">记录集</text>
+
+  <rect class="bx-p" x="320" y="40" width="130" height="120" rx="10"/>
+  <text class="ttl on-p" x="385" y="68" text-anchor="middle">业务逻辑</text>
+  <text class="sm" x="385" y="94" text-anchor="middle">第 8–9 章</text>
+  <text class="sm" x="385" y="116" text-anchor="middle">方法 · 测试</text>
+  <text class="sm" x="385" y="136" text-anchor="middle">外部 API</text>
+
+  <rect class="bx-g" x="470" y="40" width="130" height="120" rx="10"/>
+  <text class="ttl on-g" x="535" y="68" text-anchor="middle">视图</text>
+  <text class="sm" x="535" y="94" text-anchor="middle">第 10–13 章</text>
+  <text class="sm" x="535" y="116" text-anchor="middle">后台 · 看板 · 报表</text>
+  <text class="sm" x="535" y="136" text-anchor="middle">网站与门户</text>
+
+  <rect class="bx-r" x="620" y="40" width="120" height="120" rx="10"/>
+  <text class="ttl on-r" x="680" y="68" text-anchor="middle">上线</text>
+  <text class="sm" x="680" y="94" text-anchor="middle">第 14–15 章</text>
+  <text class="sm" x="680" y="116" text-anchor="middle">内置模型</text>
+  <text class="sm" x="680" y="136" text-anchor="middle">部署与维护</text>
+
+  <path class="ln" d="M152 100 H166" marker-end="url(#ar)"/>
+  <path class="ln" d="M302 100 H316" marker-end="url(#ar)"/>
+  <path class="ln" d="M452 100 H466" marker-end="url(#ar)"/>
+  <path class="ln" d="M602 100 H616" marker-end="url(#ar)"/>
+  <text class="sm" x="380" y="192" text-anchor="middle">附录：Odoo 15 → 20 变化速查，以及用 upgrade_code 迁移旧代码</text>
+</svg>
+<figcaption>图 0-3　五个部分，由浅入深</figcaption>
+</figure>
+
+<h2 id="how">怎么用这套教程</h2>
+
+<ul>
+  <li><strong>按顺序读。</strong>后面的章节建立在前面的模块之上。第 1 章不写代码，如果你急着动手，可以从第 2 章开始。</li>
+  <li><strong>亲手敲代码。</strong>每章末尾都有「动手练习」。看懂和写出来之间的差距，比你想象的大。</li>
+  <li><strong>留意紫色提示框。</strong>标着「&#8682; Odoo 20 变化」的框说明这里和原书（Odoo 15）不同；如果你从没用过旧版本，把它当作「顺便了解一下历史」即可。</li>
+  <li><strong>左右对照卡片。</strong>左边是原书的 Odoo 15 写法，右边是 Odoo 20 写法。在网上搜到老代码时，这些对照能帮你一眼认出该怎么改。</li>
+  <li><strong>参考原书仓库的代码。</strong>本仓库的 <code>ch02</code>～<code>ch15</code> 和 <code>final</code> 目录是原书的 Odoo 15 代码，可以对照阅读，但直接安装到 Odoo 20 上会失败——请以教程里的代码为准。</li>
+</ul>
+
+<h2 id="toc">全部章节</h2>
+<div id="toc-grid"></div>
+
+<div class="box tip" style="margin-top:32px">
+  <div class="t">&#128161; 一句话总结</div>
+  <p>
+    如果你只记住一件事：<strong>Odoo 里的一切——数据、界面、权限、菜单——都是某个模型里的记录，而模块就是一包「创建和修改这些记录」的代码与数据。</strong>
+    这套教程剩下的部分，都是在解释这句话的各种展开。
+  </p>
+</div>
+</main>
+</div>
+<script src="assets/site.js"></script>
+</body>
+</html>

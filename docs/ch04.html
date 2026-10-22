@@ -1,0 +1,1104 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 4 章 · 扩展模块 — Odoo 20 开发入门</title>
+<meta name="description" content="用 Odoo 的继承机制，在不修改原模块代码的前提下扩展模型、方法、视图、数据、控制器和网页模板。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-chapter="4">
+<div id="app">
+<aside id="sidebar"></aside>
+<main>
+<span class="chapter-eyebrow">第 4 章</span>
+<h1>扩展模块</h1>
+<p class="lede">
+  Odoo 最强大的能力之一：<strong>不碰别人的代码，也能修改别人的功能</strong>。
+  你不需要去改 <code>sale</code> 模块的源码来给销售订单加个字段，而是写一个新模块，像一层透明薄膜一样叠在上面。
+  这一章我们写第二个模块 <code>library_member</code>，用它来扩展上一章的 <code>library_app</code>，把每一层的扩展方法都走一遍。
+</p>
+
+<div class="goals">
+  <h4>本章目标</h4>
+  <ul>
+    <li>用 <code>_inherit</code> 给已有模型加字段、改字段属性、扩展方法</li>
+    <li>分清 Odoo 的四种模型继承：经典继承、原型继承、委托继承、混入类</li>
+    <li>给模型加上消息记录（chatter）和计划活动</li>
+    <li>扩展视图（定位器、XPath、position）和已有数据记录</li>
+    <li>扩展网页控制器和 QWeb 模板</li>
+  </ul>
+</div>
+
+<div id="chapter-toc"></div>
+
+<h2 id="project">学习项目：图书馆会员</h2>
+
+<p>我们要让图书馆能管理会员，为将来的借书功能做准备。需求如下：</p>
+
+<div class="vs">
+  <div class="new">
+    <div class="h">对「书」的修改</div>
+    <ul style="margin:10px 14px 12px 4px;font-size:14.5px">
+      <li>加一个「可借阅？」字段，暂时手动维护</li>
+      <li>ISBN 校验除了 13 位，还要支持老式的 10 位</li>
+      <li>网页书目标出不可借的书，并支持只看可借的书</li>
+    </ul>
+  </div>
+  <div class="new">
+    <div class="h">新增「会员」</div>
+    <ul style="margin:10px 14px 12px 4px;font-size:14.5px">
+      <li>新模型：姓名、借书卡号、邮箱、地址等联系信息</li>
+      <li>会员表单带消息记录和计划活动，方便协作</li>
+    </ul>
+  </div>
+</div>
+
+<p>这些修改全部放进一个新模块 <code>library_member</code>，和 <code>library_app</code> 并列：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 270" role="img" aria-label="library_member 模块叠加在 library_app 和 mail 之上">
+  <rect class="bx" x="20" y="200" width="720" height="50" rx="10"/>
+  <text class="ttl" x="380" y="230" text-anchor="middle">base（Odoo 核心：联系人、用户、组……）</text>
+
+  <rect class="bx-b" x="20" y="120" width="350" height="64" rx="10"/>
+  <text class="ttl on-b" x="195" y="146" text-anchor="middle">library_app（第 3 章）</text>
+  <text class="sm" x="195" y="168" text-anchor="middle">library.book · 书目视图 · /library/books</text>
+
+  <rect class="bx-g" x="390" y="120" width="350" height="64" rx="10"/>
+  <text class="ttl on-g" x="565" y="146" text-anchor="middle">mail（讨论应用）</text>
+  <text class="sm" x="565" y="168" text-anchor="middle">mail.thread · mail.activity.mixin</text>
+
+  <rect class="bx-a" x="120" y="20" width="520" height="80" rx="12"/>
+  <text class="ttl on-a" x="380" y="46" text-anchor="middle">library_member（本章）</text>
+  <text class="sm" x="380" y="68" text-anchor="middle">给 library.book 加字段、扩展方法、扩展视图和网页</text>
+  <text class="sm" x="380" y="86" text-anchor="middle">新增 library.member 模型，带 chatter</text>
+
+  <path class="ln-a" d="M260 102 L220 118" marker-end="url(#ar-a)"/>
+  <path class="ln-a" d="M500 102 L540 118" marker-end="url(#ar-a)"/>
+  <text class="sm" x="380" y="112" text-anchor="middle">depends</text>
+</svg>
+<figcaption>图 4-1　扩展模块依赖被扩展的模块；原模块对此一无所知，也不需要知道</figcaption>
+</figure>
+
+<p>新建 <code>~/work20/library/library_member/</code> 目录，先放一个空的 <code>__init__.py</code> 和清单文件：</p>
+
+<div class="code" data-lang="py" data-file="library_member/__manifest__.py">
+<pre>
+{
+    "name": "Library Members",
+    "description": "Manage members borrowing books.",
+    "author": "Daniel Reis",
+    "license": "AGPL-3",
+    "version": "20.0.1.0.0",
+    "depends": ["library_app"],
+    "application": False,
+}
+</pre>
+</div>
+
+<p><code>application</code> 为 <code>False</code>：它只是给图书馆应用加功能，不是一个独立的应用。</p>
+
+<h2 id="add-field">给已有模型加字段</h2>
+
+<p>
+  第一个任务最常见也最简单：给书加一个 <code>is_available</code> 布尔字段。正好借它来认识 Odoo 的继承机制。
+</p>
+
+<p>按「一个模型一个文件」的约定，准备好 Python 文件的导入链：</p>
+
+<div class="code" data-lang="py" data-file="library_member/__init__.py">
+<pre>
+from . import models
+</pre>
+</div>
+
+<div class="code" data-lang="py" data-file="library_member/models/__init__.py">
+<pre>
+from . import library_book
+</pre>
+</div>
+
+<div class="code" data-lang="py" data-file="library_member/models/library_book.py">
+<pre>
+from odoo import fields, models
+
+
+class LibraryBook(models.Model):
+    _inherit = "library.book"
+
+    is_available = fields.Boolean("Is Available?")
+</pre>
+</div>
+
+<p>
+  关键在 <code>_inherit = "library.book"</code>：它声明「我要扩展 library.book 这个模型」。
+  注意这里<strong>没有写 <code>_name</code></strong>，因为我们不打算改模型的名字。只需要写出想要添加或修改的部分，其余一切从原模型继承。
+</p>
+
+<h3>经典继承：原地修改</h3>
+
+<p>
+  可以把这种继承理解为：从一个中央<strong>注册表（registry）</strong>里拿到模型定义的引用，然后<strong>原地</strong>修改它。
+  Odoo 启动时会按模块的依赖顺序，把同一个模型的所有类「叠」在一起，组装出最终的模型：
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 300" role="img" aria-label="经典继承：多个模块对同一模型的类被叠加，组装成注册表中的最终模型">
+  <text class="ttl" x="20" y="28">各模块里的类定义</text>
+  <rect class="bx-b" x="20" y="44" width="290" height="80" rx="10"/>
+  <text class="ttl on-b" x="36" y="68">library_app</text>
+  <text class="sm mono" x="36" y="90">_name = "library.book"</text>
+  <text class="sm mono" x="36" y="110">name, isbn, active, … _check_isbn()</text>
+
+  <rect class="bx-a" x="20" y="144" width="290" height="80" rx="10"/>
+  <text class="ttl on-a" x="36" y="168">library_member</text>
+  <text class="sm mono" x="36" y="190">_inherit = "library.book"</text>
+  <text class="sm mono" x="36" y="210">is_available, _check_isbn()</text>
+
+  <path class="ln" d="M312 84 L420 140" marker-end="url(#ar)"/>
+  <path class="ln" d="M312 184 L420 160" marker-end="url(#ar)"/>
+
+  <rect class="bx-g" x="424" y="70" width="316" height="150" rx="12"/>
+  <text class="ttl on-g" x="582" y="96" text-anchor="middle">注册表里的 library.book</text>
+  <rect class="bx-a" x="444" y="108" width="276" height="36" rx="6"/>
+  <text class="sm on-a" x="582" y="131" text-anchor="middle">library_member 的类（最上层）</text>
+  <rect class="bx-b" x="444" y="150" width="276" height="36" rx="6"/>
+  <text class="sm on-b" x="582" y="173" text-anchor="middle">library_app 的类</text>
+  <text class="sm" x="582" y="208" text-anchor="middle">调用方法时从上往下找，super() 往下一层</text>
+
+  <rect class="bx-b" x="424" y="238" width="316" height="44" rx="10"/>
+  <text class="lbl on-b" x="582" y="265" text-anchor="middle">仍然只有一张表 library_book，多了一列 is_available</text>
+  <path class="ln-b" d="M582 222 V234" marker-end="url(#ar-b)"/>
+</svg>
+<figcaption>图 4-2　经典继承（<code>_inherit</code> 不改 <code>_name</code>）：同一个模型、同一张表，只是被「加了一层」</figcaption>
+</figure>
+
+<div class="box tip">
+  <div class="t">&#128161; 如果同时改了 <code>_name</code> 会怎样？</div>
+  <p>那就不是修改原模型，而是创建一个<strong>复制品</strong>新模型，称为原型继承。本章后面会讲。</p>
+</div>
+
+<p>别忘了，代码里扩展的是 <code>library.book</code>，所以要把 <code>library_app</code> 写进 <code>depends</code> —— 已经写了。安装模块后，在 <strong>设置 → 技术 → 数据库结构 → 模型</strong>里查看 <code>library.book</code>，能看到新字段。</p>
+
+<h3>把字段加到表单上</h3>
+
+<p>
+  模型有了新字段，还要让它显示出来。视图是 XML，扩展视图就是「找到 XML 里的某个位置，在那里做修改」。
+  继承视图和普通视图的写法几乎一样，只多一个 <code>inherit_id</code>，指明要扩展哪个视图。
+</p>
+
+<p>
+  先找到要扩展的视图的 XML ID：在 <strong>设置 → 技术 → 用户界面 → 视图</strong>里能查到书的表单是 <code>library_app.view_form_book</code>。
+  再选定插入点：我们想把新字段放在 ISBN 后面，ISBN 字段在视图里是 <code>&lt;field name="isbn"/&gt;</code>。
+</p>
+
+<div class="code" data-lang="xml" data-file="library_member/views/book_view.xml">
+<pre>
+&lt;odoo&gt;
+    &lt;record id="view_form_book_extend" model="ir.ui.view"&gt;
+        &lt;field name="name"&gt;Book: add Is Available? field&lt;/field&gt;
+        &lt;field name="model"&gt;library.book&lt;/field&gt;
+        &lt;field name="inherit_id" ref="library_app.view_form_book"/&gt;
+        &lt;field name="arch" type="xml"&gt;
+            &lt;field name="isbn" position="after"&gt;
+                &lt;field name="is_available"/&gt;
+            &lt;/field&gt;
+        &lt;/field&gt;
+    &lt;/record&gt;
+&lt;/odoo&gt;
+</pre>
+</div>
+
+<ul>
+  <li><code>inherit_id</code>：用 <code>ref</code> 引用被扩展视图的 XML ID。跨模块引用时要写全 <code>模块名.标识符</code>。</li>
+  <li><code>arch</code> 里的 <code>&lt;field name="isbn" position="after"&gt;</code> 是<strong>定位器</strong>：找到 name 为 isbn 的字段，在它<strong>之后</strong>插入里面的内容。</li>
+</ul>
+
+<p>把文件加入清单的 <code>data</code>，升级模块，书的表单上 ISBN 后面就多了「Is Available?」。</p>
+
+<h2 id="classic">深入经典继承</h2>
+
+<h3>增量修改已有字段</h3>
+
+<p>
+  扩展模型时，已有字段也可以<strong>增量修改</strong>：只写出要改或要加的属性，其他属性保持不变。
+  我们做两处修改：给 ISBN 加一个提示说明，给出版社字段加数据库索引（让按出版社搜索更快）：
+</p>
+
+<div class="code" data-lang="py" data-file="library_member/models/library_book.py（片段）">
+<pre>
+class LibraryBook(models.Model):
+    _inherit = "library.book"
+
+    is_available = fields.Boolean("Is Available?")
+    isbn = fields.Char(help="Use a valid ISBN-13 or ISBN-10.")
+    publisher_id = fields.Many2one(index=True)
+</pre>
+</div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 190" role="img" aria-label="字段的增量修改：原有属性与新增属性合并">
+  <rect class="bx-b" x="20" y="30" width="230" height="130" rx="10"/>
+  <text class="ttl on-b" x="135" y="54" text-anchor="middle">library_app 中</text>
+  <text class="sm mono" x="36" y="80">publisher_id = Many2one(</text>
+  <text class="sm mono" x="52" y="100">"res.partner",</text>
+  <text class="sm mono" x="52" y="120">string="Publisher")</text>
+
+  <rect class="bx-a" x="270" y="30" width="200" height="130" rx="10"/>
+  <text class="ttl on-a" x="370" y="54" text-anchor="middle">library_member 中</text>
+  <text class="sm mono" x="286" y="80">publisher_id =</text>
+  <text class="sm mono" x="286" y="100">  Many2one(</text>
+  <text class="sm mono" x="286" y="120">    index=True)</text>
+
+  <text class="ttl" x="258" y="100" text-anchor="middle">+</text>
+  <text class="ttl" x="484" y="100" text-anchor="middle">=</text>
+
+  <rect class="bx-g" x="500" y="30" width="240" height="130" rx="10"/>
+  <text class="ttl on-g" x="620" y="54" text-anchor="middle">最终字段</text>
+  <text class="sm mono" x="516" y="80">Many2one(</text>
+  <text class="sm mono" x="532" y="100">"res.partner",</text>
+  <text class="sm mono" x="532" y="120">string="Publisher",</text>
+  <text class="sm mono on-a" x="532" y="140">index=True)</text>
+</svg>
+<figcaption>图 4-3　重新声明字段时，只需写出变化的属性</figcaption>
+</figure>
+
+<p>
+  升级后，鼠标悬停在 ISBN 上能看到提示。索引的效果不太容易察觉，但可以在开发者模式下通过调试菜单 → <strong>Fields</strong> 找到出版社字段，看到它已被标记为索引。
+</p>
+
+<h3>扩展 Python 方法</h3>
+
+<p>
+  业务逻辑同样可以扩展，用的是 Python 本身的类继承机制。原来的 <code>_check_isbn()</code> 只认 13 位 ISBN，但一些老书只有 10 位 ISBN。
+  10 位 ISBN 的规则是：前 9 位分别乘以 1 到 9，求和后对 11 取余，结果应等于第 10 位。
+</p>
+
+<div class="code" data-lang="py" data-file="library_member/models/library_book.py（片段）">
+<pre>
+    def _check_isbn(self):
+        self.ensure_one()
+        digits = [int(x) for x in self.isbn if x.isdigit()]
+        if len(digits) == 10:
+            ponderators = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+            total = sum(a * b for a, b in zip(digits[:9], ponderators))
+            check = total % 11
+            return digits[-1] == check
+        else:
+            return super()._check_isbn()
+</pre>
+</div>
+
+<p>
+  在继承的类里定义一个<strong>同名</strong>方法，就扩展了它。方法里在适当的时候调用 <code>super()._check_isbn()</code>，执行「下一层」的原有逻辑。
+  这里我们把新逻辑放在 <code>super()</code> 之前：如果是 10 位就自己处理，否则交给原来的方法处理 13 位的情况。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 240" role="img" aria-label="扩展方法时通过 super() 调用下一层实现的流程">
+  <rect class="bx" x="20" y="90" width="150" height="56" rx="10"/>
+  <text class="lbl" x="95" y="114" text-anchor="middle">book._check_isbn()</text>
+  <text class="sm" x="95" y="134" text-anchor="middle">调用方</text>
+
+  <rect class="bx-a" x="220" y="70" width="250" height="96" rx="10"/>
+  <text class="ttl on-a" x="345" y="94" text-anchor="middle">library_member 版本</text>
+  <text class="sm" x="236" y="118">10 位？→ 自己计算并返回</text>
+  <text class="sm" x="236" y="140">否则 → super()._check_isbn()</text>
+
+  <rect class="bx-b" x="530" y="70" width="210" height="96" rx="10"/>
+  <text class="ttl on-b" x="635" y="94" text-anchor="middle">library_app 版本</text>
+  <text class="sm" x="546" y="118">13 位 → 计算校验位</text>
+  <text class="sm" x="546" y="140">其他 → False</text>
+
+  <path class="ln" d="M172 118 H216" marker-end="url(#ar)"/>
+  <path class="ln-a" d="M472 140 H526" marker-end="url(#ar-a)"/>
+  <text class="sm on-a" x="499" y="132" text-anchor="middle">super()</text>
+  <path class="ln-b" d="M635 168 V200 H345 V170" marker-end="url(#ar-b)"/>
+  <text class="sm" x="490" y="196" text-anchor="middle">返回结果</text>
+  <text class="sm" x="20" y="226">在 super() 之前写代码 = 「先做我的事」；之后写 = 「在原逻辑的结果上加工」；不调用 super() = 完全替换（慎用！）</text>
+</svg>
+<figcaption>图 4-4　方法扩展的调用链</figcaption>
+</figure>
+
+<div class="box warn">
+  <div class="t">&#9888; 几乎总是要调用 super()</div>
+  <p>
+    如果扩展方法里不调用 <code>super()</code>，原方法（以及其他模块对它的扩展）就再也不会执行了。
+    这会悄悄破坏别人的功能。除非你非常确定要整体替换，否则务必调用 <code>super()</code>。
+  </p>
+</div>
+
+<p>
+  不妨给它写个测试。威廉·戈尔丁《蝇王》原版的 10 位 ISBN 是 <code>0-571-05686-5</code>：
+</p>
+
+<div class="code" data-lang="py" data-file="library_member/tests/test_book.py">
+<pre>
+from odoo.tests import TransactionCase
+
+
+class TestBookISBN10(TransactionCase):
+
+    def test_check_isbn10(self):
+        "10 位 ISBN 也能通过校验"
+        book = self.env["library.book"].create({
+            "name": "Lord of the Flies",
+            "isbn": "0-571-05686-5",
+        })
+        self.assertTrue(book._check_isbn())
+</pre>
+</div>
+
+<p>（还需要一个 <code>tests/__init__.py</code> 导入它。）</p>
+
+<h2 id="mechanisms">更多继承机制</h2>
+
+<p>经典继承最常用，但 Odoo 一共提供了四种模型继承方式，各有用途：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 420" role="img" aria-label="Odoo 四种模型继承方式的对比">
+  <rect class="bx-b" x="20" y="20" width="350" height="185" rx="12"/>
+  <text class="ttl on-b" x="36" y="44">① 经典继承（原地扩展）</text>
+  <text class="sm mono" x="36" y="66">_inherit = "a"</text>
+  <rect class="bx" x="120" y="86" width="140" height="70" rx="8"/>
+  <text class="lbl" x="190" y="110" text-anchor="middle">模型 a</text>
+  <rect class="bx-a" x="132" y="122" width="116" height="24" rx="5"/>
+  <text class="sm on-a" x="190" y="138" text-anchor="middle">+ 新字段/方法</text>
+  <text class="sm" x="36" y="180">同一个模型、同一张表</text>
+  <text class="sm" x="36" y="196">最常用：给已有模型加东西</text>
+
+  <rect class="bx-p" x="390" y="20" width="350" height="185" rx="12"/>
+  <text class="ttl on-p" x="406" y="44">② 原型继承（复制）</text>
+  <text class="sm mono" x="406" y="66">_name = "b"; _inherit = "a"</text>
+  <rect class="bx" x="420" y="86" width="110" height="60" rx="8"/>
+  <text class="lbl" x="475" y="121" text-anchor="middle">模型 a</text>
+  <rect class="bx-p" x="590" y="86" width="110" height="60" rx="8"/>
+  <text class="lbl on-p" x="645" y="121" text-anchor="middle">模型 b</text>
+  <path class="ln-p" d="M532 116 H586" marker-end="url(#ar-p)"/>
+  <text class="sm" x="559" y="108" text-anchor="middle">复制</text>
+  <text class="sm" x="406" y="180">新模型、新表、数据互不相干</text>
+  <text class="sm" x="406" y="196">很少直接用</text>
+
+  <rect class="bx-g" x="20" y="220" width="350" height="185" rx="12"/>
+  <text class="ttl on-g" x="36" y="244">③ 委托继承（嵌入）</text>
+  <text class="sm mono" x="36" y="266">_inherits = {"a": "a_id"}</text>
+  <rect class="bx-g" x="50" y="286" width="120" height="60" rx="8"/>
+  <text class="lbl on-g" x="110" y="312" text-anchor="middle">模型 c</text>
+  <text class="sm mono" x="110" y="332" text-anchor="middle">a_id</text>
+  <rect class="bx" x="230" y="286" width="110" height="60" rx="8"/>
+  <text class="lbl" x="285" y="321" text-anchor="middle">模型 a</text>
+  <path class="ln-g" d="M172 316 H226" marker-end="url(#ar-g)"/>
+  <text class="sm" x="36" y="380">c 拥有 a 的全部字段，数据存在 a 里</text>
+  <text class="sm" x="36" y="396">例：用户 res.users 嵌入联系人</text>
+
+  <rect class="bx-a" x="390" y="220" width="350" height="185" rx="12"/>
+  <text class="ttl on-a" x="406" y="244">④ 混入类（mixin）</text>
+  <text class="sm mono" x="406" y="266">_inherit = ["mail.thread", …]</text>
+  <rect class="bx-d" x="420" y="286" width="120" height="30" rx="6"/>
+  <text class="sm" x="480" y="306" text-anchor="middle">抽象模型 m</text>
+  <rect class="bx-d" x="420" y="322" width="120" height="30" rx="6"/>
+  <text class="sm" x="480" y="342" text-anchor="middle">抽象模型 n</text>
+  <rect class="bx-a" x="600" y="286" width="110" height="66" rx="8"/>
+  <text class="lbl on-a" x="655" y="324" text-anchor="middle">模型 d</text>
+  <path class="ln-a" d="M542 301 L596 312" marker-end="url(#ar-a)"/>
+  <path class="ln-a" d="M542 337 L596 326" marker-end="url(#ar-a)"/>
+  <text class="sm" x="406" y="380">把一组通用功能「混」进模型</text>
+  <text class="sm" x="406" y="396">例：消息、活动、图片、网站发布</text>
+</svg>
+<figcaption>图 4-5　四种继承方式一览</figcaption>
+</figure>
+
+<h3>委托继承：嵌入另一个模型</h3>
+
+<p>
+  委托继承让我们复用另一个模型的数据结构，而且<strong>数据不重复</strong>。它在新模型里嵌入一条被委托模型的记录：
+</p>
+<ul>
+  <li>创建一条新模型的记录时，会自动创建并关联一条被委托模型的记录。</li>
+  <li>被委托模型的字段，在新模型上可以直接读写，就像自己的字段一样（底层其实读写的是关联的那条记录）。</li>
+</ul>
+
+<p>
+  最典型的例子是<strong>用户</strong>：每个用户（<code>res.users</code>）都嵌入了一个联系人（<code>res.partner</code>），所以用户有姓名、邮箱、地址等联系人字段，另外还有登录名、密码等用户特有的字段。
+</p>
+
+<div class="box note">
+  <div class="t">&#9432; 严格说这不是继承</div>
+  <p>技术上，委托继承是<strong>组合</strong>：一个对象的部分功能委托给另一个对象提供。它只在数据层面起作用，<strong>方法不会被继承</strong>。要调用嵌入记录的方法，得通过关系字段：<code>member.partner_id.some_method()</code>。</p>
+</div>
+
+<p>
+  图书馆会员正好适合这样做：会员需要借书卡号，还需要姓名、邮箱、地址等个人信息 —— 而联系人模型已经有完整的联系方式和地址结构了，没必要再造一遍。
+</p>
+
+<div class="code" data-lang="py" data-file="library_member/models/library_member.py">
+<pre>
+from odoo import fields, models
+
+
+class LibraryMember(models.Model):
+    _name = "library.member"
+    _description = "Library Member"
+
+    card_number = fields.Char()
+    partner_id = fields.Many2one(
+        "res.partner",
+        delegate=True,
+        ondelete="cascade",
+        required=True,
+    )
+</pre>
+</div>
+
+<p>
+  <code>delegate=True</code> 是关键。还有一种等价的写法，使用模型属性 <code>_inherits</code>（注意多一个 s），它来自旧 API，至今仍很常见：
+</p>
+
+<div class="code" data-lang="py">
+<pre>
+class LibraryMember(models.Model):
+    _name = "library.member"
+    _description = "Library Member"
+    _inherits = {"res.partner": "partner_id"}
+
+    card_number = fields.Char()
+    partner_id = fields.Many2one("res.partner", ondelete="cascade", required=True)
+</pre>
+</div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 270" role="img" aria-label="委托继承：会员表通过 partner_id 关联联系人表，联系人字段在会员上直接可用">
+  <rect class="bx-a" x="20" y="30" width="270" height="200" rx="12"/>
+  <text class="ttl on-a" x="155" y="56" text-anchor="middle">library.member（你看到的）</text>
+  <text class="sm mono" x="40" y="86">card_number</text>
+  <text class="sm mono" x="40" y="108">partner_id</text>
+  <rect class="bx-d" x="34" y="122" width="242" height="96" rx="6"/>
+  <text class="sm mono on-b" x="48" y="144">name</text>
+  <text class="sm mono on-b" x="48" y="164">email</text>
+  <text class="sm mono on-b" x="48" y="184">street, city, …</text>
+  <text class="sm" x="48" y="206">（通过 partner_id 委托）</text>
+
+  <rect class="bx" x="360" y="30" width="170" height="100" rx="10"/>
+  <text class="ttl" x="445" y="56" text-anchor="middle">表 library_member</text>
+  <text class="sm mono" x="376" y="84">id</text>
+  <text class="sm mono" x="376" y="104">card_number</text>
+  <text class="sm mono on-a" x="376" y="122">partner_id</text>
+
+  <rect class="bx-b" x="570" y="30" width="170" height="200" rx="10"/>
+  <text class="ttl on-b" x="655" y="56" text-anchor="middle">表 res_partner</text>
+  <text class="sm mono" x="586" y="84">id</text>
+  <text class="sm mono" x="586" y="104">name</text>
+  <text class="sm mono" x="586" y="124">email</text>
+  <text class="sm mono" x="586" y="144">street, city, …</text>
+
+  <path class="ln-a" d="M532 118 L566 92" marker-end="url(#ar-a)"/>
+  <path class="ln-d" d="M292 80 H356"/>
+  <path class="ln-d" d="M278 170 C 420 200, 480 160, 566 130" marker-end="url(#ar)"/>
+  <text class="sm" x="380" y="206">读写 member.email 实际读写这里</text>
+</svg>
+<figcaption>图 4-6　会员表里只存卡号和一个外键，姓名、邮箱等都存在关联的联系人记录里</figcaption>
+</figure>
+
+<p>
+  <code>ondelete="cascade"</code> 表示：如果关联的联系人被删除，会员记录也跟着删除。<code>required=True</code> 保证每个会员都有一个联系人。
+</p>
+
+<p>要让新模型可用，还要补上导入、访问规则、视图和菜单：</p>
+
+<div class="code" data-lang="py" data-file="library_member/models/__init__.py">
+<pre>
+from . import library_book
+from . import library_member
+</pre>
+</div>
+
+<div class="code" data-lang="csv" data-file="library_member/security/ir.access.csv">
+<pre>
+id,name,model_id,group_id/id,operation,domain
+access_member_user,Member: user,library.member,library_app.library_group_user,cru,
+access_member_manager,Member: manager,library.member,library_app.library_group_manager,crud,
+</pre>
+</div>
+
+<p>注意组的 XML ID 写成了 <code>library_app.library_group_user</code>：引用其他模块的记录时，要带上模块名前缀。</p>
+
+<div class="code" data-lang="xml" data-file="library_member/views/library_menu.xml">
+<pre>
+&lt;odoo&gt;
+    &lt;record id="action_library_member" model="ir.actions.act_window"&gt;
+        &lt;field name="name"&gt;Library Members&lt;/field&gt;
+        &lt;field name="res_model"&gt;library.member&lt;/field&gt;
+        &lt;field name="view_mode"&gt;list,form&lt;/field&gt;
+    &lt;/record&gt;
+
+    &lt;menuitem id="menu_library_member"
+              name="Members"
+              action="action_library_member"
+              parent="library_app.menu_library"/&gt;
+&lt;/odoo&gt;
+</pre>
+</div>
+
+<div class="box ver">
+  <div class="t">&#8682; &lt;act_window&gt; 已经没了</div>
+  <p>
+    书里定义会员动作用的是快捷标签 <code>&lt;act_window&gt;</code>。它在 Odoo 14 就被废弃，现在只能用 <code>&lt;record model="ir.actions.act_window"&gt;</code>。
+  </p>
+</div>
+
+<div class="code" data-lang="xml" data-file="library_member/views/member_view.xml">
+<pre>
+&lt;odoo&gt;
+    &lt;record id="view_form_member" model="ir.ui.view"&gt;
+        &lt;field name="name"&gt;Library Member Form View&lt;/field&gt;
+        &lt;field name="model"&gt;library.member&lt;/field&gt;
+        &lt;field name="arch" type="xml"&gt;
+            &lt;form&gt;
+                &lt;sheet&gt;
+                    &lt;group&gt;
+                        &lt;field name="name"/&gt;
+                        &lt;field name="email"/&gt;
+                        &lt;field name="card_number"/&gt;
+                    &lt;/group&gt;
+                &lt;/sheet&gt;
+            &lt;/form&gt;
+        &lt;/field&gt;
+    &lt;/record&gt;
+
+    &lt;record id="view_list_member" model="ir.ui.view"&gt;
+        &lt;field name="name"&gt;Library Member List View&lt;/field&gt;
+        &lt;field name="model"&gt;library.member&lt;/field&gt;
+        &lt;field name="arch" type="xml"&gt;
+            &lt;list&gt;
+                &lt;field name="name"/&gt;
+                &lt;field name="card_number"/&gt;
+            &lt;/list&gt;
+        &lt;/field&gt;
+    &lt;/record&gt;
+&lt;/odoo&gt;
+</pre>
+</div>
+
+<p>视图里直接用了 <code>name</code> 和 <code>email</code> —— 它们是联系人的字段，通过委托在会员上可用。最后更新清单：</p>
+
+<div class="code" data-lang="py" data-file="library_member/__manifest__.py（片段）">
+<pre>
+    "data": [
+        "security/ir.access.csv",
+        "views/book_view.xml",
+        "views/member_view.xml",
+        "views/library_menu.xml",
+    ],
+</pre>
+</div>
+
+<h3>原型继承：复制一个模型</h3>
+
+<p>
+  如果同时设置 <code>_inherit</code> 和一个<strong>不同的</strong> <code>_name</code>，得到的是一个新模型：原模型的复制品，有自己的表和数据，之后对它的修改不影响原模型。
+  实践中很少这样直接复制模型，需要复用数据结构时，委托继承通常是更好的选择。
+</p>
+
+<p>
+  原型继承真正有用的地方是 <code>_inherit</code> 写成<strong>列表</strong>：从多个父模型「混合」出一个新模型。这正是混入类的用法。
+</p>
+
+<h3>混入类：可复用的功能包</h3>
+
+<p>
+  <strong>混入类（mixin）</strong>就像一个功能容器，实现了某种通用功能，专门用来被加到其他模型里。它不单独使用，所以是<strong>抽象模型</strong>：
+  继承自 <code>models.AbstractModel</code>，在数据库里没有对应的表。
+</p>
+
+<p>Odoo 自带了很多混入类（在源码里搜 <code>models.AbstractModel</code> 就能找到），用得最多的两个来自讨论应用（<code>mail</code> 模块）：</p>
+
+<div class="cards">
+  <div class="card"><span class="ic">&#128172;</span><h4>mail.thread</h4><p>消息墙（chatter）：表单底部或右侧的消息记录、关注者、通知。</p></div>
+  <div class="card"><span class="ic">&#9200;</span><h4>mail.activity.mixin</h4><p>计划活动：给记录安排待办（打电话、开会……），带提醒和期限。</p></div>
+</div>
+
+<h3>给会员加上 chatter 和活动</h3>
+
+<p>三步：加依赖、继承混入类、在表单里放上 chatter。</p>
+
+<div class="code" data-lang="py" data-file="library_member/__manifest__.py（片段）">
+<pre>
+    "depends": ["library_app", "mail"],
+</pre>
+</div>
+
+<div class="code" data-lang="py" data-file="library_member/models/library_member.py">
+<pre>
+class LibraryMember(models.Model):
+    _name = "library.member"
+    _description = "Library Member"
+    _inherits = {"res.partner": "partner_id"}
+    _inherit = ["mail.thread", "mail.activity.mixin"]
+
+    card_number = fields.Char()
+    partner_id = fields.Many2one("res.partner", ondelete="cascade", required=True)
+</pre>
+</div>
+
+<p>只多了一行，模型就拥有了混入类提供的全部字段和方法。</p>
+
+<div class="box tip">
+  <div class="t">&#128161; 给「已有」模型加混入类</div>
+  <p>
+    上面是在<strong>定义新模型时</strong>加混入。如果要给别的模块已经定义好的模型加混入，<code>_inherit</code> 列表里要把原模型自己也写上，并且不写 <code>_name</code>：
+    <code>_inherit = ["library.book", "mail.thread", "mail.activity.mixin"]</code>。
+  </p>
+</div>
+
+<p>最后在会员表单里加上 chatter：</p>
+
+<div class="code" data-lang="xml" data-file="library_member/views/member_view.xml（表单部分）">
+<pre>
+&lt;form&gt;
+    &lt;sheet&gt;
+        &lt;group&gt;
+            &lt;field name="name"/&gt;
+            &lt;field name="email"/&gt;
+            &lt;field name="card_number"/&gt;
+        &lt;/group&gt;
+    &lt;/sheet&gt;
+    &lt;chatter/&gt;
+&lt;/form&gt;
+</pre>
+</div>
+
+<div class="vs">
+  <div class="old">
+    <div class="h">Odoo 15（书中写法）</div>
+    <div class="code" data-lang="xml"><pre>
+&lt;div class="oe_chatter"&gt;
+    &lt;field name="message_follower_ids"
+           widget="mail_followers"/&gt;
+    &lt;field name="activity_ids"
+           widget="mail_activity"/&gt;
+    &lt;field name="message_ids"
+           widget="mail_thread"/&gt;
+&lt;/div&gt;
+</pre></div>
+  </div>
+  <div class="new">
+    <div class="h">Odoo 20</div>
+    <div class="code" data-lang="xml"><pre>
+&lt;chatter/&gt;
+</pre></div>
+  </div>
+</div>
+
+<p>
+  从 Odoo 18 起，一个 <code>&lt;chatter/&gt;</code> 标签就自动放好了关注者、活动和消息三部分，并根据屏幕宽度显示在表单下方或右侧。
+</p>
+
+<div class="box warn">
+  <div class="t">&#9888; 混入类不会改变访问权限</div>
+  <p>
+    加了 <code>mail.thread</code> 不意味着「只有关注者能看到记录」。如果需要这样的限制，要自己写带域的访问规则。
+    <code>mail.thread</code> 提供了关注者字段 <code>message_partner_ids</code>，域可以写成
+    <code>[('message_partner_ids', 'in', [user.partner_id.id])]</code>。
+  </p>
+</div>
+
+<h2 id="views">扩展视图和数据</h2>
+
+<h3>定位器和 position</h3>
+
+<p>
+  扩展视图的核心是「定位 + 操作」。最简单的定位方式是写一个和目标同名的标签，带上能唯一识别它的属性（通常是 <code>name</code>），再用 <code>position</code> 指明做什么：
+</p>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;field name="isbn" position="after"&gt;
+    &lt;!-- 要插入的内容 --&gt;
+&lt;/field&gt;
+</pre>
+</div>
+
+<p>
+  除了 <code>string</code>，任何属性都可以用来定位。<code>string</code> 不行，因为它在生成视图时会被翻译成用户的语言，值不稳定。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 330" role="img" aria-label="视图扩展中 position 的五种取值及效果">
+  <text class="ttl" x="20" y="24">目标节点 = &lt;group name="g"&gt;，内容 = X</text>
+
+  <g>
+    <text class="mono on-a" x="20" y="58">inside</text>
+    <rect class="bx" x="120" y="40" width="200" height="56" rx="6"/>
+    <text class="sm" x="132" y="58">group g</text>
+    <rect class="bx-d" x="132" y="66" width="80" height="22" rx="4"/><text class="sm" x="172" y="81" text-anchor="middle">原有</text>
+    <rect class="bx-a" x="220" y="66" width="80" height="22" rx="4"/><text class="sm on-a" x="260" y="81" text-anchor="middle">X</text>
+    <text class="sm" x="340" y="72">放进目标内部的末尾（默认值）。目标应是容器</text>
+  </g>
+
+  <g>
+    <text class="mono on-a" x="20" y="132">after</text>
+    <rect class="bx" x="120" y="116" width="96" height="30" rx="6"/><text class="sm" x="168" y="136" text-anchor="middle">group g</text>
+    <rect class="bx-a" x="224" y="116" width="96" height="30" rx="6"/><text class="sm on-a" x="272" y="136" text-anchor="middle">X</text>
+    <text class="sm" x="340" y="136">放在目标之后（同级）</text>
+  </g>
+
+  <g>
+    <text class="mono on-a" x="20" y="182">before</text>
+    <rect class="bx-a" x="120" y="166" width="96" height="30" rx="6"/><text class="sm on-a" x="168" y="186" text-anchor="middle">X</text>
+    <rect class="bx" x="224" y="166" width="96" height="30" rx="6"/><text class="sm" x="272" y="186" text-anchor="middle">group g</text>
+    <text class="sm" x="340" y="186">放在目标之前（同级）</text>
+  </g>
+
+  <g>
+    <text class="mono on-a" x="20" y="232">replace</text>
+    <rect class="bx-a" x="120" y="216" width="200" height="30" rx="6"/><text class="sm on-a" x="220" y="236" text-anchor="middle">X（g 被替换掉）</text>
+    <text class="sm" x="340" y="228">用内容替换目标。内容为空 = 删除目标；</text>
+    <text class="sm" x="340" y="246">内容里的 $0 代表原节点，可用来「包一层」</text>
+  </g>
+
+  <g>
+    <text class="mono on-a" x="20" y="290">attributes</text>
+    <rect class="bx" x="120" y="270" width="200" height="40" rx="6"/>
+    <text class="sm mono" x="130" y="294">group g <tspan class="on-a">invisible="1"</tspan></text>
+    <text class="sm" x="340" y="286">修改目标的属性，内容写成</text>
+    <text class="sm mono" x="340" y="304">&lt;attribute name="属性"&gt;值&lt;/attribute&gt;</text>
+  </g>
+</svg>
+<figcaption>图 4-7　<code>position</code> 的五种取值</figcaption>
+</figure>
+
+<div class="code" data-lang="xml" data-file="几个例子">
+<pre>
+&lt;!-- 用 $0 给原有字段包一层 h1 --&gt;
+&lt;field name="name" position="replace"&gt;
+    &lt;h1&gt;$0&lt;/h1&gt;
+&lt;/field&gt;
+
+&lt;!-- 修改属性：把某字段设为只读 --&gt;
+&lt;field name="isbn" position="attributes"&gt;
+    &lt;attribute name="readonly"&gt;True&lt;/attribute&gt;
+&lt;/field&gt;
+
+&lt;!-- 在已有的 invisible 条件上「或」一个新条件，而不是覆盖它 --&gt;
+&lt;field name="isbn" position="attributes"&gt;
+    &lt;attribute name="invisible" add="not active" separator="or"/&gt;
+&lt;/field&gt;
+
+&lt;!-- 不带内容的 attribute：删除这个属性 --&gt;
+&lt;field name="isbn" position="attributes"&gt;
+    &lt;attribute name="readonly"/&gt;
+&lt;/field&gt;
+</pre>
+</div>
+
+<div class="box tip">
+  <div class="t">&#128161; 能隐藏就不要删除</div>
+  <p>
+    <code>position="replace"</code> 配合空内容可以删除元素，但应当尽量避免：别的模块可能正拿这个元素当定位点，你删了它，那些模块就会安装失败。
+    更稳妥的做法是保留元素，把它设为 <code>invisible="1"</code>。
+  </p>
+</div>
+
+<h3>移动节点</h3>
+
+<p>
+  在 <code>inside</code>、<code>after</code>、<code>before</code> 定位器里放一个带 <code>position="move"</code> 的子定位器，可以把一个已有元素移动到新位置：
+</p>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;!-- 把 my_field 从原来的位置移到 target_field 之后 --&gt;
+&lt;field name="target_field" position="after"&gt;
+    &lt;field name="my_field" position="move"/&gt;
+&lt;/field&gt;
+</pre>
+</div>
+
+<h3>用 XPath 定位</h3>
+
+<p>
+  有时候没法用简单定位器：目标元素没有 <code>name</code>（常见于 <code>&lt;group&gt;</code>、<code>&lt;notebook&gt;</code>、<code>&lt;page&gt;</code>），
+  或者同名元素出现了好几次（比如看板模板里同一个字段出现多次）。这时用 <strong>XPath</strong> 表达式：
+</p>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;!-- 与 &lt;field name="isbn" position="after"&gt; 完全等价 --&gt;
+&lt;xpath expr="//field[@name='isbn']" position="after"&gt;
+    &lt;field name="is_available"/&gt;
+&lt;/xpath&gt;
+</pre>
+</div>
+
+<div class="tw"><table>
+  <tr><th>XPath</th><th>含义</th></tr>
+  <tr><td><code>//field[@name='isbn']</code></td><td>任意位置、name 属性为 isbn 的 field 元素</td></tr>
+  <tr><td><code>//group[@name='group_right']</code></td><td>name 为 group_right 的 group</td></tr>
+  <tr><td><code>//sheet/group[1]</code></td><td>sheet 下的第一个 group</td></tr>
+  <tr><td><code>//page[@name='lines']//list</code></td><td>name 为 lines 的页签里的列表</td></tr>
+  <tr><td><code>//div[hasclass('oe_title')]</code></td><td>CSS 类里含 oe_title 的 div（Odoo 扩展的函数）</td></tr>
+  <tr><td><code>.</code></td><td>根节点本身</td></tr>
+</table></div>
+
+<p>
+  如果一个 XPath 匹配到多个元素，只有<strong>第一个</strong>会被修改。所以表达式要尽量精确 —— 这也再次说明了：
+  <strong>写视图时给元素加上唯一的 <code>name</code></strong>，是在为将来扩展它的人（包括你自己）铺路。
+</p>
+
+<h3>修改已有的数据记录</h3>
+
+<p>
+  普通数据记录也能「扩展」，其实就是覆盖已有的值。<code>&lt;record id="x" model="y"&gt;</code> 的语义是「如果 x 不存在就创建，存在就更新」，
+  而用 <code>模块名.标识符</code> 可以引用其他模块创建的记录。
+</p>
+
+<p>比如，把 <code>library_app</code> 创建的「User」组改名为「Librarian」：</p>
+
+<div class="code" data-lang="xml" data-file="library_member/security/library_security.xml">
+<pre>
+&lt;odoo&gt;
+    &lt;!-- 修改 library_app 中定义的组名 --&gt;
+    &lt;record id="library_app.library_group_user" model="res.groups"&gt;
+        &lt;field name="name"&gt;Librarian&lt;/field&gt;
+    &lt;/record&gt;
+&lt;/odoo&gt;
+</pre>
+</div>
+
+<p>这里只写了 <code>name</code> 字段，相当于对这条记录做一次只改 name 的写操作，其他字段不受影响。记得把文件加入清单的 <code>data</code>。</p>
+
+<div class="box warn">
+  <div class="t">&#9888; 快捷标签是「整体覆盖」</div>
+  <p>
+    用 <code>&lt;record&gt;</code> 可以只写想改的字段，但 <code>&lt;menuitem&gt;</code> 这样的快捷标签不行：它会写入<strong>全部</strong>属性，没写的属性会被清空。
+    要修改别的模块的菜单项的某个属性，用 <code>&lt;record id="其他模块.菜单id" model="ir.ui.menu"&gt;</code> 只写那个字段。
+  </p>
+</div>
+
+<div class="box tip">
+  <div class="t">&#128161; 点号是保留字符</div>
+  <p>XML ID 里的 <code>.</code> 专门用来分隔模块名和标识符，所以标识符本身只能用下划线，不能有点。</p>
+</div>
+
+<h2 id="web">扩展网页</h2>
+
+<p>网页控制器和 QWeb 模板同样可以扩展。我们利用新加的「可借阅？」信息改进书目页面：</p>
+<ul>
+  <li>控制器：支持查询参数 <code>/library/books?available=1</code>，只显示可借的书。</li>
+  <li>模板：在不可借的书旁边标注「(Not Available)」。</li>
+</ul>
+
+<h3>扩展控制器</h3>
+
+<p>
+  控制器负责处理网页请求、准备渲染的数据。它应该只处理<strong>展示逻辑</strong>（比如解析 URL 参数），业务逻辑应该放在模型方法里。
+</p>
+
+<div class="code" data-lang="py" data-file="library_member/controllers/main.py">
+<pre>
+from odoo import http
+from odoo.addons.library_app.controllers.main import Books
+
+
+class BooksExtended(Books):
+
+    @http.route()
+    def list(self, **kwargs):
+        response = super().list(**kwargs)
+        if kwargs.get("available"):
+            all_books = response.qcontext["books"]
+            available_books = all_books.filtered("is_available")
+            response.qcontext["books"] = available_books
+        return response
+</pre>
+</div>
+
+<p>别忘了让 Python 能找到它：</p>
+
+<div class="code" data-lang="py" data-file="library_member/__init__.py">
+<pre>
+from . import models
+from . import controllers
+</pre>
+</div>
+
+<div class="code" data-lang="py" data-file="library_member/controllers/__init__.py">
+<pre>
+from . import main
+</pre>
+</div>
+
+<p>逐行理解：</p>
+<ul>
+  <li>
+    <strong>导入原控制器类。</strong>模型有中央注册表，<code>self.env["library.book"]</code> 就能拿到，不用关心它在哪个文件。
+    控制器<strong>没有</strong>这样的注册表，必须知道原控制器在哪个模块的哪个文件里，用 <code>odoo.addons.模块名.路径</code> 导入。
+  </li>
+  <li><strong>继承它。</strong>新类的名字无所谓，它只是一个用来扩展原类的载体。</li>
+  <li>
+    <strong>重新声明方法，并且必须再次加上 <code>@http.route()</code>。</strong>不带参数的 <code>@http.route()</code> 表示沿用父类定义的路由；
+    不加这个装饰器，路由就失效了。也可以传入参数来修改路由。
+  </li>
+  <li>
+    <code>**kwargs</code> 收集 URL 里的所有参数，比如 <code>?available=1</code> 会变成 <code>{"available": "1"}</code>。用 <code>**kwargs</code> 能让页面容忍未知参数；
+    如果只声明特定参数，访问时带了别的参数就会直接报错。
+  </li>
+</ul>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 260" role="img" aria-label="扩展控制器时，父类返回的延迟渲染响应在真正渲染前被修改">
+  <rect class="bx-g" x="20" y="30" width="170" height="60" rx="10"/>
+  <text class="lbl on-g" x="105" y="56" text-anchor="middle">GET /library/books</text>
+  <text class="sm mono" x="105" y="76" text-anchor="middle">?available=1</text>
+
+  <rect class="bx-a" x="230" y="20" width="250" height="80" rx="10"/>
+  <text class="ttl on-a" x="355" y="44" text-anchor="middle">BooksExtended.list()</text>
+  <text class="sm" x="355" y="66" text-anchor="middle">① super().list(**kwargs)</text>
+  <text class="sm" x="355" y="86" text-anchor="middle">③ 修改 qcontext["books"]</text>
+
+  <rect class="bx-b" x="530" y="20" width="210" height="80" rx="10"/>
+  <text class="ttl on-b" x="635" y="44" text-anchor="middle">Books.list()</text>
+  <text class="sm" x="635" y="66" text-anchor="middle">② 查询全部书</text>
+  <text class="sm" x="635" y="86" text-anchor="middle">返回「还没渲染」的响应</text>
+
+  <path class="ln-g" d="M192 60 H226" marker-end="url(#ar-g)"/>
+  <path class="ln-a" d="M482 50 H526" marker-end="url(#ar-a)"/>
+  <path class="ln-b" d="M526 74 H486" marker-end="url(#ar-b)"/>
+
+  <rect class="bx-p" x="230" y="140" width="250" height="90" rx="10"/>
+  <text class="ttl on-p" x="355" y="164" text-anchor="middle">Response（延迟渲染）</text>
+  <text class="sm mono" x="355" y="186" text-anchor="middle">template = book_list_template</text>
+  <text class="sm mono" x="355" y="206" text-anchor="middle">qcontext = {"books": …}</text>
+  <path class="ln-a" d="M355 102 V136" marker-end="url(#ar-a)"/>
+
+  <rect class="bx-g" x="560" y="155" width="180" height="60" rx="10"/>
+  <text class="lbl on-g" x="650" y="182" text-anchor="middle">④ 控制器返回后</text>
+  <text class="sm" x="650" y="202" text-anchor="middle">才真正生成 HTML</text>
+  <path class="ln-p" d="M482 185 H556" marker-end="url(#ar-p)"/>
+</svg>
+<figcaption>图 4-8　<code>request.render()</code> 返回的响应是「延迟渲染」的，所以子类还有机会修改模板变量</figcaption>
+</figure>
+
+<p>
+  关键在于：父方法用 <code>request.render()</code> 返回的 <code>Response</code> 对象<strong>还没有生成 HTML</strong>，它只记着模板名（<code>template</code>）和模板变量（<code>qcontext</code>）。
+  HTML 要等整个控制器执行完才生成。所以我们能在中间替换 <code>qcontext["books"]</code>，用过滤后的书目去渲染。
+  <code>filtered("is_available")</code> 返回记录集中 <code>is_available</code> 为真的那些记录。
+</p>
+
+<p>现在访问 <code>http://localhost:8069/library/books?available=1</code>，只显示勾了「可借阅」的书。</p>
+
+<h3>扩展 QWeb 模板</h3>
+
+<p>
+  网页模板也是 XML，扩展方式和后台视图一样，只是用 <code>&lt;template&gt;</code> 元素加 <code>inherit_id</code> 属性。
+  网页模板里 HTML 元素多，通常需要用更灵活的 XPath：
+</p>
+
+<div class="code" data-lang="xml" data-file="library_member/views/book_list_template.xml">
+<pre>
+&lt;odoo&gt;
+    &lt;template id="book_list_extended"
+              name="Extended Book List"
+              inherit_id="library_app.book_list_template"&gt;
+        &lt;xpath expr="//span[@t-field='book.publisher_id']" position="after"&gt;
+            &lt;t t-if="not book.is_available"&gt;
+                &lt;b&gt;(Not Available)&lt;/b&gt;
+            &lt;/t&gt;
+        &lt;/xpath&gt;
+    &lt;/template&gt;
+&lt;/odoo&gt;
+</pre>
+</div>
+
+<p>
+  这里也可以用简写定位器 <code>&lt;span t-field="book.publisher_id" position="after"&gt;</code>，效果一样。
+  <code>t-if</code> 是 QWeb 的条件指令：条件为真时才输出里面的内容。
+</p>
+
+<p>完整的清单：</p>
+
+<div class="code" data-lang="py" data-file="library_member/__manifest__.py">
+<pre>
+{
+    "name": "Library Members",
+    "description": "Manage members borrowing books.",
+    "author": "Daniel Reis",
+    "license": "AGPL-3",
+    "version": "20.0.1.0.0",
+    "depends": ["library_app", "mail"],
+    "application": False,
+    "data": [
+        "security/library_security.xml",
+        "security/ir.access.csv",
+        "views/book_view.xml",
+        "views/member_view.xml",
+        "views/library_menu.xml",
+        "views/book_list_template.xml",
+    ],
+}
+</pre>
+</div>
+
+<h2 id="summary">小结</h2>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 230" role="img" aria-label="各层的扩展方式汇总">
+  <rect class="bx-b" x="20" y="20" width="230" height="90" rx="10"/>
+  <text class="ttl on-b" x="135" y="46" text-anchor="middle">模型</text>
+  <text class="sm mono" x="135" y="70" text-anchor="middle">_inherit = "模型名"</text>
+  <text class="sm" x="135" y="92" text-anchor="middle">加字段 · 增量改字段</text>
+
+  <rect class="bx-a" x="265" y="20" width="230" height="90" rx="10"/>
+  <text class="ttl on-a" x="380" y="46" text-anchor="middle">方法</text>
+  <text class="sm mono" x="380" y="70" text-anchor="middle">同名方法 + super()</text>
+  <text class="sm" x="380" y="92" text-anchor="middle">在原逻辑前后加代码</text>
+
+  <rect class="bx-g" x="510" y="20" width="230" height="90" rx="10"/>
+  <text class="ttl on-g" x="625" y="46" text-anchor="middle">视图</text>
+  <text class="sm mono" x="625" y="70" text-anchor="middle">inherit_id + 定位器</text>
+  <text class="sm" x="625" y="92" text-anchor="middle">position / XPath</text>
+
+  <rect class="bx-p" x="20" y="125" width="230" height="90" rx="10"/>
+  <text class="ttl on-p" x="135" y="151" text-anchor="middle">数据记录</text>
+  <text class="sm mono" x="135" y="175" text-anchor="middle">&lt;record id="模块.id"&gt;</text>
+  <text class="sm" x="135" y="197" text-anchor="middle">只写要改的字段</text>
+
+  <rect class="bx-r" x="265" y="125" width="230" height="90" rx="10"/>
+  <text class="ttl on-r" x="380" y="151" text-anchor="middle">控制器</text>
+  <text class="sm mono" x="380" y="175" text-anchor="middle">继承类 + @http.route()</text>
+  <text class="sm" x="380" y="197" text-anchor="middle">修改 qcontext</text>
+
+  <rect class="bx" x="510" y="125" width="230" height="90" rx="10"/>
+  <text class="ttl" x="625" y="151" text-anchor="middle">网页模板</text>
+  <text class="sm mono" x="625" y="175" text-anchor="middle">&lt;template inherit_id&gt;</text>
+  <text class="sm" x="625" y="197" text-anchor="middle">XPath 定位</text>
+</svg>
+<figcaption>图 4-9　每一层的扩展方法</figcaption>
+</figure>
+
+<ul>
+  <li>可扩展性是 Odoo 的核心设计：扩展模块叠加在原模块之上，原模块的代码一行不改。</li>
+  <li>经典继承（<code>_inherit</code>）原地修改模型；字段可以增量重定义；方法扩展记得调用 <code>super()</code>。</li>
+  <li>委托继承（<code>delegate=True</code> / <code>_inherits</code>）复用另一个模型的数据结构，不重复存储。</li>
+  <li>混入类是抽象模型，<code>mail.thread</code> 和 <code>mail.activity.mixin</code> 最常用；Odoo 20 用一个 <code>&lt;chatter/&gt;</code> 标签显示它们。</li>
+  <li>视图扩展 = <code>inherit_id</code> + 定位器（简写或 XPath）+ <code>position</code>；给自己写的视图元素加 <code>name</code>，方便别人扩展。</li>
+  <li>控制器扩展要重新加 <code>@http.route()</code>；延迟渲染的响应允许修改 <code>qcontext</code>。</li>
+</ul>
+
+<div class="exercise">
+  <h3>动手练习</h3>
+  <ol>
+    <li>写出 <code>library_member</code> 模块，安装后确认：书的表单出现「Is Available?」，会员菜单可用，会员表单带 chatter。</li>
+    <li>扩展书的<strong>列表视图</strong>，在出版社后面加一列「可借阅？」。</li>
+    <li>扩展书的<strong>搜索视图</strong>，加一个「可借阅」筛选。</li>
+    <li>扩展 <code>button_check_isbn</code>：校验通过后，把 ISBN 里的连字符去掉再保存（<code>book.isbn = book.isbn.replace("-", "")</code>）。想一想：这段代码应该写在 <code>super()</code> 之前还是之后？为什么？</li>
+    <li>修改网页模板，让不可借的书整行显示为灰色（提示：<code>t-attf-class</code> 或 <code>t-att-class</code>）。</li>
+  </ol>
+</div>
+<div id="pager"></div>
+</main>
+</div>
+<script src="assets/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,1084 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 15 章 · 部署与维护 — Odoo 20 开发入门</title>
+<meta name="description" content="把 Odoo 20 部署到生产服务器：准备 Ubuntu 主机、从源码安装、编写配置文件、多进程 worker、systemd 服务、Nginx 反向代理与 HTTPS，以及用预发布环境安全地升级。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-chapter="15">
+<div id="app">
+<aside id="sidebar"></aside>
+<main>
+<span class="chapter-eyebrow">第 15 章</span>
+<h1>部署与维护</h1>
+<p class="lede">
+  应用开发完了，最后一公里是把它部署到服务器上给真正的用户使用。生产环境和开发环境的要求很不一样：
+  它要<strong>开机自动运行</strong>、要<strong>扛住多人同时使用</strong>、要<strong>通过 HTTPS 加密</strong>、要<strong>能安全地升级和回滚</strong>。
+  这一章我们在一台全新的 Ubuntu 服务器上，一步步搭出一个「小规模生产可用」的 Odoo 20。
+</p>
+
+<div class="box warn">
+  <div class="t">先说清楚</div>
+  <p>
+    服务器的搭建和运维本身是一门专业。本章介绍的是 Odoo 部署中最重要的配置和最佳实践，足以让你理解每一块在做什么、搭出一个合理安全的服务器；
+    但对于存放敏感数据的关键系统，仍然建议请有经验的系统管理员把关（防火墙、备份策略、监控、数据库调优等本章不展开）。
+  </p>
+</div>
+
+<div class="goals">
+  <h4>本章目标</h4>
+  <ul>
+    <li>准备 Ubuntu 24.04 主机：系统依赖、PostgreSQL、专用系统用户</li>
+    <li>从源码安装 Odoo 20，并编写生产用的配置文件</li>
+    <li>理解多进程 worker 模式，以及如何估算 worker 数量</li>
+    <li>把 Odoo 配置成 systemd 服务，开机自启</li>
+    <li>用 Nginx 做反向代理，启用 HTTPS 和 WebSocket</li>
+    <li>建立预发布（staging）环境，安全地更新代码和升级模块</li>
+  </ul>
+</div>
+
+<div id="chapter-toc"></div>
+
+<h2 id="overview">生产环境长什么样</h2>
+
+<p>先看一眼我们最终要搭出来的结构：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 330" role="img" aria-label="生产环境架构：浏览器经 HTTPS 到 Nginx，再转发给 Odoo 的 HTTP worker 和 gevent 进程，最后访问 PostgreSQL 和 filestore">
+  <rect class="bx-d" x="20" y="120" width="110" height="80" rx="10"/>
+  <text class="ttl" x="75" y="152" text-anchor="middle">浏览器</text>
+  <text class="sm" x="75" y="176" text-anchor="middle">用户 / 门户</text>
+
+  <rect class="bx-b" x="170" y="100" width="150" height="120" rx="10"/>
+  <text class="ttl on-b" x="245" y="128" text-anchor="middle">Nginx</text>
+  <text class="sm" x="245" y="152" text-anchor="middle">:443 HTTPS</text>
+  <text class="sm" x="245" y="172" text-anchor="middle">:80 → 跳转 443</text>
+  <text class="sm" x="245" y="192" text-anchor="middle">压缩 · 缓存</text>
+  <path class="ln" d="M132 160 H166" marker-end="url(#ar)"/>
+  <text class="sm" x="150" y="148" text-anchor="middle">HTTPS</text>
+
+  <rect class="bx-a" x="370" y="20" width="220" height="290" rx="12"/>
+  <text class="ttl on-a" x="480" y="46" text-anchor="middle">Odoo 服务（systemd）</text>
+  <rect class="bx" x="390" y="62" width="180" height="80" rx="8"/>
+  <text class="lbl" x="480" y="86" text-anchor="middle">HTTP worker × N</text>
+  <text class="sm mono" x="480" y="108" text-anchor="middle">127.0.0.1:8069</text>
+  <text class="sm" x="480" y="128" text-anchor="middle">普通页面、RPC</text>
+  <rect class="bx" x="390" y="152" width="180" height="70" rx="8"/>
+  <text class="lbl" x="480" y="176" text-anchor="middle">gevent 进程</text>
+  <text class="sm mono" x="480" y="198" text-anchor="middle">127.0.0.1:8072</text>
+  <text class="sm" x="480" y="214" text-anchor="middle">/websocket 实时通知</text>
+  <rect class="bx" x="390" y="232" width="180" height="64" rx="8"/>
+  <text class="lbl" x="480" y="256" text-anchor="middle">cron worker</text>
+  <text class="sm" x="480" y="278" text-anchor="middle">执行计划任务</text>
+
+  <path class="ln" d="M322 140 L386 102" marker-end="url(#ar)"/>
+  <path class="ln" d="M322 180 L386 186" marker-end="url(#ar)"/>
+
+  <rect class="bx-g" x="630" y="60" width="110" height="100" rx="10"/>
+  <text class="ttl on-g" x="685" y="90" text-anchor="middle">PostgreSQL</text>
+  <text class="sm" x="685" y="114" text-anchor="middle">数据库</text>
+  <text class="sm mono" x="685" y="134" text-anchor="middle">odoo-prod</text>
+  <rect class="bx-p" x="630" y="190" width="110" height="100" rx="10"/>
+  <text class="ttl on-p" x="685" y="220" text-anchor="middle">filestore</text>
+  <text class="sm" x="685" y="244" text-anchor="middle">附件文件</text>
+  <text class="sm" x="685" y="264" text-anchor="middle">data_dir 下</text>
+  <path class="ln" d="M592 110 H626" marker-end="url(#ar)"/>
+  <path class="ln" d="M592 240 H626" marker-end="url(#ar)"/>
+</svg>
+<figcaption>图 15-1　本章要搭建的生产环境。Odoo 只监听本机地址，外界只能经过 Nginx 访问它</figcaption>
+</figure>
+
+<div class="tw"><table>
+  <tr><th></th><th>开发环境（第 2 章）</th><th>生产环境（本章）</th></tr>
+  <tr><td>运行方式</td><td>在终端里手动启动，Ctrl+C 停止</td><td>systemd 服务，开机自启、崩溃自动拉起</td></tr>
+  <tr><td>运行用户</td><td>你自己的账号</td><td>专用的 <code>odoo</code> 系统用户，没有特权</td></tr>
+  <tr><td>进程模型</td><td>单进程多线程</td><td>多进程 worker</td></tr>
+  <tr><td>访问方式</td><td><code>http://localhost:8069</code></td><td>Nginx 反向代理 + HTTPS 域名</td></tr>
+  <tr><td>数据库管理页面</td><td>开着，方便建库删库</td><td>关闭（<code>list_db = False</code>）</td></tr>
+  <tr><td>开发者选项</td><td><code>--dev=all</code></td><td>绝对不要开</td></tr>
+</table></div>
+
+<h2 id="host">准备主机</h2>
+
+<p>
+  Odoo 通常部署在 Debian 系的 Linux 上，Ubuntu 是云服务器上最常见的选择。本章以 <strong>Ubuntu 24.04 LTS</strong> 为例。
+  它自带的 Python 3.12 和 PostgreSQL 16 正好满足 Odoo 20 的最低要求。
+</p>
+
+<div class="box ver">
+  <div class="t">&#8682; Odoo 20 的版本要求</div>
+  <p>
+    Odoo 20 需要 <strong>Python 3.12 – 3.14</strong> 和 <strong>PostgreSQL 16 或更高版本</strong>。书中使用的 Ubuntu 20.04 自带 Python 3.8、PostgreSQL 12，都已经不够用了。
+  </p>
+</div>
+
+<h3>安装系统依赖</h3>
+
+<p>先更新软件包，然后安装 PostgreSQL：</p>
+
+<div class="code" data-lang="bash">
+<pre>
+sudo apt update
+sudo apt upgrade -y
+sudo apt install -y postgresql
+</pre>
+</div>
+
+<div class="box note">
+  <div class="t">数据库也可以在另一台服务器上</div>
+  <p>
+    Odoo 可以连接一台独立的 PostgreSQL 服务器。那样的话这台机器就不用装 PostgreSQL，只要在配置文件里填上 <code>db_host</code>、<code>db_port</code>、<code>db_user</code>、<code>db_password</code>。
+  </p>
+</div>
+
+<p>
+  接着是编译 Python 依赖所需的系统包。和第 2 章开发环境用的一样：
+</p>
+
+<div class="code" data-lang="bash">
+<pre>
+sudo apt install -y git python3-dev python3-pip python3-venv \
+    build-essential libpq-dev libxml2-dev libxslt1-dev \
+    libldap2-dev libsasl2-dev libssl-dev libjpeg-dev zlib1g-dev
+</pre>
+</div>
+
+<div class="box tip">
+  <div class="t">另一种方式：用 Debian 软件包</div>
+  <p>
+    Odoo 源码里的 <code>setup/debinstall.sh</code> 脚本会读取 <code>debian/control</code> 文件，用 <code>apt</code> 安装 Odoo 需要的全部系统包（包括 Python 库的 Debian 版本）。
+    克隆源码后运行 <code>sudo ./setup/debinstall.sh</code> 即可；加 <code>--list</code> 参数只列出包名不安装。
+  </p>
+</div>
+
+<p>最后是生成 PDF 报表用的 wkhtmltopdf（第 12 章讲过，这里再重复一次）：</p>
+
+<div class="code" data-lang="bash">
+<pre>
+wget https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-3/wkhtmltox_0.12.6.1-3.jammy_amd64.deb \
+     -O /tmp/wkhtml.deb
+sudo apt install -y /tmp/wkhtml.deb
+wkhtmltopdf --version     # 应显示 0.12.6.1 (with patched qt)
+</pre>
+</div>
+
+<h3>创建专用的系统用户</h3>
+
+<p>
+  良好的安全习惯是用一个<strong>没有任何特权</strong>的专用用户来运行 Odoo。万一 Odoo 被攻破，攻击者也只能拿到这个用户的权限：
+</p>
+
+<div class="code" data-lang="bash">
+<pre>
+sudo adduser --system --home=/opt/odoo --group odoo
+</pre>
+</div>
+
+<p>
+  <code>--system</code> 创建一个系统用户（不能登录、没有密码），<code>--home=/opt/odoo</code> 把它的主目录设为 <code>/opt/odoo</code>，
+  我们会把 Odoo 的代码放在这里。<code>--group</code> 同时创建同名的用户组。
+</p>
+
+<p>然后给它创建一个同名的 PostgreSQL 账号：</p>
+
+<div class="code" data-lang="bash">
+<pre>
+sudo -u postgres createuser --createdb odoo
+</pre>
+</div>
+
+<p>
+  这个数据库账号<strong>不是超级用户</strong>，只有「创建数据库」的权限：它可以创建并拥有自己的数据库，但碰不到 PostgreSQL 里的其他东西。
+  PostgreSQL 在本机默认使用「peer」认证：Linux 用户 <code>odoo</code> 连接时自动对应数据库用户 <code>odoo</code>，不需要密码。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 220" role="img" aria-label="Linux 用户与 PostgreSQL 用户的对应关系">
+  <rect class="bx-a" x="20" y="40" width="220" height="140" rx="12"/>
+  <text class="ttl on-a" x="130" y="68" text-anchor="middle">Linux 系统用户 odoo</text>
+  <text class="sm" x="130" y="96" text-anchor="middle">家目录 /opt/odoo</text>
+  <text class="sm" x="130" y="118" text-anchor="middle">运行 Odoo 进程</text>
+  <text class="sm" x="130" y="140" text-anchor="middle">不能登录、没有 sudo</text>
+
+  <rect class="bx-g" x="520" y="40" width="220" height="140" rx="12"/>
+  <text class="ttl on-g" x="630" y="68" text-anchor="middle">PostgreSQL 用户 odoo</text>
+  <text class="sm" x="630" y="96" text-anchor="middle">CREATEDB 权限</text>
+  <text class="sm" x="630" y="118" text-anchor="middle">拥有 odoo-prod 等数据库</text>
+  <text class="sm" x="630" y="140" text-anchor="middle">不是超级用户</text>
+
+  <path class="ln" d="M242 110 H516" marker-end="url(#ar)"/>
+  <text class="lbl" x="380" y="98" text-anchor="middle">本机 Unix socket · peer 认证</text>
+  <text class="sm" x="380" y="128" text-anchor="middle">同名即通过，不需要密码</text>
+</svg>
+<figcaption>图 15-2　系统用户和数据库用户同名，本机连接时由 PostgreSQL 自动认证</figcaption>
+</figure>
+
+<div class="box tip">
+  <div class="t">更严格的做法</div>
+  <p>
+    Odoo 日常运行其实不需要「数据库所有者」权限，只有安装、升级模块时才需要。安全要求更高的场合，可以让 Odoo 服务用一个非所有者的数据库账号运行，
+    维护操作再用所有者账号单独执行。Odoo 不允许用 <code>postgres</code> 超级用户运行，会直接报错退出。
+  </p>
+</div>
+
+<h2 id="install">从源码安装 Odoo 20</h2>
+
+<p>
+  Odoo 也提供 Debian/Ubuntu 的安装包，但从源码安装更灵活：可以精确控制部署的版本，打补丁、回滚都方便，还能和 Git 工作流结合。
+  以下操作都以 <code>odoo</code> 用户的身份执行：
+</p>
+
+<div class="code" data-lang="bash">
+<pre>
+sudo -u odoo -H bash          # 切换为 odoo 用户（它不能直接登录）
+cd /opt/odoo
+git clone https://github.com/odoo/odoo.git odoo20 -b 20.0 --depth=1
+git clone https://github.com/你的账号/library.git library     # 你自己的模块仓库
+</pre>
+</div>
+
+<p>
+  <code>-b 20.0</code> 选择 20.0 分支；<code>--depth=1</code> 只下载最新的一次提交，不要几十万条历史记录，下载更快、占用更小。
+  自定义模块一般也用 Git 管理，同样克隆到服务器上。
+</p>
+
+<p>然后在虚拟环境里安装 Python 依赖和 Odoo 本身：</p>
+
+<div class="code" data-lang="bash">
+<pre>
+python3 -m venv /opt/odoo/env20
+source /opt/odoo/env20/bin/activate
+(env20) $ pip install -U pip
+(env20) $ pip install -r /opt/odoo/odoo20/requirements.txt
+(env20) $ pip install -e /opt/odoo/odoo20
+(env20) $ odoo --version
+Odoo Server 20.0
+(env20) $ exit                  # 回到你自己的用户
+</pre>
+</div>
+
+<p>下面几种启动方式效果相同，在脚本里常用最后一种，因为它不需要先激活虚拟环境：</p>
+
+<div class="tw"><table>
+  <tr><th>命令</th><th>说明</th></tr>
+  <tr><td><code>odoo --version</code></td><td>激活虚拟环境后，使用 <code>pip install -e</code> 生成的 <code>odoo</code> 命令</td></tr>
+  <tr><td><code>/opt/odoo/odoo20/odoo-bin --version</code></td><td>直接运行源码里的启动脚本（同样需要激活虚拟环境）</td></tr>
+  <tr><td><code>/opt/odoo/env20/bin/python /opt/odoo/odoo20/odoo-bin --version</code></td><td>用虚拟环境里的 Python 运行启动脚本</td></tr>
+  <tr><td><code>/opt/odoo/env20/bin/odoo --version</code></td><td>直接调用虚拟环境里的 <code>odoo</code> 命令，最简洁</td></tr>
+</table></div>
+
+<h2 id="config">配置 Odoo</h2>
+
+<h3>生成并放置配置文件</h3>
+
+<p>
+  Linux 上配置文件习惯放在 <code>/etc</code> 下，所以我们使用 <code>/etc/odoo/odoo.conf</code>。先让 Odoo 生成一份包含全部默认选项的文件，方便以后查看有哪些选项：
+</p>
+
+<div class="code" data-lang="bash">
+<pre>
+sudo -u odoo /opt/odoo/env20/bin/odoo -c /opt/odoo/odoo.conf --save --stop-after-init \
+    --db-filter='^odoo-prod$' --proxy-mode --no-database-list \
+    --addons-path=/opt/odoo/odoo20/addons,/opt/odoo/library
+
+sudo mkdir /etc/odoo
+sudo cp /opt/odoo/odoo.conf /etc/odoo/odoo.conf
+sudo chown root:odoo /etc/odoo/odoo.conf
+sudo chmod 640 /etc/odoo/odoo.conf     # root 可写，odoo 组只读，其他人不可见
+
+sudo mkdir /var/log/odoo
+sudo chown odoo:odoo /var/log/odoo
+</pre>
+</div>
+
+<p>
+  <code>-c</code> 指定配置文件路径；<code>--save</code> 把命令行上的选项写进文件（文件不存在就创建，内容是全部默认值加上你给的选项）；
+  <code>--stop-after-init</code> 让它做完就退出。把文件交给 <code>root</code> 所有、<code>odoo</code> 组只读，Odoo 进程能读但不能改，配置里的密码也不会被其他用户看到。
+</p>
+
+<h3>重要的配置项</h3>
+
+<p>用编辑器打开 <code>sudo nano /etc/odoo/odoo.conf</code>，确认下面这些关键选项：</p>
+
+<div class="code" data-lang="ini" data-file="/etc/odoo/odoo.conf">
+<pre>
+[options]
+addons_path = /opt/odoo/odoo20/addons,/opt/odoo/library
+admin_passwd = 一个很长的随机密码
+db_name = odoo-prod
+dbfilter = ^odoo-prod$
+list_db = False
+http_interface = 127.0.0.1
+http_port = 8069
+gevent_port = 8072
+proxy_mode = True
+workers = 6
+max_cron_threads = 1
+limit_time_cpu = 600
+limit_time_real = 1200
+logfile = /var/log/odoo/odoo-server.log
+data_dir = /opt/odoo/.local/share/Odoo
+</pre>
+</div>
+
+<div class="tw"><table>
+  <tr><th>选项</th><th>作用</th></tr>
+  <tr><td><code>addons_path</code></td><td>逗号分隔的模块目录列表，<strong>从左到右</strong>查找，左边的优先。Odoo 内核自带的 <code>odoo/addons</code> 会自动加入，不必写</td></tr>
+  <tr><td><code>admin_passwd</code></td><td>「主密码」，用于网页上的数据库管理功能（建库、删库、备份）。一定要改成强密码；Odoo 启动后会把它自动替换为哈希值</td></tr>
+  <tr><td><code>db_name</code></td><td>默认使用的数据库</td></tr>
+  <tr><td><code>dbfilter</code></td><td>正则表达式，限定这个服务能访问哪些数据库。写成 <code>^库名$</code>，用户就不会被要求选择数据库，公开网页（如第 13 章的书目页）也能正常工作。支持 <code>%h</code>（请求的主机名）和 <code>%d</code>（子域名）占位符，可以实现「一个域名一个库」</td></tr>
+  <tr><td><code>list_db</code></td><td>设为 <code>False</code> 会隐藏数据库列表，并<strong>关闭</strong>网页上的数据库管理器及其接口</td></tr>
+  <tr><td><code>http_interface</code></td><td>监听的地址。默认 <code>0.0.0.0</code>（所有网卡）；Nginx 和 Odoo 在同一台机器时设为 <code>127.0.0.1</code>，外界就无法绕过 Nginx 直接访问 Odoo</td></tr>
+  <tr><td><code>http_port</code> / <code>gevent_port</code></td><td>普通 HTTP 请求的端口（默认 8069）和 WebSocket 长连接的端口（默认 8072）</td></tr>
+  <tr><td><code>proxy_mode</code></td><td>在反向代理后面运行时必须设为 <code>True</code>，Odoo 才会信任代理传来的 <code>X-Forwarded-*</code> 请求头（见后面 Nginx 一节）</td></tr>
+  <tr><td><code>workers</code></td><td>大于 0 时启用多进程模式，见下一节</td></tr>
+  <tr><td><code>limit_time_cpu</code> / <code>limit_time_real</code></td><td>单个请求允许消耗的 CPU 时间 / 实际时间（秒），超过就终止该 worker。默认 60 / 120，导入大文件、生成大报表时可能不够</td></tr>
+  <tr><td><code>logfile</code></td><td>日志文件位置。不设置时日志输出到标准输出（systemd 会收进 journal）</td></tr>
+  <tr><td><code>data_dir</code></td><td>存放附件（filestore）和会话的目录。<strong>备份时它和数据库同样重要</strong></td></tr>
+</table></div>
+
+<div class="box warn">
+  <div class="t">两个必须设置的安全选项</div>
+  <p>
+    <code>admin_passwd</code>（强密码）和 <code>list_db = False</code> 在任何连上互联网的 Odoo 服务器上都必须设置，否则任何人都可能通过网页上的数据库管理器下载、甚至删除你的数据库。
+    生成随机密码可以用 <code>openssl rand -base64 32</code>。
+  </p>
+</div>
+
+<div class="box ver">
+  <div class="t">&#8682; Odoo 20 变化</div>
+  <p>
+    书中的 <code>without_demo = all</code> 不再需要：从 Odoo 18.3 起，新数据库<strong>默认不加载</strong>演示数据，想要演示数据反而要显式加 <code>--with-demo</code>。
+    书中 Nginx 配置里的长轮询端口 <code>longpolling_port</code> 也已改名为 <code>gevent_port</code>（实时通信从「长轮询」改为了 WebSocket）。
+  </p>
+</div>
+
+<h3>初始化数据库并试运行</h3>
+
+<p>
+  用 Odoo 20 的 <code>odoo db</code> 命令创建并初始化生产数据库，同时设置管理员密码、语言和公司所在国家：
+</p>
+
+<div class="code" data-lang="bash">
+<pre>
+sudo -u odoo /opt/odoo/env20/bin/odoo db -c /etc/odoo/odoo.conf \
+    init odoo-prod --language zh_CN --country CN \
+    --username admin --password '另一个强密码'
+</pre>
+</div>
+
+<p>然后手动启动一次，在另一个终端里观察日志，确认没有报错：</p>
+
+<div class="code" data-lang="bash">
+<pre>
+sudo -u odoo /opt/odoo/env20/bin/odoo -c /etc/odoo/odoo.conf
+# 另开一个终端：
+tail -f /var/log/odoo/odoo-server.log
+</pre>
+</div>
+
+<p>
+  因为日志写进了文件，第一个终端里不会有任何输出，这是正常的。确认无误后按 Ctrl+C 停止。
+</p>
+
+<div class="box tip">
+  <div class="t">在一个终端里开多个窗口</div>
+  <p>
+    用 <code>tmux</code> 或 GNU <code>screen</code> 这样的终端复用工具，可以在一个 SSH 连接里同时开多个窗口，即使网络断开，里面的程序也会继续运行。
+  </p>
+</div>
+
+<h3 id="workers">理解多进程 worker</h3>
+
+<p>
+  默认情况下 Odoo 以单进程、多线程的方式运行。由于 Python 的全局解释器锁（GIL），这样只能利用一个 CPU 核心。
+  设置 <code>workers = N</code>（N ≥ 1）后，Odoo 切换到<strong>多进程（prefork）模式</strong>：
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 300" role="img" aria-label="多进程模式：主进程管理多个 HTTP worker、cron worker 和 gevent 进程">
+  <rect class="bx-a" x="280" y="20" width="200" height="66" rx="10"/>
+  <text class="ttl on-a" x="380" y="48" text-anchor="middle">主进程</text>
+  <text class="sm" x="380" y="70" text-anchor="middle">监控、回收、重启子进程</text>
+
+  <rect class="bx-b" x="20" y="140" width="300" height="140" rx="12"/>
+  <text class="ttl on-b" x="170" y="166" text-anchor="middle">HTTP worker（workers = 6）</text>
+  <rect class="bx" x="40" y="184" width="76" height="36" rx="6"/><text class="sm" x="78" y="207" text-anchor="middle">worker 1</text>
+  <rect class="bx" x="132" y="184" width="76" height="36" rx="6"/><text class="sm" x="170" y="207" text-anchor="middle">worker 2</text>
+  <rect class="bx" x="224" y="184" width="76" height="36" rx="6"/><text class="sm" x="262" y="207" text-anchor="middle">worker 3</text>
+  <rect class="bx" x="40" y="230" width="76" height="36" rx="6"/><text class="sm" x="78" y="253" text-anchor="middle">worker 4</text>
+  <rect class="bx" x="132" y="230" width="76" height="36" rx="6"/><text class="sm" x="170" y="253" text-anchor="middle">worker 5</text>
+  <rect class="bx" x="224" y="230" width="76" height="36" rx="6"/><text class="sm" x="262" y="253" text-anchor="middle">worker 6</text>
+
+  <rect class="bx-p" x="350" y="140" width="180" height="140" rx="12"/>
+  <text class="ttl on-p" x="440" y="166" text-anchor="middle">cron worker</text>
+  <text class="sm" x="440" y="196" text-anchor="middle">max_cron_threads</text>
+  <text class="sm" x="440" y="218" text-anchor="middle">个，默认 2</text>
+  <text class="sm" x="440" y="248" text-anchor="middle">执行计划任务</text>
+
+  <rect class="bx-g" x="560" y="140" width="180" height="140" rx="12"/>
+  <text class="ttl on-g" x="650" y="166" text-anchor="middle">gevent 进程</text>
+  <text class="sm" x="650" y="196" text-anchor="middle">端口 8072</text>
+  <text class="sm" x="650" y="218" text-anchor="middle">成千上万个</text>
+  <text class="sm" x="650" y="240" text-anchor="middle">WebSocket 长连接</text>
+
+  <path class="ln" d="M320 88 L200 136" marker-end="url(#ar)"/>
+  <path class="ln" d="M380 88 L430 136" marker-end="url(#ar)"/>
+  <path class="ln" d="M440 88 L620 136" marker-end="url(#ar)"/>
+</svg>
+<figcaption>图 15-3　多进程模式：每个 HTTP worker 是一个独立进程，可以分布在不同的 CPU 核心上</figcaption>
+</figure>
+
+<ul>
+  <li><strong>经验公式</strong>：<code>workers = 2 × CPU 核数 + 1</code>。如果 PostgreSQL 也在同一台机器上，要适当减少。</li>
+  <li><strong>宁多勿少</strong>：浏览器会对同一个网站并发发起多个请求，所以至少设为 6 比较合适。上限主要由内存决定，每个 worker 都会占用一部分内存。</li>
+  <li><strong>容量估算</strong>：一般使用模式下，一个 worker 大约能服务 6 个同时在线的用户。</li>
+  <li><strong>自动回收</strong>：<code>limit_memory_soft</code>、<code>limit_memory_hard</code>、<code>limit_request</code>、<code>limit_time_*</code> 这些限制达到时，主进程会结束该 worker 并启动一个新的，防止内存泄漏或个别请求拖垮整个服务器。</li>
+  <li><strong>生成 PDF 至少需要 2 个 worker</strong>：wkhtmltopdf 渲染时会回头向 Odoo 请求样式和图片（第 12 章）。</li>
+</ul>
+
+<div class="box note">
+  <div class="t">内存怎么算？</div>
+  <p>
+    默认 <code>limit_memory_soft</code> 是 2 GB、<code>limit_memory_hard</code> 是 2.5 GB，这是<strong>单个 worker</strong> 的上限，而不是平均占用。
+    一般的 worker 平时只用几百 MB。规划内存时可以粗略按「worker 数 × 平均占用 + PostgreSQL + 系统」估算，再留出余量。
+  </p>
+</div>
+
+<h2 id="service">配置成系统服务</h2>
+
+<p>
+  生产环境里的 Odoo 应该作为<strong>系统服务</strong>运行：开机自动启动，不依赖任何人登录。现在的 Ubuntu 用 <strong>systemd</strong> 管理服务，
+  只需要写一个描述文件 <code>/etc/systemd/system/odoo.service</code>：
+</p>
+
+<div class="code" data-lang="ini" data-file="/etc/systemd/system/odoo.service">
+<pre>
+[Unit]
+Description=Odoo 20
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=odoo
+Group=odoo
+ExecStart=/opt/odoo/env20/bin/odoo -c /etc/odoo/odoo.conf
+KillMode=mixed
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+</pre>
+</div>
+
+<p>
+  它基于 Odoo 源码里的 <code>debian/odoo.service</code> 示例，改了 <code>ExecStart</code> 的路径，并加上 <code>Restart=on-failure</code>（进程意外退出时自动重启）。
+  日志位置已经在配置文件的 <code>logfile</code> 里设置了，所以这里不用重复。
+</p>
+
+<div class="code" data-lang="bash">
+<pre>
+sudo systemctl daemon-reload          # 让 systemd 读取新的服务文件
+sudo systemctl enable --now odoo      # 设为开机自启，并立即启动
+sudo systemctl status odoo            # 查看状态
+sudo systemctl restart odoo           # 重启（更新代码后用）
+sudo systemctl stop odoo              # 停止
+</pre>
+</div>
+
+<div class="box warn">
+  <div class="t">书中的小差异</div>
+  <p>
+    书中的服务文件放在 <code>/lib/systemd/system/</code>，那里是软件包安装服务文件的位置，系统管理员自己写的应该放在 <code>/etc/systemd/system/</code>；
+    书中 <code>ExecStart</code> 写的是 <code>/opt/odoo/env/bin/odoo</code>，而前文创建的虚拟环境叫 <code>env15</code>，路径要和实际一致；
+    参数 <code>--logfile</code> 写成了 <code>--log-file</code>（仓库里的脚本）也是错的。
+  </p>
+</div>
+
+<h3>在命令行检查服务</h3>
+
+<p>在服务器上用 <code>curl</code> 确认 Odoo 在响应：</p>
+
+<div class="code" data-lang="bash">
+<pre>
+$ curl -I http://localhost:8069
+HTTP/1.1 303 SEE OTHER
+Location: http://localhost:8069/odoo
+...
+$ curl -s http://localhost:8069/web/version
+{"version_info": [20, 0, 0, "final", 0, ""], "version": "20.0"}
+</pre>
+</div>
+
+<p>
+  根路径会把你重定向到后台 <code>/odoo</code>；<code>/web/version</code> 返回版本号，很适合做健康检查。查看日志：
+</p>
+
+<div class="code" data-lang="bash">
+<pre>
+less /var/log/odoo/odoo-server.log       # 翻看
+tail -f /var/log/odoo/odoo-server.log    # 实时跟踪
+sudo journalctl -u odoo -e               # systemd 记录的启动 / 崩溃信息
+</pre>
+</div>
+
+<div class="box tip">
+  <div class="t">日志轮转</div>
+  <p>
+    日志文件会一直变大。可以参照 Odoo 源码里的 <code>debian/logrotate</code>，在 <code>/etc/logrotate.d/odoo</code> 里配置按周轮转、压缩旧日志。
+  </p>
+</div>
+
+<h2 id="nginx">Nginx 反向代理</h2>
+
+<p>
+  Odoo 自己就能提供网页服务，但生产环境中强烈建议在它前面放一个<strong>反向代理</strong>。反向代理接收所有客户端的请求，再转交给后面的 Odoo：
+</p>
+
+<div class="cards">
+  <div class="card"><span class="ic">&#128274;</span><h4>安全</h4><p>处理并强制 HTTPS 加密；隐藏内部网络结构；还可以充当应用防火墙，只放行允许的 URL。</p></div>
+  <div class="card"><span class="ic">&#9889;</span><h4>性能</h4><p>缓存静态文件、压缩响应，减轻 Odoo 的负担；必要时把请求分发到多台 Odoo 服务器（负载均衡）。</p></div>
+</div>
+
+<p>先安装 Nginx，删掉默认站点，建立 Odoo 站点的配置文件：</p>
+
+<div class="code" data-lang="bash">
+<pre>
+sudo apt install -y nginx
+sudo rm /etc/nginx/sites-enabled/default
+sudo nano /etc/nginx/sites-available/odoo
+sudo ln -s /etc/nginx/sites-available/odoo /etc/nginx/sites-enabled/odoo
+</pre>
+</div>
+
+<p>
+  Nginx 的约定是：配置写在 <code>sites-available</code> 里，在 <code>sites-enabled</code> 里建一个指向它的符号链接才算启用。
+  先写一个只用 HTTP 的基本配置，确认代理工作正常：
+</p>
+
+<div class="code" data-lang="nginx" data-file="/etc/nginx/sites-available/odoo（HTTP 版）">
+<pre>
+upstream odoo {
+    server 127.0.0.1:8069;
+}
+upstream odoochat {
+    server 127.0.0.1:8072;
+}
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+server {
+    listen 80;
+    server_name odoo.mycompany.com;
+
+    proxy_read_timeout 720s;
+    proxy_connect_timeout 720s;
+    proxy_send_timeout 720s;
+
+    access_log /var/log/nginx/odoo.access.log;
+    error_log  /var/log/nginx/odoo.error.log;
+
+    # WebSocket：实时通知、聊天
+    location /websocket {
+        proxy_pass http://odoochat;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header X-Forwarded-Host $http_host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    # 其他所有请求
+    location / {
+        proxy_set_header X-Forwarded-Host $http_host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_redirect off;
+        proxy_pass http://odoo;
+    }
+
+    gzip on;
+    gzip_types text/css text/plain text/xml application/xml application/json application/javascript;
+}
+</pre>
+</div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 260" role="img" aria-label="Nginx 按路径把请求分到两个上游：/websocket 到 8072，其他到 8069">
+  <rect class="bx-d" x="20" y="90" width="140" height="80" rx="10"/>
+  <text class="ttl" x="90" y="122" text-anchor="middle">请求</text>
+  <text class="sm mono" x="90" y="146" text-anchor="middle">:80 / :443</text>
+
+  <rect class="bx-b" x="210" y="40" width="250" height="180" rx="12"/>
+  <text class="ttl on-b" x="335" y="66" text-anchor="middle">Nginx server { }</text>
+  <rect class="bx" x="230" y="84" width="210" height="50" rx="8"/>
+  <text class="lbl mono" x="335" y="106" text-anchor="middle">location /websocket</text>
+  <text class="sm" x="335" y="124" text-anchor="middle">升级为 WebSocket 连接</text>
+  <rect class="bx" x="230" y="148" width="210" height="50" rx="8"/>
+  <text class="lbl mono" x="335" y="170" text-anchor="middle">location /</text>
+  <text class="sm" x="335" y="188" text-anchor="middle">普通 HTTP 请求</text>
+
+  <rect class="bx-g" x="530" y="70" width="210" height="56" rx="10"/>
+  <text class="lbl mono on-g" x="635" y="94" text-anchor="middle">upstream odoochat</text>
+  <text class="sm mono" x="635" y="114" text-anchor="middle">127.0.0.1:8072（gevent）</text>
+  <rect class="bx-a" x="530" y="146" width="210" height="56" rx="10"/>
+  <text class="lbl mono on-a" x="635" y="170" text-anchor="middle">upstream odoo</text>
+  <text class="sm mono" x="635" y="190" text-anchor="middle">127.0.0.1:8069（worker）</text>
+
+  <path class="ln" d="M162 130 H206" marker-end="url(#ar)"/>
+  <path class="ln-g" d="M442 108 L526 100" marker-end="url(#ar-g)"/>
+  <path class="ln-a" d="M442 172 L526 174" marker-end="url(#ar-a)"/>
+  <text class="sm" x="380" y="245" text-anchor="middle">两个 location 都要设置 X-Forwarded-* 请求头，配合 Odoo 的 proxy_mode</text>
+</svg>
+<figcaption>图 15-4　Nginx 按 URL 路径分流：WebSocket 去 gevent 进程，其余去 HTTP worker</figcaption>
+</figure>
+
+<ul>
+  <li><code>upstream</code> 定义后端服务的地址：8069 处理网页和 RPC 请求，8072 处理 WebSocket 长连接（即时消息、通知等实时功能）。</li>
+  <li><code>/websocket</code> 需要额外的 <code>Upgrade</code> / <code>Connection</code> 请求头，把 HTTP 连接「升级」为 WebSocket；上面的 <code>map</code> 就是为此准备的。</li>
+  <li><code>X-Forwarded-*</code> 请求头告诉 Odoo 原始请求的主机名、协议和客户端 IP。</li>
+  <li><code>gzip</code> 压缩文本类响应，加快页面加载。</li>
+</ul>
+
+<div class="box warn">
+  <div class="t">为什么 proxy_mode 必须和请求头一起用</div>
+  <p>
+    经过 Nginx 之后，所有到达 Odoo 的请求都来自 <code>127.0.0.1</code>。打开 <code>proxy_mode</code> 后，Odoo 会从 <code>X-Forwarded-For</code> 取出真实的客户端 IP、
+    从 <code>X-Forwarded-Proto</code> 得知用户用的是 HTTPS（这样生成的链接、跳转才正确）。
+    但如果开了 <code>proxy_mode</code> 却<strong>没有</strong>让代理强制设置这些请求头，恶意客户端就可以自己伪造它们。
+    另外，Odoo 只在请求带有 <code>X-Forwarded-Host</code> 时才启用代理处理，所以这个头不能漏。
+  </p>
+</div>
+
+<div class="box ver">
+  <div class="t">&#8682; Odoo 20 变化</div>
+  <p>
+    书中把 <code>/longpolling</code> 路径转发给 8072 端口。从 Odoo 16 起，实时通信改用 WebSocket，路径是 <code>/websocket</code>，
+    而且必须转发 <code>Upgrade</code> / <code>Connection</code> 请求头；照搬书中配置的话，聊天和通知将无法实时更新。
+  </p>
+</div>
+
+<p>检查配置语法，然后让 Nginx 重新加载（reload 不会中断正在进行的连接）：</p>
+
+<div class="code" data-lang="bash">
+<pre>
+$ sudo nginx -t
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+$ sudo systemctl reload nginx
+</pre>
+</div>
+
+<h2 id="https">配置并强制 HTTPS</h2>
+
+<p>
+  网络流量不应该以明文在互联网上传输，尤其是登录密码。Odoo 对外提供服务时，必须使用 HTTPS。
+</p>
+
+<h3>获取证书</h3>
+
+<p>
+  推荐使用 <strong>Let's Encrypt</strong> 的免费证书，它被所有浏览器信任，<code>certbot</code> 工具会自动申请证书、修改 Nginx 配置并定期续期：
+</p>
+
+<div class="code" data-lang="bash">
+<pre>
+sudo apt install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d odoo.mycompany.com
+</pre>
+</div>
+
+<p>
+  前提是域名已经解析到这台服务器、80 端口可以从外网访问。如果只是内网测试，没有公网域名，也可以生成一个<strong>自签名证书</strong>：
+</p>
+
+<div class="code" data-lang="bash">
+<pre>
+sudo mkdir -p /etc/ssl/nginx
+sudo openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+    -keyout /etc/ssl/nginx/server.key -out /etc/ssl/nginx/server.crt
+sudo chmod 600 /etc/ssl/nginx/server.key
+</pre>
+</div>
+
+<div class="box note">
+  <div class="t">自签名证书的局限</div>
+  <p>
+    自签名证书能加密流量，但浏览器无法验证它，会显示安全警告，也无法防止中间人攻击。只适合测试。对外提供服务、尤其是有网上商城时，一定要用受信任机构签发的证书。
+  </p>
+</div>
+
+<h3>HTTPS 版的 Nginx 配置</h3>
+
+<p>
+  把前面的 <code>server</code> 块拆成两个：80 端口只负责把请求<strong>重定向</strong>到 HTTPS，443 端口才真正提供服务：
+</p>
+
+<div class="code" data-lang="nginx" data-file="/etc/nginx/sites-available/odoo（HTTPS 版）">
+<pre>
+# upstream 和 map 与前面相同，省略
+
+# http -&gt; https
+server {
+    listen 80;
+    server_name odoo.mycompany.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name odoo.mycompany.com;
+
+    ssl_certificate     /etc/ssl/nginx/server.crt;
+    ssl_certificate_key /etc/ssl/nginx/server.key;
+    ssl_session_timeout 30m;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    proxy_read_timeout 720s;
+    proxy_connect_timeout 720s;
+    proxy_send_timeout 720s;
+
+    access_log /var/log/nginx/odoo.access.log;
+    error_log  /var/log/nginx/odoo.error.log;
+
+    location /websocket {
+        proxy_pass http://odoochat;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header X-Forwarded-Host $http_host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains";
+        proxy_cookie_flags session_id samesite=lax secure;
+    }
+
+    location / {
+        proxy_set_header X-Forwarded-Host $http_host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains";
+        proxy_cookie_flags session_id samesite=lax secure;
+        proxy_redirect off;
+        proxy_pass http://odoo;
+    }
+
+    # 缓存静态文件（各模块的 /模块名/static/...）
+    location ~* ^/[^/]+/static/ {
+        proxy_set_header X-Forwarded-Host $http_host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_pass http://odoo;
+        expires 7d;
+    }
+
+    gzip on;
+    gzip_types text/css text/plain text/xml application/xml application/json application/javascript;
+}
+</pre>
+</div>
+
+<ul>
+  <li><code>return 301 https://...</code>：把所有 <code>http://</code> 访问永久重定向到对应的 <code>https://</code> 地址，防止有人不小心用明文访问。</li>
+  <li><code>Strict-Transport-Security</code>（HSTS）：告诉浏览器「以后一年内都只用 HTTPS 访问这个域名」。</li>
+  <li><code>proxy_cookie_flags ... secure</code>：给会话 Cookie 加上 <code>Secure</code> 标志，它只会通过 HTTPS 发送。</li>
+  <li>静态文件：Odoo 的静态文件路径都是 <code>/模块名/static/...</code>。<code>expires 7d</code> 让浏览器缓存它们 7 天，下次打开页面不用再请求。资源包的 URL 里带有内容哈希，更新后 URL 会变，不用担心缓存过期的问题。</li>
+</ul>
+
+<div class="box warn">
+  <div class="t">书中配置的过时之处</div>
+  <p>
+    书中的 <code>ssl on;</code> 指令在 Nginx 1.15 已弃用、1.25 起移除，现在要写成 <code>listen 443 ssl;</code>；书中只允许 <code>TLSv1.2</code>，建议加上 <code>TLSv1.3</code>。
+    另外书中的静态缓存只匹配 <code>/web/static/</code>，其他模块（包括我们自己的）的静态文件不会被缓存；而单独写 <code>proxy_cache_valid</code>
+    却没有用 <code>proxy_cache</code> 定义缓存区，这行其实不会生效。
+  </p>
+</div>
+
+<p>重新加载并测试：</p>
+
+<div class="code" data-lang="bash">
+<pre>
+sudo nginx -t &amp;amp;&amp;amp; sudo systemctl reload nginx
+curl -k -I https://localhost      # -k：接受自签名证书
+</pre>
+</div>
+
+<div class="box tip">
+  <div class="t">别忘了 web.base.url</div>
+  <p>
+    Odoo 生成邮件里的链接、门户链接时使用系统参数 <code>web.base.url</code>（第 14 章）。管理员登录时 Odoo 会自动把它更新为当前访问的地址。
+    用 HTTPS 域名以管理员身份登录一次，再到「设置 → 技术 → 参数 → 系统参数」确认它是 <code>https://odoo.mycompany.com</code>；
+    若不希望它再被自动修改，可以新增参数 <code>web.base.url.freeze</code> 设为 <code>True</code>。
+  </p>
+</div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 200" role="img" aria-label="HTTPS 请求流：80 端口重定向，443 端口加密，转发给本机 Odoo">
+  <rect class="bx-d" x="20" y="70" width="130" height="60" rx="10"/>
+  <text class="lbl" x="85" y="98" text-anchor="middle">http://…</text>
+  <text class="sm" x="85" y="118" text-anchor="middle">用户输入</text>
+  <rect class="bx-r" x="200" y="20" width="160" height="60" rx="10"/>
+  <text class="lbl on-r" x="280" y="46" text-anchor="middle">:80</text>
+  <text class="sm" x="280" y="66" text-anchor="middle">301 → https</text>
+  <rect class="bx-g" x="200" y="120" width="160" height="60" rx="10"/>
+  <text class="lbl on-g" x="280" y="146" text-anchor="middle">:443 TLS 加密</text>
+  <text class="sm" x="280" y="166" text-anchor="middle">证书 · HSTS</text>
+  <rect class="bx-a" x="440" y="120" width="140" height="60" rx="10"/>
+  <text class="lbl on-a" x="510" y="146" text-anchor="middle">Odoo</text>
+  <text class="sm mono" x="510" y="166" text-anchor="middle">127.0.0.1</text>
+  <rect class="bx-p" x="620" y="120" width="120" height="60" rx="10"/>
+  <text class="lbl on-p" x="680" y="146" text-anchor="middle">PostgreSQL</text>
+  <text class="sm" x="680" y="166" text-anchor="middle">本机</text>
+  <path class="ln" d="M152 90 L196 56" marker-end="url(#ar)"/>
+  <path class="ln-r" d="M280 82 V116" marker-end="url(#ar-r)"/>
+  <text class="sm" x="292" y="104">浏览器重新请求</text>
+  <path class="ln" d="M362 150 H436" marker-end="url(#ar)"/>
+  <text class="sm" x="400" y="134" text-anchor="middle">明文（仅本机）</text>
+  <path class="ln" d="M582 150 H616" marker-end="url(#ar)"/>
+</svg>
+<figcaption>图 15-5　加密只发生在浏览器和 Nginx 之间；Nginx 到 Odoo 是本机通信，不经过网络</figcaption>
+</figure>
+
+<h2 id="maintenance">维护：预发布环境与升级</h2>
+
+<p>
+  服务器跑起来之后，迟早要做维护：更新 Odoo 代码以获得修复、升级自己的模块、安装新模块。这些操作都有风险，
+  所以最好先在一个<strong>预发布（staging）环境</strong>里演练一遍。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 260" role="img" aria-label="升级流程：复制生产库到预发布，更新代码，在预发布测试，备份生产，升级生产">
+  <rect class="bx-b" x="20" y="30" width="130" height="80" rx="10"/>
+  <text class="ttl on-b" x="85" y="58" text-anchor="middle">① 复制</text>
+  <text class="sm" x="85" y="80" text-anchor="middle">生产库 → 预发布库</text>
+  <text class="sm" x="85" y="98" text-anchor="middle">并「中和」</text>
+  <rect class="bx-a" x="170" y="30" width="130" height="80" rx="10"/>
+  <text class="ttl on-a" x="235" y="58" text-anchor="middle">② 更新代码</text>
+  <text class="sm" x="235" y="80" text-anchor="middle">git tag</text>
+  <text class="sm" x="235" y="98" text-anchor="middle">git pull</text>
+  <rect class="bx-p" x="320" y="30" width="130" height="80" rx="10"/>
+  <text class="ttl on-p" x="385" y="58" text-anchor="middle">③ 预发布测试</text>
+  <text class="sm" x="385" y="80" text-anchor="middle">升级模块</text>
+  <text class="sm" x="385" y="98" text-anchor="middle">端口 8080 上验证</text>
+  <rect class="bx-g" x="470" y="30" width="130" height="80" rx="10"/>
+  <text class="ttl on-g" x="535" y="58" text-anchor="middle">④ 备份生产</text>
+  <text class="sm" x="535" y="80" text-anchor="middle">数据库 +</text>
+  <text class="sm" x="535" y="98" text-anchor="middle">filestore</text>
+  <rect class="bx-g" x="620" y="30" width="120" height="80" rx="10"/>
+  <text class="ttl on-g" x="680" y="58" text-anchor="middle">⑤ 升级生产</text>
+  <text class="sm" x="680" y="80" text-anchor="middle">停服 → 升级</text>
+  <text class="sm" x="680" y="98" text-anchor="middle">→ 启动</text>
+  <path class="ln" d="M152 70 H166" marker-end="url(#ar)"/>
+  <path class="ln" d="M302 70 H316" marker-end="url(#ar)"/>
+  <path class="ln" d="M452 70 H466" marker-end="url(#ar)"/>
+  <path class="ln" d="M602 70 H616" marker-end="url(#ar)"/>
+
+  <path class="ln-r" d="M385 112 V170 H235 V114" marker-end="url(#ar-r)"/>
+  <text class="sm" x="310" y="190" text-anchor="middle">测试失败？git checkout 回到标签，修好再来</text>
+  <path class="ln-r" d="M680 112 V220 H535 V114" marker-end="url(#ar-r)"/>
+  <text class="sm" x="608" y="240" text-anchor="middle">生产出问题？用备份恢复</text>
+</svg>
+<figcaption>图 15-6　一次安全的升级：任何改动都先在预发布环境里跑通，生产环境动手前先备份</figcaption>
+</figure>
+
+<h3>建立预发布环境</h3>
+
+<p>
+  理想情况下预发布环境应该在一台单独的服务器上。一个简化但对大多数情况足够安全的做法，是把它放在生产服务器上，用不同的数据库和端口。
+</p>
+
+<p>
+  <strong>第一步：复制数据库。</strong>Odoo 20 的 <code>odoo db duplicate</code> 会连同 filestore 一起复制，
+  <code>--neutralize</code> 选项还会「中和」副本：停用外发邮件服务器、计划任务、支付和第三方集成等，避免测试库给真实客户发邮件或扣款：
+</p>
+
+<div class="code" data-lang="bash">
+<pre>
+sudo -u odoo /opt/odoo/env20/bin/odoo db -c /etc/odoo/odoo.conf \
+    duplicate --force --neutralize odoo-prod odoo-stage
+</pre>
+</div>
+
+<div class="vs">
+  <div class="old">
+    <div class="h">Odoo 15（书中写法）</div>
+    <div class="code" data-lang="bash"><pre>
+dropdb odoo-stage
+createdb --owner=odoo odoo-stage
+pg_dump odoo-prod | psql -d odoo-stage
+sudo su - odoo
+cd ~/.local/share/Odoo/filestore/
+cp -r odoo-prod odoo-stage
+exit
+# 还要自己写 SQL 停用邮件服务器……
+</pre></div>
+  </div>
+  <div class="new">
+    <div class="h">Odoo 20</div>
+    <div class="code" data-lang="bash"><pre>
+odoo db -c /etc/odoo/odoo.conf \
+    duplicate --force --neutralize \
+    odoo-prod odoo-stage
+
+# 已有的库也可以单独中和：
+odoo neutralize -c /etc/odoo/odoo.conf \
+    -d odoo-stage
+</pre></div>
+  </div>
+</div>
+
+<p>
+  <strong>第二步：准备代码和配置。</strong>预发布环境需要一份独立的代码（这样才能先在这里试新代码）和一个使用不同端口的配置文件：
+</p>
+
+<div class="code" data-lang="bash">
+<pre>
+sudo -u odoo -H bash
+mkdir /opt/odoo/stage
+cp -r /opt/odoo/odoo20 /opt/odoo/library /opt/odoo/stage/
+python3 -m venv /opt/odoo/env-stage
+/opt/odoo/env-stage/bin/pip install -r /opt/odoo/stage/odoo20/requirements.txt
+/opt/odoo/env-stage/bin/pip install -e /opt/odoo/stage/odoo20
+exit
+</pre>
+</div>
+
+<div class="code" data-lang="ini" data-file="/etc/odoo/odoo-stage.conf（与生产配置不同的部分）">
+<pre>
+[options]
+addons_path = /opt/odoo/stage/odoo20/addons,/opt/odoo/stage/library
+db_name = odoo-stage
+dbfilter = ^odoo-stage$
+http_port = 8080
+gevent_port = 8073
+logfile = /var/log/odoo/odoo-stage.log
+</pre>
+</div>
+
+<h3>更新代码</h3>
+
+<p>
+  拉取新代码之前，先用 <code>git tag</code> 给当前版本打个标签，出问题时可以一步回到这里：
+</p>
+
+<div class="code" data-lang="bash">
+<pre>
+sudo -u odoo -H bash
+cd /opt/odoo/stage/odoo20
+git tag --force 20-last-prod     # 记住当前版本
+git pull
+cd /opt/odoo/stage/library
+git tag --force 20-last-prod
+git pull
+exit
+</pre>
+</div>
+
+<p>
+  Python 代码的改动需要<strong>重启</strong>服务才生效；数据文件（XML、CSV）的改动、新加的字段则需要<strong>升级模块</strong>。在预发布库上试一下：
+</p>
+
+<div class="code" data-lang="bash">
+<pre>
+sudo -u odoo /opt/odoo/env-stage/bin/odoo module -c /etc/odoo/odoo-stage.conf \
+    upgrade library_app library_member library_checkout library_portal
+sudo -u odoo /opt/odoo/env-stage/bin/odoo -c /etc/odoo/odoo-stage.conf
+</pre>
+</div>
+
+<p>
+  然后用浏览器打开 <code>http://服务器地址:8080</code>（需要防火墙放行，或者用 SSH 端口转发 <code>ssh -L 8080:localhost:8080 服务器</code>），确认升级后一切正常。
+  如果有问题，用 <code>git checkout 20-last-prod</code> 回到之前的版本。
+</p>
+
+<div class="box tip">
+  <div class="t">要不要升级所有模块？</div>
+  <p>
+    Odoo 稳定分支（如 20.0）上的更新一般都是缺陷修复，通常重启服务就够了，不值得冒险升级所有模块。
+    需要时可以用 <code>odoo module upgrade ... --outdated all</code> 只升级「磁盘上版本号更新了」的模块；<code>upgrade base</code> 或 <code>upgrade all</code> 会升级全部模块，耗时也长得多。
+  </p>
+</div>
+
+<h3>升级生产环境</h3>
+
+<p>
+  在预发布环境验证无误后，对生产环境做同样的代码更新。只需要重启的话，<code>sudo systemctl restart odoo</code> 就够了；
+  如果要升级模块，建议的流程是<strong>先备份、再停服、升级、启动</strong>：
+</p>
+
+<div class="code" data-lang="bash">
+<pre>
+# 1. 备份：数据库 + filestore 打包成一个 zip
+sudo -u odoo /opt/odoo/env20/bin/odoo db -c /etc/odoo/odoo.conf \
+    dump odoo-prod /opt/odoo/backups/odoo-prod-$(date +%F).zip
+
+# 2. 更新生产代码
+sudo -u odoo git -C /opt/odoo/odoo20 tag --force 20-last-prod
+sudo -u odoo git -C /opt/odoo/odoo20 pull
+sudo -u odoo git -C /opt/odoo/library tag --force 20-last-prod
+sudo -u odoo git -C /opt/odoo/library pull
+
+# 3. 停服、升级、启动
+sudo systemctl stop odoo
+sudo -u odoo /opt/odoo/env20/bin/odoo module -c /etc/odoo/odoo.conf \
+    upgrade library_app library_member library_checkout library_portal
+sudo systemctl start odoo
+</pre>
+</div>
+
+<p>
+  万一升级后出了严重问题：停服，代码 <code>git checkout 20-last-prod</code>，再用 <code>odoo db load --force</code> 从刚才的 zip 恢复数据库，最后启动服务。
+</p>
+
+<div class="box key">
+  <div class="t">备份要定期做，而且要演练恢复</div>
+  <p>
+    除了升级前的备份，还应该每天自动备份（比如用 systemd timer 或 cron 运行 <code>odoo db dump</code>），并把备份文件复制到<strong>另一台机器</strong>上。
+    没有演练过恢复的备份，不能算真正的备份——定期把备份恢复到预发布环境，就是最好的演练。
+  </p>
+</div>
+
+<div class="box ver">
+  <div class="t">&#8682; 大版本升级（比如 15 → 20）</div>
+  <p>
+    本节讲的是同一大版本内的更新。跨大版本的升级需要迁移数据库结构和数据，不能只换代码：企业版用户可以使用 Odoo 官方的升级服务，
+    社区版通常借助 OCA 的 OpenUpgrade 项目。自定义模块的代码可以先用 <code>odoo upgrade_code</code> 命令自动完成一部分机械性的改写（比如 <code>tree</code> → <code>list</code>），
+    剩下的再参照附录里的「15 → 20 变化速查」手工调整。
+  </p>
+</div>
+
+<h2 id="summary">小结</h2>
+
+<ul>
+  <li>生产环境：Ubuntu 24.04 + PostgreSQL 16 + Python 3.12；用无特权的 <code>odoo</code> 系统用户运行，数据库账号不是超级用户。</li>
+  <li>从源码安装（<code>git clone -b 20.0 --depth=1</code> + 虚拟环境），便于更新和回滚。</li>
+  <li>配置文件放在 <code>/etc/odoo/odoo.conf</code>；务必设置强 <code>admin_passwd</code>、<code>list_db = False</code>、<code>dbfilter</code>、<code>proxy_mode</code>，并只监听 <code>127.0.0.1</code>。</li>
+  <li><code>workers</code> 启用多进程模式，经验值 <code>2 × CPU + 1</code>；WebSocket 由 <code>gevent_port</code>（8072）上的 gevent 进程处理。</li>
+  <li>systemd 服务让 Odoo 开机自启、崩溃自动重启；<code>/web/version</code> 可用作健康检查。</li>
+  <li>Nginx 反向代理：<code>/websocket</code> 转发到 8072 并升级连接，其余转发到 8069；设置 <code>X-Forwarded-*</code> 请求头；强制 HTTPS，推荐 Let's Encrypt 证书。</li>
+  <li>维护：<code>odoo db duplicate --neutralize</code> 建立预发布库，<code>git tag</code> 记录版本，<code>odoo module upgrade</code> 升级模块，<code>odoo db dump</code> 备份。</li>
+</ul>
+
+<div class="exercise">
+  <h3>动手练习</h3>
+  <ol>
+    <li>在一台虚拟机（或云服务器）上按本章完整部署一次 Odoo 20，并把本书的图书馆模块装进去。</li>
+    <li>用 <code>ps aux | grep odoo</code> 观察 worker 进程的数量，把 <code>workers</code> 改成 2 再重启，看看有什么变化。</li>
+    <li>打开浏览器开发者工具的「网络」面板，确认 <code>/websocket</code> 连接的状态码是 <code>101 Switching Protocols</code>。</li>
+    <li>写一个每天凌晨执行的 systemd timer（或 cron 任务），用 <code>odoo db dump</code> 备份生产库，并只保留最近 7 天的备份。</li>
+    <li>用 <code>odoo db duplicate --neutralize</code> 建一个预发布库，登录后到「设置 → 技术 → 外发邮件服务器」看看中和做了什么。</li>
+  </ol>
+</div>
+<div id="pager"></div>
+</main>
+</div>
+<script src="assets/site.js"></script>
+</body>
+</html>

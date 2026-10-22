@@ -1,0 +1,990 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 11 章 · 看板视图与 OWL 模板 — Odoo 20 开发入门</title>
+<meta name="description" content="看板的概念与看板状态；用 Odoo 20 的 card / menu 模板设计看板卡片；客户端 QWeb（OWL）模板语言详解；扩展看板视图；通过清单 assets 加入 CSS 与 JavaScript，并写一个最小的 OWL 字段组件。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-chapter="11">
+<div id="app">
+<aside id="sidebar"></aside>
+<main>
+<span class="chapter-eyebrow">第 11 章</span>
+<h1>看板视图与 OWL 模板</h1>
+<p class="lede">
+  看板（Kanban）把「工作进行到哪一步」变成一眼就能看懂的画面，是支撑精益流程的利器。
+  Odoo 的看板视图由 <strong>QWeb</strong> 模板驱动 —— 这是 Odoo 基于 XML 的模板语言，报表和网站也用它。
+  这一章给借书单做一个看板，顺带把 QWeb 模板语言彻底学一遍，最后学会给模块加入自己的 CSS 和 JavaScript。
+</p>
+
+<div class="goals">
+  <h4>本章目标</h4>
+  <ul>
+    <li>理解看板、拉动式流程和看板状态</li>
+    <li>用 Odoo 20 的写法设计看板：分列、进度条、<code>card</code> 和 <code>menu</code> 模板</li>
+    <li>在卡片上使用颜色、优先级、活动、状态、头像等组件</li>
+    <li>掌握客户端 QWeb 的全部常用指令：<code>t-out</code>、<code>t-set</code>、<code>t-if</code>、<code>t-foreach</code>、<code>t-att</code>、<code>t-call</code>……</li>
+    <li>扩展别人的看板视图</li>
+    <li>通过清单的 <code>assets</code> 键加入 CSS / JS，并认识 OWL 组件</li>
+  </ul>
+</div>
+
+<div id="chapter-toc"></div>
+
+<div class="box ver">
+  <div class="t">&#8682; 看板的写法在 Odoo 18 有一次大改</div>
+  <p>
+    书里的看板卡片模板叫 <code>kanban-box</code>，里面用 <code>oe_kanban_global_click</code>、<code>o_kanban_record_title</code>、<code>oe_kanban_bottom_left</code>
+    等一堆 CSS 类手工搭布局，下拉菜单要自己写 Bootstrap 的 dropdown 标记。
+    Odoo 18 起改成了语义化的写法：卡片模板叫 <code>card</code>，布局用 <code>&lt;main&gt;</code>、<code>&lt;aside&gt;</code>、<code>&lt;footer&gt;</code>，
+    下拉菜单是一个单独的 <code>menu</code> 模板，卡片默认就可以点击打开。
+    在 Odoo 20 里，<strong>没有 <code>card</code> 模板的看板会直接报错</strong>，书中的看板代码必须重写。
+  </p>
+</div>
+
+<h2 id="kanban">认识看板</h2>
+
+<p>
+  Kanban 是日语「看板 / 广告牌」，源自丰田的精益生产，后来随着敏捷开发在软件行业流行起来。看板是一块可视化的工作队列：
+  <strong>列</strong>代表流程的阶段，<strong>卡片</strong>代表工作项。新工作从最左边一列开始，一路向右，到最右一列时完成。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 240" role="img" aria-label="一个三列看板：待办、进行中、已完成，卡片从左向右移动">
+  <rect class="bx" x="20" y="20" width="230" height="200" rx="10"/>
+  <text class="ttl" x="135" y="44" text-anchor="middle">To Do</text>
+  <rect class="bx-b" x="36" y="60" width="198" height="40" rx="6"/><text class="sm" x="135" y="85" text-anchor="middle">任务 D</text>
+  <rect class="bx-b" x="36" y="110" width="198" height="40" rx="6"/><text class="sm" x="135" y="135" text-anchor="middle">任务 E</text>
+
+  <rect class="bx" x="265" y="20" width="230" height="200" rx="10"/>
+  <text class="ttl" x="380" y="44" text-anchor="middle">Doing</text>
+  <rect class="bx-a" x="281" y="60" width="198" height="40" rx="6"/><text class="sm" x="380" y="85" text-anchor="middle">任务 B</text>
+  <rect class="bx-a" x="281" y="110" width="198" height="40" rx="6"/><text class="sm" x="380" y="135" text-anchor="middle">任务 C</text>
+
+  <rect class="bx" x="510" y="20" width="230" height="200" rx="10"/>
+  <text class="ttl" x="625" y="44" text-anchor="middle">Done</text>
+  <rect class="bx-g" x="526" y="60" width="198" height="40" rx="6"/><text class="sm" x="625" y="85" text-anchor="middle">任务 A</text>
+
+  <path class="ln-a" d="M236 130 C 250 170, 270 170, 283 145" marker-end="url(#ar-a)"/>
+  <path class="ln-g" d="M481 80 H522" marker-end="url(#ar-g)"/>
+  <text class="sm" x="380" y="200" text-anchor="middle">拖动卡片到另一列 = 修改它的阶段</text>
+</svg>
+<figcaption>图 11-1　最简单的看板</figcaption>
+</figure>
+
+<p>和沉重的工作流引擎相比，看板往往是管理流程更有效的方式。在 Odoo 里，看板视图有两种用法：</p>
+
+<div class="vs">
+  <div class="new">
+    <div class="h">卡片列表</div>
+    <div style="padding:10px 14px;font-size:14px">
+      只是把记录显示成卡片，不分列。比如联系人、产品、员工、应用列表。
+    </div>
+  </div>
+  <div class="new">
+    <div class="h">看板</div>
+    <div style="padding:10px 14px;font-size:14px">
+      按某个字段（通常是阶段）<strong>分组</strong>成列，卡片可以在列之间拖动 —— 拖动就是修改那个分组字段。比如 CRM 的销售管道、项目任务。
+    </div>
+  </div>
+</div>
+
+<h3>看板状态：从「推」到「拉」</h3>
+
+<p>
+  卡片从左往右移动，意味着一种<strong>推动式</strong>策略：这一阶段做完了，就把工作推给下一阶段。这容易造成下游积压。
+  精益方法更推荐<strong>拉动式</strong>：下一阶段有空了，才从上一阶段拉取工作。
+</p>
+
+<p>
+  Odoo 用<strong>看板状态</strong>支持拉动式：每张卡片有一个状态灯 ——
+  <strong>灰色</strong>（进行中）、<strong>红色</strong>（受阻）、<strong>绿色</strong>（就绪）。
+  某阶段的工作做完了，不急着把卡片推到下一列，而是标成绿色，表示「可以被下一阶段拉走了」；遇到阻碍就标红，表示需要帮助。
+  看板状态只在当前阶段有意义，卡片换阶段时应当重置为灰色。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 210" role="img" aria-label="看板状态：进行中、受阻、就绪，以及列头的进度条">
+  <rect class="bx" x="20" y="20" width="340" height="170" rx="10"/>
+  <text class="ttl" x="36" y="44">Borrowed　　<tspan class="sm">5 本</tspan></text>
+  <rect x="36" y="54" width="180" height="8" rx="4" style="fill:var(--line-2)"/>
+  <rect x="216" y="54" width="70" height="8" rx="4" style="fill:var(--green)"/>
+  <rect x="286" y="54" width="58" height="8" rx="4" style="fill:var(--red)"/>
+  <text class="sm" x="36" y="80">↑ 进度条：各状态所占比例</text>
+  <rect class="bx" x="36" y="92" width="308" height="26" rx="5"/><text class="sm" x="48" y="110">借书单 #1</text><circle cx="328" cy="105" r="6" style="fill:var(--line-2)"/>
+  <rect class="bx" x="36" y="124" width="308" height="26" rx="5"/><text class="sm" x="48" y="142">借书单 #4</text><circle cx="328" cy="137" r="6" style="fill:var(--green)"/>
+  <rect class="bx" x="36" y="156" width="308" height="26" rx="5"/><text class="sm" x="48" y="174">借书单 #7</text><circle cx="328" cy="169" r="6" style="fill:var(--red)"/>
+
+  <circle cx="420" cy="60" r="9" style="fill:var(--line-2)"/><text class="lbl" x="440" y="65">normal：进行中</text>
+  <circle cx="420" cy="100" r="9" style="fill:var(--red)"/><text class="lbl" x="440" y="105">blocked：受阻，需要帮助</text>
+  <circle cx="420" cy="140" r="9" style="fill:var(--green)"/><text class="lbl" x="440" y="145">done：就绪，可以被下一阶段拉走</text>
+  <text class="sm" x="410" y="180">卡片换阶段时，状态自动重置为 normal</text>
+</svg>
+<figcaption>图 11-2　看板状态和列头进度条</figcaption>
+</figure>
+
+<h2 id="view">设计看板视图</h2>
+
+<p>
+  表单视图主要使用 Odoo 专有的元素（<code>&lt;field&gt;</code>、<code>&lt;group&gt;</code>），只零星用一些 HTML。看板视图正好相反：它<strong>以 HTML 为主</strong>，
+  另外支持 <code>&lt;field&gt;</code>、<code>&lt;widget&gt;</code> 等少数 Odoo 元素。卡片的 HTML 由 QWeb 模板动态生成，这带来了很大的灵活性，也让设计更复杂。
+  好办法是：找一个和你的需求相近的现成看板，看它是怎么写的，照着改。
+</p>
+
+<h3>最小的看板</h3>
+
+<ol class="steps">
+  <li>在动作的 <code>view_mode</code> 里加入 <code>kanban</code>，放在第一位让它成为默认视图：
+    <div class="code" data-lang="xml"><pre>
+&lt;field name="view_mode"&gt;kanban,list,form,activity,calendar,pivot,graph&lt;/field&gt;
+</pre></div>
+  </li>
+  <li>新建 <code>views/checkout_kanban_view.xml</code>，并加入清单的 <code>data</code>。</li>
+  <li>写一个最小的看板：</li>
+</ol>
+
+<div class="code" data-lang="xml" data-file="library_checkout/views/checkout_kanban_view.xml">
+<pre>
+&lt;odoo&gt;
+    &lt;record id="library_checkout_kanban" model="ir.ui.view"&gt;
+        &lt;field name="model"&gt;library.checkout&lt;/field&gt;
+        &lt;field name="arch" type="xml"&gt;
+            &lt;kanban default_group_by="stage_id"&gt;
+                &lt;templates&gt;
+                    &lt;t t-name="card"&gt;
+                        &lt;field name="name"/&gt;
+                    &lt;/t&gt;
+                &lt;/templates&gt;
+            &lt;/kanban&gt;
+        &lt;/field&gt;
+    &lt;/record&gt;
+&lt;/odoo&gt;
+</pre>
+</div>
+
+<ul>
+  <li>看板视图是一个 <code>&lt;kanban&gt;</code> 元素，卡片模板写在 <code>&lt;templates&gt;</code> 里。</li>
+  <li><code>t-name="card"</code> 的模板就是每张卡片的内容，这里只显示一个字段。</li>
+  <li><code>default_group_by="stage_id"</code> 默认按阶段分列，就成了看板；用户仍然可以在搜索栏改用别的分组方式。</li>
+</ul>
+
+<h3>看板的属性和子元素</h3>
+
+<div class="tw"><table>
+  <tr><th><code>&lt;kanban&gt;</code> 属性</th><th>作用</th></tr>
+  <tr><td><code>default_group_by</code></td><td>默认按哪个字段分列</td></tr>
+  <tr><td><code>default_order</code></td><td>卡片的默认排序</td></tr>
+  <tr><td><code>highlight_color</code></td><td>存放卡片颜色的整数字段名，卡片左侧会显示对应颜色的色条</td></tr>
+  <tr><td><code>quick_create="false"</code></td><td>关闭列头「+」快速创建（只输入标题就新建一张卡片）</td></tr>
+  <tr><td><code>quick_create_view</code></td><td>快速创建时使用的表单视图的 XML ID</td></tr>
+  <tr><td><code>on_create="quick_create"</code></td><td>点「新建」按钮时用快速创建而不是打开完整表单</td></tr>
+  <tr><td><code>group_create</code> / <code>group_edit</code> / <code>group_delete</code></td><td>设为 <code>false</code> 时禁止新建 / 编辑 / 删除列</td></tr>
+  <tr><td><code>records_draggable="false"</code></td><td>禁止在列之间拖动卡片</td></tr>
+  <tr><td><code>can_open="false"</code></td><td>点击卡片不打开表单</td></tr>
+  <tr><td><code>class</code></td><td>给看板根元素加 CSS 类</td></tr>
+  <tr><td><code>sample="1"</code></td><td>没有数据时显示示例卡片</td></tr>
+</table></div>
+
+<p><code>&lt;kanban&gt;</code> 里可以放这些元素：</p>
+<ul>
+  <li><code>&lt;field&gt;</code>：在模板之外声明的字段，会被加载到前端但不显示。<strong>模板的表达式里用到、却没有在模板里用 <code>&lt;field&gt;</code> 显示的字段</strong>，应该在这里声明。</li>
+  <li><code>&lt;progressbar&gt;</code>：列头的进度条。</li>
+  <li><code>&lt;header&gt;</code>：放按钮，和列表视图的页眉类似。</li>
+  <li><code>&lt;templates&gt;</code>：必需，放 QWeb 模板：<code>card</code>（卡片，必需）、<code>menu</code>（卡片的下拉菜单，可选），以及你自己定义的、可以被 <code>t-call</code> 的辅助模板。</li>
+</ul>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 290" role="img" aria-label="看板视图 XML 的整体结构">
+  <rect class="bx-a" x="20" y="20" width="720" height="250" rx="12"/>
+  <text class="ttl mono on-a" x="36" y="44">&lt;kanban default_group_by="stage_id" highlight_color="color"&gt;</text>
+  <rect class="bx" x="40" y="58" width="300" height="40" rx="6"/>
+  <text class="sm mono" x="54" y="82">&lt;field name="state"/&gt;　表达式要用的字段</text>
+  <rect class="bx-b" x="40" y="106" width="300" height="40" rx="6"/>
+  <text class="sm mono on-b" x="54" y="130">&lt;progressbar field="kanban_state" …/&gt;</text>
+  <rect class="bx-p" x="370" y="58" width="350" height="196" rx="8"/>
+  <text class="sm mono on-p" x="386" y="80">&lt;templates&gt;</text>
+  <rect class="bx" x="390" y="92" width="310" height="40" rx="6"/>
+  <text class="sm mono" x="404" y="116">&lt;t t-name="menu"&gt;　下拉菜单（可选）</text>
+  <rect class="bx-g" x="390" y="140" width="310" height="52" rx="6"/>
+  <text class="sm mono on-g" x="404" y="162">&lt;t t-name="card"&gt;　卡片（必需）</text>
+  <text class="sm" x="404" y="182">main / aside / footer</text>
+  <rect class="bx-d" x="390" y="200" width="310" height="40" rx="6"/>
+  <text class="sm mono" x="404" y="224">&lt;t t-name="book_covers"&gt;　自定义片段</text>
+  <text class="sm" x="40" y="186">看板元素本身只描述「怎么分列、</text>
+  <text class="sm" x="40" y="206">列头显示什么」；</text>
+  <text class="sm" x="40" y="230">每张卡片长什么样，</text>
+  <text class="sm" x="40" y="250">全由 templates 里的模板决定</text>
+</svg>
+<figcaption>图 11-3　看板视图的结构</figcaption>
+</figure>
+
+<h3>列头进度条</h3>
+
+<p>
+  进度条在每一列的列头显示一个数字和一条彩色的条，表示这一列里各个子状态的比例。CRM 用它显示活动是「已计划 / 今天 / 已逾期」，项目任务用它显示看板状态。
+  我们给借书单加上看板状态：
+</p>
+
+<div class="code" data-lang="py" data-file="library_checkout/models/library_checkout.py（片段）">
+<pre>
+    kanban_state = fields.Selection(
+        [("normal", "In Progress"),
+         ("blocked", "Blocked"),
+         ("done", "Ready for next stage")],
+        "Kanban State",
+        default="normal",
+    )
+
+    def write(self, vals):
+        # 换阶段时重置看板状态
+        if "stage_id" in vals and "kanban_state" not in vals:
+            vals["kanban_state"] = "normal"
+        # ……第 8 章 write() 里原有的逻辑……
+        return super().write(vals)
+</pre>
+</div>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;kanban default_group_by="stage_id"&gt;
+    &lt;progressbar field="kanban_state"
+                 colors='{"done": "success", "blocked": "danger", "normal": "300"}'
+                 sum_field="num_books"/&gt;
+    &lt;templates&gt;
+        &lt;t t-name="card"&gt;
+            &lt;field name="name"/&gt;
+        &lt;/t&gt;
+    &lt;/templates&gt;
+&lt;/kanban&gt;
+</pre>
+</div>
+
+<ul>
+  <li><code>field</code>：按哪个字段的取值分段。</li>
+  <li><code>colors</code>：每个取值用什么颜色。值会被拼成 Bootstrap 的背景色类 <code>bg-颜色</code>，所以可以用 <code>success</code>、<code>warning</code>、<code>danger</code>、<code>info</code>，以及灰度 <code>200</code>、<code>300</code> 等。</li>
+  <li><code>sum_field</code>：列头数字默认是卡片数量，指定这个字段后改为显示该字段的合计（这里是借出的书的总数）。</li>
+</ul>
+
+<div class="box note">
+  <div class="t">&#9432; 书里的 "muted" 和 sum_fields</div>
+  <p>书中写的 <code>"normal": "muted"</code> 在当前版本里不对应任何背景色类，灰色改用 <code>"300"</code>；属性名也应是 <code>sum_field</code>（单数），而不是书中正文里的 <code>sum_fields</code>。</p>
+</div>
+
+<h2 id="card">设计卡片</h2>
+
+<p>以 CRM 销售管道的卡片为蓝本，一张信息丰富的卡片通常有这些区域：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 330" role="img" aria-label="Odoo 20 看板卡片的结构：色条、main、footer 左右、aside、右上角菜单">
+  <rect class="bx" x="140" y="20" width="400" height="290" rx="10"/>
+  <rect x="140" y="20" width="6" height="290" style="fill:var(--accent)"/>
+  <text class="sm on-a" x="80" y="40" text-anchor="middle">颜色条</text>
+  <text class="sm" x="80" y="56" text-anchor="middle">highlight_color</text>
+  <path class="ln-a" d="M110 60 L140 80"/>
+
+  <rect class="bx-p" x="490" y="30" width="36" height="26" rx="6"/>
+  <text class="ttl on-p" x="508" y="48" text-anchor="middle">⋮</text>
+  <text class="sm on-p" x="560" y="40">&lt;t t-name="menu"&gt;</text>
+  <text class="sm" x="560" y="56">编辑 · 删除 · 颜色 · 自定义动作</text>
+
+  <rect class="bx-g" x="160" y="40" width="250" height="190" rx="8"/>
+  <text class="sm on-g" x="172" y="58">&lt;main&gt;</text>
+  <text class="ttl" x="172" y="86" style="font-size:16px">暑期书单</text>
+  <text class="lbl on-r" x="172" y="112">2026-10-22</text>
+  <text class="lbl" x="172" y="138">👤 张三</text>
+  <rect class="bx-d" x="172" y="152" width="40" height="54" rx="4"/>
+  <rect class="bx-d" x="218" y="152" width="40" height="54" rx="4"/>
+  <rect class="bx-d" x="264" y="152" width="40" height="54" rx="4"/>
+  <text class="sm" x="310" y="184">书的封面</text>
+
+  <rect class="bx-b" x="420" y="70" width="100" height="160" rx="8"/>
+  <text class="sm on-b" x="470" y="90" text-anchor="middle">&lt;aside&gt;</text>
+  <text class="sm" x="470" y="150" text-anchor="middle">图片 / 头像</text>
+
+  <rect class="bx-a" x="160" y="244" width="360" height="50" rx="8"/>
+  <text class="sm on-a" x="172" y="260">&lt;footer&gt;</text>
+  <text class="lbl" x="172" y="284">★☆☆　⏰</text>
+  <text class="lbl" x="420" y="284">● 👤</text>
+  <text class="sm" x="560" y="262">左：优先级、活动</text>
+  <text class="sm" x="560" y="280">右（ms-auto）：看板状态、</text>
+  <text class="sm" x="560" y="298">负责人头像</text>
+</svg>
+<figcaption>图 11-4　Odoo 18+ 的卡片：语义化的 main / aside / footer，外加一个独立的 menu 模板</figcaption>
+</figure>
+
+<p>为此先给模型补几个字段：</p>
+
+<div class="code" data-lang="py" data-file="library_checkout/models/library_checkout.py（片段）">
+<pre>
+    color = fields.Integer()
+    priority = fields.Selection(
+        [("0", "Normal"),
+         ("1", "High"),
+         ("2", "Very High"),
+         ("3", "Critical")],
+        default="0",
+    )
+</pre>
+</div>
+
+<div class="code" data-lang="py" data-file="library_checkout/models/library_checkout_line.py（片段）">
+<pre>
+    book_cover = fields.Image(related="book_id.image")
+</pre>
+</div>
+
+<p>然后是完整的看板视图：</p>
+
+<div class="code" data-lang="xml" data-file="library_checkout/views/checkout_kanban_view.xml">
+<pre>
+&lt;odoo&gt;
+    &lt;record id="library_checkout_kanban" model="ir.ui.view"&gt;
+        &lt;field name="model"&gt;library.checkout&lt;/field&gt;
+        &lt;field name="arch" type="xml"&gt;
+            &lt;kanban default_group_by="stage_id" highlight_color="color" sample="1"&gt;
+                &lt;!-- 表达式里要用的字段 --&gt;
+                &lt;field name="state"/&gt;
+                &lt;field name="num_books"/&gt;
+                &lt;field name="line_ids"/&gt;
+
+                &lt;progressbar field="kanban_state"
+                             colors='{"done": "success", "blocked": "danger", "normal": "300"}'
+                             sum_field="num_books"/&gt;
+
+                &lt;templates&gt;
+                    &lt;!-- 卡片右上角的下拉菜单 --&gt;
+                    &lt;t t-name="menu"&gt;
+                        &lt;a t-if="widget.editable" role="menuitem" type="open"
+                           class="dropdown-item"&gt;Edit&lt;/a&gt;
+                        &lt;a t-if="widget.deletable" role="menuitem" type="delete"
+                           class="dropdown-item"&gt;Delete&lt;/a&gt;
+                        &lt;a t-if="record.state.raw_value == 'open'" role="menuitem"
+                           type="object" name="button_done"
+                           class="dropdown-item"&gt;Return Books&lt;/a&gt;
+                        &lt;div role="separator" class="dropdown-divider"/&gt;
+                        &lt;field name="color" widget="kanban_color_picker"/&gt;
+                    &lt;/t&gt;
+
+                    &lt;!-- 可复用的片段：显示前几本书的封面 --&gt;
+                    &lt;t t-name="book_covers"&gt;
+                        &lt;div class="d-flex gap-1"&gt;
+                            &lt;t t-foreach="record.line_ids.raw_value.slice(0, limit)"
+                               t-as="line" t-key="line"&gt;
+                                &lt;img t-att-src="'/web/image/library.checkout.line/' + line + '/book_cover'"
+                                     height="48" alt="Cover"/&gt;
+                            &lt;/t&gt;
+                        &lt;/div&gt;
+                    &lt;/t&gt;
+
+                    &lt;!-- 卡片 --&gt;
+                    &lt;t t-name="card"&gt;
+                        &lt;main&gt;
+                            &lt;field name="name" class="fw-bold fs-5"/&gt;
+                            &lt;div t-att-class="record.priority.raw_value &gt;= '2' ? 'text-danger' : ''"&gt;
+                                &lt;field name="request_date"/&gt;
+                            &lt;/div&gt;
+                            &lt;field name="member_id" widget="many2one_avatar"/&gt;
+                            &lt;div t-if="record.num_books.raw_value == 0" class="text-muted"&gt;No books!&lt;/div&gt;
+                            &lt;div t-elif="record.num_books.raw_value == 1"&gt;One book&lt;/div&gt;
+                            &lt;div t-else=""&gt;&lt;field name="num_books"/&gt; books&lt;/div&gt;
+                            &lt;t t-call="book_covers"&gt;
+                                &lt;t t-set="limit" t-value="3"/&gt;
+                            &lt;/t&gt;
+                            &lt;footer&gt;
+                                &lt;div class="d-flex"&gt;
+                                    &lt;field name="priority" widget="priority"/&gt;
+                                    &lt;field name="activity_ids" widget="kanban_activity" class="ms-2"/&gt;
+                                &lt;/div&gt;
+                                &lt;div class="d-flex ms-auto align-items-center"&gt;
+                                    &lt;field name="kanban_state" widget="state_selection" class="me-1"/&gt;
+                                    &lt;field name="user_id" widget="many2one_avatar_user"/&gt;
+                                &lt;/div&gt;
+                            &lt;/footer&gt;
+                        &lt;/main&gt;
+                    &lt;/t&gt;
+                &lt;/templates&gt;
+            &lt;/kanban&gt;
+        &lt;/field&gt;
+    &lt;/record&gt;
+&lt;/odoo&gt;
+</pre>
+</div>
+
+<p>下面逐块解释。</p>
+
+<h3>标题和内容</h3>
+
+<p>
+  <code>&lt;main&gt;</code> 是卡片的主体区域，里面的元素默认从上到下排列。可以随意使用 HTML 元素，也可以用 <code>&lt;field&gt;</code>，
+  后者会像在表单里一样按字段类型正确格式化（日期按用户的日期格式、多对一显示名称……）。
+  标题直接用 Bootstrap 的工具类加粗放大：<code>class="fw-bold fs-5"</code>。<code>many2one_avatar</code> 组件把会员显示成「头像 + 名字」。
+</p>
+
+<h3>下拉菜单</h3>
+
+<p>
+  <code>menu</code> 模板定义卡片右上角 <strong>⋮</strong> 按钮里的菜单项。只要定义了这个模板，按钮就会自动出现，不用像书里那样自己写 Bootstrap 的 dropdown 标记。
+</p>
+<ul>
+  <li><code>&lt;a type="open"&gt;</code> 打开记录，<code>&lt;a type="delete"&gt;</code> 删除记录。</li>
+  <li><code>widget.editable</code>、<code>widget.deletable</code> 告诉你当前用户能不能编辑、删除，用 <code>t-if</code> 控制菜单项是否出现。</li>
+  <li><code>&lt;a type="object" name="button_done"&gt;</code> 和表单里的按钮一样调用模型方法；<code>type="action"</code> 执行动作。</li>
+  <li><code>&lt;field name="color" widget="kanban_color_picker"/&gt;</code> 放一个调色板，选中的颜色存进 <code>color</code> 字段；配合 <code>&lt;kanban highlight_color="color"&gt;</code>，卡片左侧就会出现对应颜色的色条。</li>
+</ul>
+
+<div class="vs">
+  <div class="old">
+    <div class="h">Odoo 15：颜色要自己算 CSS 类</div>
+    <div class="code" data-lang="xml"><pre>
+&lt;ul class="oe_kanban_colorpicker" data-field="color"/&gt;
+...
+&lt;div t-attf-class="oe_kanban_global_click
+  {{!selection_mode ? 'oe_kanban_color_' +
+    kanban_getcolor(record.color.raw_value) : ''}}"&gt;
+</pre></div>
+  </div>
+  <div class="new">
+    <div class="h">Odoo 20：声明一下就行</div>
+    <div class="code" data-lang="xml"><pre>
+&lt;kanban highlight_color="color"&gt;
+...
+&lt;t t-name="menu"&gt;
+    &lt;field name="color" widget="kanban_color_picker"/&gt;
+&lt;/t&gt;
+</pre></div>
+  </div>
+</div>
+
+<h3>页脚</h3>
+
+<p>
+  <code>&lt;footer&gt;</code> 固定在卡片底部。里面用两个 flex 容器：左边放优先级（<code>priority</code>，可点击的星星）和活动指示器（<code>kanban_activity</code>）；
+  右边用 <code>ms-auto</code> 推到最右，放看板状态灯（<code>state_selection</code>）和负责人头像（<code>many2one_avatar_user</code>）。
+</p>
+
+<div class="box ver">
+  <div class="t">&#8682; 组件改名</div>
+  <p>书里看板状态用的 <code>kanban_state_selection</code> 组件已不存在，改用 <code>state_selection</code>；它按取值 <code>normal</code> / <code>blocked</code> / <code>done</code> 显示灰 / 红 / 绿。</p>
+</div>
+
+<h3>侧栏</h3>
+
+<p>
+  <code>&lt;aside&gt;</code> 和 <code>&lt;main&gt;</code> 并列，通常用来放图片或头像（比如联系人看板右侧的照片）。给 <code>&lt;t t-name="card"&gt;</code> 加 <code>class="flex-row"</code> 可以让它们横向排列。
+  借书单的卡片没有用到它。
+</p>
+
+<h3>卡片里的动作链接</h3>
+
+<p>和表单按钮一样，卡片里的 <code>&lt;a&gt;</code> 或 <code>&lt;button&gt;</code> 可以通过 <code>type</code> 属性执行动作：</p>
+<ul>
+  <li><code>type="object"</code> + <code>name="方法名"</code>：调用模型方法</li>
+  <li><code>type="action"</code> + <code>name="%(动作 XML ID)d"</code>：执行窗口动作</li>
+  <li><code>type="open"</code>：打开记录的表单</li>
+  <li><code>type="archive"</code> / <code>type="unarchive"</code>：归档 / 恢复</li>
+  <li><code>type="delete"</code>：删除记录</li>
+</ul>
+
+<h3>可复用的卡片视图（Odoo 20 新增）</h3>
+
+<p>
+  Odoo 20 新增了一种 <code>card</code> 视图类型：把卡片的模板单独写成一个视图，再在看板里用 <code>card_id</code> 引用它。
+  这样同一种卡片可以被多个看板（或其他使用卡片的地方）复用：
+</p>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;record id="library_checkout_card" model="ir.ui.view"&gt;
+    &lt;field name="model"&gt;library.checkout&lt;/field&gt;
+    &lt;field name="arch" type="xml"&gt;
+        &lt;card&gt;
+            &lt;templates&gt;
+                &lt;t t-name="menu"&gt; ... &lt;/t&gt;
+                &lt;t t-name="card"&gt; ... &lt;/t&gt;
+            &lt;/templates&gt;
+        &lt;/card&gt;
+    &lt;/field&gt;
+&lt;/record&gt;
+
+&lt;record id="library_checkout_kanban" model="ir.ui.view"&gt;
+    &lt;field name="model"&gt;library.checkout&lt;/field&gt;
+    &lt;field name="arch" type="xml"&gt;
+        &lt;kanban card_id="%(library_checkout_card)d"
+                default_group_by="stage_id" highlight_color="color"&gt;
+            &lt;progressbar field="kanban_state" colors='{"done": "success", "blocked": "danger"}'/&gt;
+        &lt;/kanban&gt;
+    &lt;/field&gt;
+&lt;/record&gt;
+</pre>
+</div>
+
+<h2 id="qweb">QWeb 模板语言</h2>
+
+<p>
+  QWeb 解析器在模板里寻找特殊的<strong>指令</strong>（以 <code>t-</code> 开头的 XML 属性），用动态生成的 HTML 替换它们。指令可以写在任何元素上 ——
+  <code>&lt;div&gt;</code>、<code>&lt;span&gt;</code>、<code>&lt;field&gt;</code>……如果需要用指令、又不想多出一个 HTML 元素，就用 <code>&lt;t&gt;</code>：它是「隐形」的，本身不会出现在输出里。
+</p>
+
+<h3>两种 QWeb：客户端与服务端</h3>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 250" role="img" aria-label="客户端 QWeb 用 JavaScript 表达式在浏览器渲染，服务端 QWeb 用 Python 表达式在服务器渲染">
+  <rect class="bx-g" x="20" y="20" width="350" height="210" rx="12"/>
+  <text class="ttl on-g" x="195" y="46" text-anchor="middle">客户端 QWeb（OWL）</text>
+  <text class="sm" x="36" y="74">在哪里：浏览器</text>
+  <text class="sm" x="36" y="96">用于：看板卡片、Web 客户端组件</text>
+  <text class="sm" x="36" y="118">表达式语言：<tspan class="on-g">JavaScript</tspan></text>
+  <text class="sm mono" x="36" y="144">record.num_books.raw_value &gt; 0</text>
+  <text class="sm mono" x="36" y="164">cond ? 'a' : 'b'　·　!x　·　x.slice(0, 3)</text>
+  <text class="sm" x="36" y="192">数据：前端从服务器读来的记录</text>
+  <text class="sm" x="36" y="212">（record.字段.value / raw_value）</text>
+
+  <rect class="bx-b" x="390" y="20" width="350" height="210" rx="12"/>
+  <text class="ttl on-b" x="565" y="46" text-anchor="middle">服务端 QWeb（Python）</text>
+  <text class="sm" x="406" y="74">在哪里：Odoo 服务器</text>
+  <text class="sm" x="406" y="96">用于：PDF 报表（第 12 章）、网站页面（第 13 章）</text>
+  <text class="sm" x="406" y="118">表达式语言：<tspan class="on-b">Python</tspan></text>
+  <text class="sm mono" x="406" y="144">o.num_books &gt; 0</text>
+  <text class="sm mono" x="406" y="164">'a' if cond else 'b'　·　not x</text>
+  <text class="sm" x="406" y="192">数据：真正的记录集对象</text>
+  <text class="sm" x="406" y="212">（可以点号访问任何关联数据）</text>
+</svg>
+<figcaption>图 11-5　同样的指令，两种实现，两种表达式语言</figcaption>
+</figure>
+
+<p>
+  看板卡片在浏览器中渲染，表达式是 <strong>JavaScript</strong>。（Odoo 的 OWL 框架还允许用 <code>and</code>、<code>or</code>、<code>not</code> 这样的 Python 风格关键字，
+  Odoo 自己的看板里经常这么写。）渲染一个看板的过程大致如下：
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 170" role="img" aria-label="看板渲染流程：取视图结构、取数据、编译模板、渲染卡片">
+  <rect class="bx" x="20" y="50" width="150" height="70" rx="10"/>
+  <text class="lbl" x="95" y="78" text-anchor="middle">① 取视图 XML</text>
+  <text class="sm" x="95" y="100" text-anchor="middle">get_views</text>
+  <rect class="bx" x="200" y="50" width="160" height="70" rx="10"/>
+  <text class="lbl" x="280" y="78" text-anchor="middle">② 编译模板</text>
+  <text class="sm" x="280" y="100" text-anchor="middle">card → OWL 模板</text>
+  <rect class="bx" x="390" y="50" width="160" height="70" rx="10"/>
+  <text class="lbl" x="470" y="78" text-anchor="middle">③ 取数据</text>
+  <text class="sm" x="470" y="100" text-anchor="middle">只读需要的字段</text>
+  <rect class="bx-g" x="580" y="50" width="160" height="70" rx="10"/>
+  <text class="lbl on-g" x="660" y="78" text-anchor="middle">④ 渲染每张卡片</text>
+  <text class="sm" x="660" y="100" text-anchor="middle">插入页面</text>
+  <path class="ln" d="M172 85 H196" marker-end="url(#ar)"/>
+  <path class="ln" d="M362 85 H386" marker-end="url(#ar)"/>
+  <path class="ln" d="M552 85 H576" marker-end="url(#ar)"/>
+  <text class="sm" x="380" y="150" text-anchor="middle">数据变了（比如点了星星改优先级），只重新渲染受影响的卡片</text>
+</svg>
+<figcaption>图 11-6　看板卡片的渲染过程（示意）</figcaption>
+</figure>
+
+<h3>求值上下文</h3>
+
+<p>卡片模板的表达式里可以使用这些变量：</p>
+
+<div class="tw"><table>
+  <tr><th>变量</th><th>含义</th></tr>
+  <tr><td><code>record</code></td><td>当前记录。<code>record.字段.raw_value</code> 是原始值，适合做判断；<code>record.字段.value</code> 是按用户设置格式化后的文本，适合显示</td></tr>
+  <tr><td><code>widget</code></td><td>卡片的辅助信息，如 <code>widget.editable</code>、<code>widget.deletable</code></td></tr>
+  <tr><td><code>context</code></td><td>当前上下文</td></tr>
+  <tr><td><code>luxon</code></td><td>日期时间库，比如 <code>luxon.DateTime.now()</code></td></tr>
+  <tr><td><code>JSON</code></td><td>JavaScript 的 JSON 对象</td></tr>
+</table></div>
+
+<p>
+  <code>raw_value</code> 的具体形式：多对一字段是 ID（或 <code>false</code>），对多字段是 ID 列表，日期是 ISO 格式的字符串。
+</p>
+
+<div class="box tip">
+  <div class="t">&#128161; XML 里写不了 &lt;</div>
+  <p>
+    模板是 XML 文件，<code>&lt;</code> 在 XML 里有特殊含义，不能直接写在属性值里。比较运算要写成 <code>&amp;lt;</code>（小于）、<code>&amp;lt;=</code>，
+    或者用 QWeb 支持的关键字 <code>lt</code>、<code>lte</code>、<code>gt</code>、<code>gte</code>：<code>t-if="record.num_books.raw_value gt 0"</code>。
+    <code>&gt;</code> 在属性值里其实可以直接写，但为了统一，很多人也写成 <code>&amp;gt;</code>。
+  </p>
+</div>
+
+<p>下面逐个介绍指令。</p>
+
+<div class="cards">
+  <div class="card"><h4>t-out</h4><p>输出表达式的值（自动转义 HTML）</p></div>
+  <div class="card"><h4>t-set / t-value</h4><p>定义变量</p></div>
+  <div class="card"><h4>t-if / t-elif / t-else</h4><p>条件渲染</p></div>
+  <div class="card"><h4>t-foreach / t-as / t-key</h4><p>循环</p></div>
+  <div class="card"><h4>t-att-NAME / t-attf-NAME / t-att</h4><p>动态属性</p></div>
+  <div class="card"><h4>t-call</h4><p>调用另一个模板</p></div>
+</div>
+
+<h3>t-out：输出值</h3>
+
+<p>
+  <code>&lt;field&gt;</code> 只能显示字段内容。<code>t-out</code> 可以输出任意表达式的结果，并自动做 HTML 转义（防止注入）：
+</p>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;t t-out="'Requested on ' + record.request_date.value"/&gt;
+</pre>
+</div>
+
+<div class="box ver">
+  <div class="t">&#8682; t-esc 和 t-raw 已经退役</div>
+  <p>
+    Odoo 15 引入 <code>t-out</code> 取代了 <code>t-esc</code>（转义输出）和 <code>t-raw</code>（不转义输出，有安全风险）。你在老模板里还会看到它们，新代码统一用 <code>t-out</code>。
+    需要输出 HTML 时，让值本身是「安全的 HTML」（服务端用 <code>Markup</code>，Html 字段的值本身就是），<code>t-out</code> 就会原样输出。
+  </p>
+</div>
+
+<h3>t-set：定义变量</h3>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;!-- 用表达式赋值 --&gt;
+&lt;t t-set="red_or_black" t-value="record.num_books.raw_value == 0 ? 'text-danger' : ''"/&gt;
+&lt;strong t-att-class="red_or_black"&gt;&lt;field name="name"/&gt;&lt;/strong&gt;
+
+&lt;!-- 用一段 HTML 赋值 --&gt;
+&lt;t t-set="calendar_sign"&gt;
+    &lt;i class="oi" data-icon="calendar_month" title="Calendar"/&gt;
+&lt;/t&gt;
+&lt;t t-out="calendar_sign"/&gt;
+</pre>
+</div>
+
+<h3>t-attf- 与 t-att-：动态属性</h3>
+
+<p><code>t-attf-属性名</code> 做<strong>字符串替换</strong>：在固定文本里嵌入 <code>{{ 表达式 }}</code>（或 <code>#{ 表达式 }</code>），适合拼 URL、CSS 类名：</p>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;div t-attf-class="text-{{ record.priority.raw_value &amp;lt; '2' ? 'body' : 'danger' }}"&gt;
+    &lt;field name="request_date"/&gt;
+&lt;/div&gt;
+</pre>
+</div>
+
+<p><code>t-att-属性名</code> 用<strong>整个表达式的结果</strong>作为属性值：</p>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;div t-att-class="record.priority.raw_value &amp;lt; '2' ? 'text-body' : 'text-danger'"&gt;
+    &lt;field name="request_date"/&gt;
+&lt;/div&gt;
+</pre>
+</div>
+
+<p>
+  当 <code>t-att-</code> 的结果为假值（<code>false</code>、<code>null</code>……）时，这个属性<strong>根本不会被输出</strong>。这对 <code>checked</code>、<code>disabled</code> 这类「出现即生效」的 HTML 属性很重要。
+  还有一个不带名字的 <code>t-att</code>，接受一个「属性名 → 值」的字典，一次设置多个属性：<code>&lt;p t-att="{'class': 'fw-bold', 'title': 'Hello'}"/&gt;</code>。
+</p>
+
+<h3>t-foreach：循环</h3>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;t t-foreach="record.line_ids.raw_value" t-as="line" t-key="line"&gt;
+    &lt;t t-out="line"/&gt;
+    &lt;t t-if="!line_last"&gt;, &lt;/t&gt;
+&lt;/t&gt;
+</pre>
+</div>
+
+<ul>
+  <li><code>t-foreach</code> 接一个返回可迭代对象的表达式；<code>t-as</code> 给每次循环的元素起名字。</li>
+  <li><code>t-key</code> 给每个元素一个唯一标识，帮助 OWL 在数据变化时高效地更新界面。客户端模板里循环时应该总是写上。</li>
+  <li>
+    循环会自动提供几个辅助变量，名字以 <code>t-as</code> 的值为前缀。以 <code>t-as="line"</code> 为例：
+    <code>line_index</code>（从 0 开始的序号）、<code>line_first</code>（是否第一个）、<code>line_last</code>（是否最后一个）、<code>line_value</code>（遍历字典时的值）。
+    上例用 <code>line_last</code> 避免在最后一项后面多一个逗号。
+  </li>
+  <li>表达式就是 JavaScript，所以可以用 <code>.slice(0, 5)</code> 只取前 5 个。</li>
+</ul>
+
+<p>
+  看板里对多字段的 <code>raw_value</code> 是 ID 列表，不是记录。要显示关联记录的图片，可以直接拼 Odoo 的图片地址 <code>/web/image/模型/ID/字段</code>，这就是前面 <code>book_covers</code> 模板的做法。
+</p>
+
+<div class="box ver">
+  <div class="t">&#8682; kanban_image() 不见了</div>
+  <p>
+    书里用 <code>kanban_image('library.checkout.line', 'book_cover', line)</code> 生成图片地址。这个辅助函数在新的看板实现里已不再提供，
+    直接拼 <code>'/web/image/library.checkout.line/' + line + '/book_cover'</code> 即可（对当前记录自己的图片字段，用 <code>&lt;field widget="image"/&gt;</code> 更简单）。
+  </p>
+</div>
+
+<h3>t-if：条件</h3>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;div t-if="record.num_books.raw_value == 0"&gt;No books!&lt;/div&gt;
+&lt;div t-elif="record.num_books.raw_value == 1"&gt;One book&lt;/div&gt;
+&lt;div t-else=""&gt;&lt;field name="num_books"/&gt; books&lt;/div&gt;
+</pre>
+</div>
+
+<p>只有条件为真时，元素及其内容才会被渲染。<code>t-elif</code> 和 <code>t-else</code> 必须紧跟在 <code>t-if</code> 元素后面。</p>
+
+<div class="box tip">
+  <div class="t">&#128161; 字段上的 invisible</div>
+  <p>对 <code>&lt;field&gt;</code> 元素，也可以像表单里那样用 <code>invisible="not member_id"</code> 这种 Python 风格的条件来隐藏，Odoo 自带的看板里大量这样写。</p>
+</div>
+
+<h3>t-call：复用模板</h3>
+
+<p>
+  与其到处重复同样的 HTML，不如把它做成一个可复用的片段。在 <code>&lt;templates&gt;</code> 里，任何 <code>t-name</code> 不是 <code>card</code> / <code>menu</code> 的模板都可以被 <code>t-call</code> 调用。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 210" role="img" aria-label="t-call 调用子模板并通过 t-set 传入参数">
+  <rect class="bx-g" x="20" y="20" width="330" height="170" rx="10"/>
+  <text class="ttl on-g" x="36" y="44">card 模板（调用方）</text>
+  <text class="sm mono" x="36" y="74">&lt;t t-call="book_covers"&gt;</text>
+  <text class="sm mono on-a" x="56" y="96">&lt;t t-set="limit" t-value="3"/&gt;</text>
+  <text class="sm mono" x="36" y="118">&lt;/t&gt;</text>
+  <text class="sm" x="36" y="150">内部的 t-set = 传给子模板的参数，</text>
+  <text class="sm" x="36" y="170">只在子模板里可见</text>
+
+  <rect class="bx-p" x="410" y="20" width="330" height="170" rx="10"/>
+  <text class="ttl on-p" x="426" y="44">book_covers 模板（被调用）</text>
+  <text class="sm mono" x="426" y="74">t-foreach="…slice(0, limit)"</text>
+  <text class="sm" x="426" y="106">也能看到调用方的变量，如 record</text>
+  <text class="sm" x="426" y="128">t-call 内部的其他内容可以用</text>
+  <text class="sm mono" x="426" y="150">&lt;t t-out="0"/&gt;</text>
+  <text class="sm" x="426" y="170">在子模板里输出（用于做布局）</text>
+  <path class="ln-a" d="M352 96 H406" marker-end="url(#ar-a)"/>
+</svg>
+<figcaption>图 11-7　t-call 与参数传递</figcaption>
+</figure>
+
+<ul>
+  <li>被调用的模板和调用方共享上下文，调用方的变量在子模板里都能用。</li>
+  <li>在 <code>t-call</code> 元素内部用 <code>t-set</code> 设置的变量是<strong>参数</strong>：只在子模板中可见，不会影响调用方。</li>
+  <li><code>t-call</code> 元素内部的其他内容，在子模板里可以通过特殊变量 <code>0</code> 输出（<code>&lt;t t-out="0"/&gt;</code>）。这是做「布局模板」的标准手法，第 12、13 章会大量用到。</li>
+</ul>
+
+<h2 id="extend">扩展看板视图</h2>
+
+<p>
+  看板视图和其他视图一样可以继承扩展（第 4 章）：定位元素，用 <code>position</code> 指定操作。但看板的 XML 通常更复杂，定位更棘手：
+</p>
+<ul>
+  <li>同一个字段可能出现多次：一次在模板外的字段声明里，一次在卡片模板里。简单定位器只匹配<strong>第一个</strong>，往往不是你想要的那个。</li>
+  <li>大量没有标识的 HTML 元素（<code>div</code>、<code>span</code>），需要更复杂的 XPath。</li>
+</ul>
+
+<p>解决办法是把 XPath 限定在 <code>card</code> 模板内部。比如在联系人看板卡片的名字前面加一个标签：</p>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;record id="res_partner_kanban_inherit" model="ir.ui.view"&gt;
+    &lt;field name="name"&gt;Contact Kanban modification&lt;/field&gt;
+    &lt;field name="model"&gt;res.partner&lt;/field&gt;
+    &lt;field name="inherit_id" ref="base.res_partner_kanban_view"/&gt;
+    &lt;field name="arch" type="xml"&gt;
+        &lt;xpath expr="//t[@t-name='card']//field[@name='name']" position="before"&gt;
+            &lt;span&gt;Name: &lt;/span&gt;
+        &lt;/xpath&gt;
+    &lt;/field&gt;
+&lt;/record&gt;
+</pre>
+</div>
+
+<p>XPath 先找到 <code>&lt;t t-name="card"&gt;</code>，再在它里面找 <code>&lt;field name="name"&gt;</code>，就排除了模板外的那个同名字段。</p>
+
+<div class="box tip">
+  <div class="t">&#128161; 在命令行里试 XPath</div>
+  <p>
+    复杂的 XPath 可以先在命令行里试。Ubuntu 上安装 <code>libxml2-utils</code> 后：
+    <code>xmllint --xpath "//t[@t-name='card']//field[@name='name']" library_checkout/views/checkout_kanban_view.xml</code>。
+  </p>
+</div>
+
+<h2 id="assets">加入 CSS 和 JavaScript</h2>
+
+<p>
+  看板以 HTML 为主，大量使用 CSS 类。Odoo 用的是 Bootstrap 5，它的工具类（<code>d-flex</code>、<code>ms-auto</code>、<code>fw-bold</code>、<code>text-danger</code>……）通常就够用了。
+  需要自己的样式或脚本时，按惯例放在模块的 <code>static/src/</code> 下，然后在清单的 <code>assets</code> 键里声明：
+</p>
+
+<div class="code" data-lang="py" data-file="library_checkout/__manifest__.py（片段）">
+<pre>
+    "assets": {
+        "web.assets_backend": [
+            "library_checkout/static/src/**/*",
+        ],
+    },
+</pre>
+</div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 250" role="img" aria-label="模块通过清单 assets 键把文件加入资源包，浏览器加载合并后的资源包">
+  <rect class="bx-a" x="20" y="30" width="220" height="190" rx="10"/>
+  <text class="ttl on-a" x="130" y="54" text-anchor="middle">library_checkout/static/src/</text>
+  <text class="sm mono" x="36" y="84">css/checkout.css</text>
+  <text class="sm mono" x="36" y="106">fields/book_count_field.js</text>
+  <text class="sm mono" x="36" y="128">fields/book_count_field.xml</text>
+  <text class="sm" x="36" y="170">清单 assets 键：</text>
+  <text class="sm mono" x="36" y="190">"web.assets_backend": [...]</text>
+
+  <rect class="bx-p" x="300" y="30" width="200" height="190" rx="10"/>
+  <text class="ttl on-p" x="400" y="54" text-anchor="middle">资源包（bundle）</text>
+  <rect class="bx" x="316" y="70" width="168" height="36" rx="6"/><text class="sm" x="400" y="93" text-anchor="middle">web.assets_backend</text>
+  <rect class="bx" x="316" y="114" width="168" height="36" rx="6"/><text class="sm" x="400" y="137" text-anchor="middle">web.assets_frontend</text>
+  <rect class="bx" x="316" y="158" width="168" height="36" rx="6"/><text class="sm" x="400" y="181" text-anchor="middle">web.report_assets_…</text>
+
+  <rect class="bx-g" x="560" y="30" width="180" height="190" rx="10"/>
+  <text class="ttl on-g" x="650" y="54" text-anchor="middle">浏览器</text>
+  <text class="sm" x="650" y="92" text-anchor="middle">后台 Web 客户端</text>
+  <text class="sm" x="650" y="136" text-anchor="middle">网站 / 门户</text>
+  <text class="sm" x="650" y="180" text-anchor="middle">PDF 报表</text>
+
+  <path class="ln-a" d="M242 88 L312 88" marker-end="url(#ar-a)"/>
+  <path class="ln-p" d="M486 88 H556" marker-end="url(#ar-p)"/>
+  <path class="ln-p" d="M486 132 H556" marker-end="url(#ar-p)"/>
+  <path class="ln-p" d="M486 176 H556" marker-end="url(#ar-p)"/>
+  <text class="sm" x="380" y="242" text-anchor="middle">Odoo 把同一个包里所有模块的文件合并、压缩后一起发给浏览器</text>
+</svg>
+<figcaption>图 11-8　前端资源的组织方式</figcaption>
+</figure>
+
+<p>最常用的资源包：</p>
+<ul>
+  <li><code>web.assets_backend</code>：后台 Web 客户端（看板、表单、自定义组件……）</li>
+  <li><code>web.assets_frontend</code>：网站和门户页面（第 13 章）</li>
+  <li><code>web.report_assets_common</code>：PDF 报表（第 12 章）</li>
+</ul>
+
+<p>
+  列表里可以写具体文件，也可以用 <code>**/*</code> 这样的通配符（会包含 <code>.js</code>、<code>.xml</code> 模板、<code>.scss</code> / <code>.css</code>）。
+  修改资源后需要升级模块；开发时用「开发者模式（含资源）」（<code>?debug=assets</code>）可以加载未压缩的源文件，方便在浏览器里调试。
+</p>
+
+<div class="box ver">
+  <div class="t">&#8682; 资源包的变化</div>
+  <ul>
+    <li>书里提到的 <code>web.assets_common</code> 已在 Odoo 16 拆分，日常开发只需要关心上面三个包。</li>
+    <li>Odoo 15 以前通过继承 <code>web.assets_backend</code> 模板、插入 <code>&lt;script&gt;</code> 和 <code>&lt;link&gt;</code> 标签来添加资源（原书仓库里的 <code>views/assets.xml</code>），这种方式早已废弃。</li>
+    <li>书中清单里的 <code>assets</code> 值写成了集合 <code>{...}</code>，应该是列表 <code>[...]</code>：资源的加载<strong>顺序</strong>有时很重要，集合没有顺序。</li>
+  </ul>
+</div>
+
+<h3>一个最小的 OWL 字段组件</h3>
+
+<p>
+  Odoo 的 Web 客户端是用自家的前端框架 <strong>OWL</strong>（Odoo Web Library）写的，Odoo 20 使用的是 <strong>OWL 3</strong>。
+  界面上的每个字段组件（widget）都是一个 OWL 组件。下面写一个最小的例子：显示借书数量、数量为 0 时标红的字段组件，让你对「组件是什么样子」有个直观印象。
+</p>
+
+<div class="code" data-lang="js" data-file="library_checkout/static/src/fields/book_count_field.js">
+<pre>
+import { registry } from "@web/core/registry";
+import { standardFieldProps } from "@web/views/fields/standard_field_props";
+import { Component, useProps } from "@odoo/owl";
+
+export class BookCountField extends Component {
+    static template = "library_checkout.BookCountField";
+    props = useProps(standardFieldProps);
+
+    get count() {
+        return this.props.record.data[this.props.name] || 0;
+    }
+}
+
+registry.category("fields").add("book_count", {
+    component: BookCountField,
+    supportedTypes: ["integer"],
+});
+</pre>
+</div>
+
+<div class="code" data-lang="xml" data-file="library_checkout/static/src/fields/book_count_field.xml">
+<pre>
+&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;templates xml:space="preserve"&gt;
+    &lt;t t-name="library_checkout.BookCountField"&gt;
+        &lt;span t-att-class="this.count === 0 ? 'text-danger' : ''"&gt;
+            &lt;i class="oi me-1" data-icon="menu_book"/&gt;
+            &lt;t t-out="this.count"/&gt;
+        &lt;/span&gt;
+    &lt;/t&gt;
+&lt;/templates&gt;
+</pre>
+</div>
+
+<p>然后在任何视图里就可以使用：<code>&lt;field name="num_books" widget="book_count"/&gt;</code>。</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 200" role="img" aria-label="字段组件通过注册表与视图中的 widget 属性连接">
+  <rect class="bx-a" x="20" y="40" width="220" height="110" rx="10"/>
+  <text class="ttl on-a" x="130" y="64" text-anchor="middle">OWL 组件</text>
+  <text class="sm mono" x="36" y="90">class BookCountField</text>
+  <text class="sm mono" x="36" y="110">  template · props</text>
+  <text class="sm mono" x="36" y="130">  get count()</text>
+
+  <rect class="bx-p" x="280" y="40" width="200" height="110" rx="10"/>
+  <text class="ttl on-p" x="380" y="64" text-anchor="middle">fields 注册表</text>
+  <text class="sm mono" x="380" y="96" text-anchor="middle">"book_count" →</text>
+  <text class="sm mono" x="380" y="116" text-anchor="middle">{component, …}</text>
+
+  <rect class="bx-g" x="520" y="40" width="220" height="110" rx="10"/>
+  <text class="ttl on-g" x="630" y="64" text-anchor="middle">视图 XML</text>
+  <text class="sm mono" x="630" y="96" text-anchor="middle">&lt;field name="num_books"</text>
+  <text class="sm mono" x="630" y="116" text-anchor="middle">widget="book_count"/&gt;</text>
+
+  <path class="ln-a" d="M242 95 H276" marker-end="url(#ar-a)"/>
+  <text class="sm" x="259" y="86" text-anchor="middle">add</text>
+  <path class="ln-g" d="M518 95 H484" marker-end="url(#ar-g)"/>
+  <text class="sm" x="501" y="86" text-anchor="middle">查找</text>
+  <text class="sm" x="380" y="180" text-anchor="middle">Odoo 的扩展点几乎都是这种「注册表」：字段组件、视图类型、服务、菜单项……</text>
+</svg>
+<figcaption>图 11-9　注册表把组件和视图连接起来</figcaption>
+</figure>
+
+<ul>
+  <li>JS 文件是 ES 模块，用 <code>import</code> 引入 Odoo 和 OWL 提供的东西。<code>@web/...</code> 指向 <code>web</code> 模块的 <code>static/src/</code>，<code>@odoo/owl</code> 是 OWL 框架本身。</li>
+  <li>组件类声明它的模板名（<code>static template</code>）和接受的属性（<code>useProps</code>）。字段组件都会收到 <code>record</code>（当前记录）和 <code>name</code>（字段名），值在 <code>record.data[name]</code> 里。</li>
+  <li>OWL 3 的模板里通过 <code>this.</code> 访问组件的属性和方法。</li>
+  <li>最后在 <code>fields</code> 注册表里登记一个名字，视图里的 <code>widget="..."</code> 就是用这个名字查找组件的。</li>
+</ul>
+
+<div class="box warn">
+  <div class="t">&#9888; 前端开发是另一门功课</div>
+  <p>
+    OWL 组件、服务、钩子、补丁（patch）机制……Odoo 的前端开发内容非常多，而且在大版本之间变化很快（Odoo 20 刚从 OWL 2 升级到 OWL 3）。
+    这个例子只是一个入口。深入学习请看官方文档的「Web framework」部分和教程，并多读 <code>addons/web/static/src/</code> 里的源码 —— 那里有每一个组件的实现。
+  </p>
+</div>
+
+<h2 id="summary">小结</h2>
+
+<ul>
+  <li>看板把流程可视化：列是阶段，卡片是工作项；看板状态（灰 / 红 / 绿）支持拉动式流程，列头进度条显示比例。</li>
+  <li>Odoo 20 的看板：<code>&lt;kanban&gt;</code> 里写 <code>default_group_by</code>、<code>highlight_color</code>、<code>&lt;progressbar&gt;</code>，模板 <code>card</code> 必需、<code>menu</code> 可选；卡片用 <code>main</code> / <code>aside</code> / <code>footer</code> 布局。</li>
+  <li>卡片里的常用组件：<code>kanban_color_picker</code>、<code>priority</code>、<code>kanban_activity</code>、<code>state_selection</code>、<code>many2one_avatar_user</code>。</li>
+  <li>客户端 QWeb 的表达式是 JavaScript；<code>record.字段.raw_value</code> 做判断、<code>.value</code> 做显示。</li>
+  <li>指令：<code>t-out</code>、<code>t-set</code>、<code>t-if</code>/<code>t-elif</code>/<code>t-else</code>、<code>t-foreach</code>/<code>t-as</code>/<code>t-key</code>、<code>t-att-</code>/<code>t-attf-</code>、<code>t-call</code>。</li>
+  <li>扩展看板时，把 XPath 限定在 <code>//t[@t-name='card']</code> 内部。</li>
+  <li>前端资源通过清单的 <code>assets</code> 键加入资源包；字段组件是注册到 <code>fields</code> 注册表的 OWL 组件。</li>
+</ul>
+
+<div class="exercise">
+  <h3>动手练习</h3>
+  <ol>
+    <li>按本章做出借书单看板，把卡片在列之间拖动，确认看板状态被重置为灰色、借出 / 归还日期被正确设置。</li>
+    <li>在卡片的菜单里加一个「Cancel」菜单项，调用一个把借书单移到取消阶段的方法。</li>
+    <li>给 <code>library_app</code> 的书做一个卡片列表视图（不分列）：封面放在 <code>&lt;aside&gt;</code>，书名、作者（<code>many2many_tags</code>）、出版社放在 <code>&lt;main&gt;</code>。</li>
+    <li>把借书单的卡片模板改写成一个独立的 <code>card</code> 视图，在看板里用 <code>card_id</code> 引用它。</li>
+    <li>写一个继承视图，在联系人看板卡片的邮箱下面显示这位联系人出版的书的数量（提示：需要一个计算字段）。</li>
+    <li>实现本章的 <code>book_count</code> 字段组件，在借书单列表里使用它。</li>
+  </ol>
+</div>
+<div id="pager"></div>
+</main>
+</div>
+<script src="assets/site.js"></script>
+</body>
+</html>

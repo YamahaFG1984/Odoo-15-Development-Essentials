@@ -1,0 +1,1000 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 1 章 · 用开发者模式快速上手 — Odoo 20 开发入门</title>
+<meta name="description" content="不写代码，用 Odoo 20 的开发者模式搭出一个待办应用，认识模型、字段、视图、菜单、动作与访问权限。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-chapter="1">
+<div id="app">
+<aside id="sidebar"></aside>
+<main>
+<span class="chapter-eyebrow">第 1 章</span>
+<h1>用开发者模式快速上手</h1>
+<p class="lede">
+  在装开发环境、写 Python 之前，先在浏览器里把一个小应用「点」出来。
+  这一章不写任何代码，但你会亲手碰到 Odoo 应用的每一个零件：模型、字段、视图、菜单、动作和访问权限。
+  后面的章节只是把这些零件改成用代码来写。
+</p>
+
+<div class="goals">
+  <h4>本章目标</h4>
+  <ul>
+    <li>知道 Odoo 是什么、社区版和企业版的区别、版本是怎么发布的</li>
+    <li>理解 Odoo 的三层架构：数据层、逻辑层、表现层</li>
+    <li>打开开发者模式，学会用它查看任何界面背后的技术信息</li>
+    <li>只用界面操作，做出一个「待办事项」应用：新模型、新字段、菜单、视图、权限</li>
+  </ul>
+</div>
+
+<div class="box ver">
+  <div class="t">&#8682; 关于版本</div>
+  <p>
+    原书基于 Odoo 15（2021 年发布）。本教程全部改用 <strong>Odoo 20</strong>（2026 年 9 月发布）讲解。
+    界面和代码里凡是和书上不一样的地方，都会用这种紫色提示框标出来，附录（第 16 章）还有一张完整的对照表。
+  </p>
+</div>
+
+<div id="chapter-toc"></div>
+
+<h2 id="project">要做的东西：一个待办应用</h2>
+
+<p>
+  这一章的例子很简单：一个<strong>待办事项（To-do）</strong>清单。需求如下：
+</p>
+<ul>
+  <li>可以新建待办事项，比如「买鸡蛋」，完成后勾上「已完成？」。</li>
+  <li>每个待办只有创建它的人能看到 —— 别人的待办你看不见。</li>
+  <li>一个待办可以指定若干位协作者，称为「工作组」（Work Team）。协作者从联系人里选，但只有被标记为「工作组成员」的联系人才能被选中。</li>
+</ul>
+
+<p>
+  做任何业务应用，都可以先按<strong>三层</strong>去想它：
+</p>
+
+<div class="cards">
+  <div class="card"><span class="ic">&#128451;</span><h4>数据层</h4><p>要存什么？用<strong>模型</strong>来描述。这里是「待办事项」模型，以及给联系人加一个标记字段。</p></div>
+  <div class="card"><span class="ic">&#9881;</span><h4>逻辑层</h4><p>有什么规则？增删改查由框架自动提供；更复杂的自动化以后用 Python 写。</p></div>
+  <div class="card"><span class="ic">&#128444;</span><h4>表现层</h4><p>用户怎么用？用<strong>菜单</strong>、<strong>动作</strong>和<strong>视图</strong>（列表、表单、搜索）来呈现。</p></div>
+</div>
+
+<p>落到具体操作上，就是下面这张图里的五步。整章就按这个顺序来：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 210" role="img" aria-label="本章搭建待办应用的五个步骤">
+  <rect class="bx-b" x="10"  y="40" width="132" height="70" rx="10"/>
+  <text class="ttl on-b" x="76" y="68" text-anchor="middle">① 加字段</text>
+  <text class="sm" x="76" y="90" text-anchor="middle">联系人 + 工作组标记</text>
+
+  <rect class="bx-b" x="162" y="40" width="132" height="70" rx="10"/>
+  <text class="ttl on-b" x="228" y="68" text-anchor="middle">② 建模型</text>
+  <text class="sm" x="228" y="90" text-anchor="middle">x_todo_item</text>
+
+  <rect class="bx-p" x="314" y="40" width="132" height="70" rx="10"/>
+  <text class="ttl on-p" x="380" y="68" text-anchor="middle">③ 菜单 + 动作</text>
+  <text class="sm" x="380" y="90" text-anchor="middle">让用户找得到</text>
+
+  <rect class="bx-r" x="466" y="40" width="132" height="70" rx="10"/>
+  <text class="ttl on-r" x="532" y="68" text-anchor="middle">④ 访问权限</text>
+  <text class="sm" x="532" y="90" text-anchor="middle">谁能看、能改什么</text>
+
+  <rect class="bx-g" x="618" y="40" width="132" height="70" rx="10"/>
+  <text class="ttl on-g" x="684" y="68" text-anchor="middle">⑤ 视图</text>
+  <text class="sm" x="684" y="90" text-anchor="middle">列表 / 表单 / 搜索</text>
+
+  <path class="ln" d="M144 75 H158" marker-end="url(#ar)"/>
+  <path class="ln" d="M296 75 H310" marker-end="url(#ar)"/>
+  <path class="ln" d="M448 75 H462" marker-end="url(#ar)"/>
+  <path class="ln" d="M600 75 H614" marker-end="url(#ar)"/>
+
+  <rect class="bx-d" x="10" y="140" width="284" height="40" rx="8"/>
+  <text class="lbl" x="152" y="165" text-anchor="middle">数据层</text>
+  <rect class="bx-d" x="314" y="140" width="436" height="40" rx="8"/>
+  <text class="lbl" x="532" y="165" text-anchor="middle">表现层（以及权限，它横跨所有层）</text>
+</svg>
+<figcaption>图 1-1　本章的五个步骤，以及它们分别属于哪一层</figcaption>
+</figure>
+
+<h2 id="concepts">先认识 Odoo</h2>
+
+<h3>Odoo 和它的社区</h3>
+
+<p>
+  Odoo 是比利时公司 Odoo S.A. 开发的开源业务软件，创始人是 Fabien Pinckaers。
+  它最早叫 TinyERP，后来改名 OpenERP，2014 年起叫 Odoo。它既是一整套现成的业务应用（CRM、销售、库存、会计、网站……），
+  也是一个<strong>开发业务应用的框架</strong>。本教程关心的是后者。
+</p>
+
+<p>Odoo 采用「开放核心」模式，发布两个版本：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 250" role="img" aria-label="Odoo 社区版、企业版与第三方模块的层次关系">
+  <rect class="bx-g" x="40" y="160" width="680" height="60" rx="10"/>
+  <text class="ttl on-g" x="380" y="186" text-anchor="middle">Odoo 社区版（Community Edition，CE）</text>
+  <text class="sm" x="380" y="206" text-anchor="middle">开源，LGPL-3 许可 · 框架 + 大部分应用 · github.com/odoo/odoo</text>
+
+  <rect class="bx-p" x="40" y="94" width="330" height="56" rx="10"/>
+  <text class="ttl on-p" x="205" y="118" text-anchor="middle">企业版（Enterprise，EE）</text>
+  <text class="sm" x="205" y="137" text-anchor="middle">叠在 CE 之上的一层付费模块，例如 Studio</text>
+
+  <rect class="bx-b" x="390" y="94" width="330" height="56" rx="10"/>
+  <text class="ttl on-b" x="555" y="118" text-anchor="middle">社区模块（OCA 等）</text>
+  <text class="sm" x="555" y="137" text-anchor="middle">github.com/OCA · apps.odoo.com 应用商店</text>
+
+  <rect class="bx-a" x="200" y="28" width="360" height="54" rx="10"/>
+  <text class="ttl on-a" x="380" y="52" text-anchor="middle">你写的模块</text>
+  <text class="sm" x="380" y="70" text-anchor="middle">可以依赖下面任何一层</text>
+
+  <path class="ln-d" d="M300 84 L230 92"/>
+  <path class="ln-d" d="M460 84 L530 92"/>
+  <path class="ln-d" d="M205 152 V158"/>
+  <path class="ln-d" d="M555 152 V158"/>
+</svg>
+<figcaption>图 1-2　CE 是地基；EE 和社区模块都是叠在上面的「附加模块」，你的模块也一样</figcaption>
+</figure>
+
+<ul>
+  <li><strong>社区版（CE）</strong>：完全开源，本教程用的就是它。</li>
+  <li><strong>企业版（EE）</strong>：在 CE 之上加一层专有模块，提供额外功能，需要订阅。</li>
+  <li><strong>OCA（Odoo 社区协会）</strong>：一个非营利组织，托管了几百个仓库的高质量社区模块，并制定了统一的编码规范。遇到通用需求，先去 <a href="https://github.com/OCA">github.com/OCA</a> 搜一下，很可能已经有人做好了。</li>
+</ul>
+
+<h3>版本节奏</h3>
+
+<p>
+  Odoo 每年秋天在 Odoo Experience 大会上发布一个大版本，官方同时支持最近的三个大版本。
+  两个大版本之间，Odoo Online（官方 SaaS）还会滚动发布 <code>x.1</code>、<code>x.2</code>… 这样的中间版本，
+  新特性通常先在中间版本里出现，再汇入下一个大版本。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 200" role="img" aria-label="Odoo 15 到 20 的发布时间线">
+  <path class="ln" d="M30 100 H730"/>
+  <circle cx="60"  cy="100" r="7" class="bx"/>
+  <circle cx="190" cy="100" r="7" class="bx"/>
+  <circle cx="320" cy="100" r="7" class="bx"/>
+  <circle cx="450" cy="100" r="7" class="bx-b"/>
+  <circle cx="580" cy="100" r="7" class="bx-b"/>
+  <circle cx="710" cy="100" r="9" class="bx-a"/>
+
+  <text class="ttl" x="60"  y="78" text-anchor="middle">15</text>
+  <text class="ttl" x="190" y="78" text-anchor="middle">16</text>
+  <text class="ttl" x="320" y="78" text-anchor="middle">17</text>
+  <text class="ttl on-b" x="450" y="78" text-anchor="middle">18</text>
+  <text class="ttl on-b" x="580" y="78" text-anchor="middle">19</text>
+  <text class="ttl on-a" x="710" y="74" text-anchor="middle">20</text>
+
+  <text class="sm" x="60"  y="126" text-anchor="middle">2021</text>
+  <text class="sm" x="190" y="126" text-anchor="middle">2022</text>
+  <text class="sm" x="320" y="126" text-anchor="middle">2023</text>
+  <text class="sm" x="450" y="126" text-anchor="middle">2024</text>
+  <text class="sm" x="580" y="126" text-anchor="middle">2025</text>
+  <text class="sm" x="710" y="126" text-anchor="middle">2026</text>
+
+  <text class="sm" x="60" y="40" text-anchor="middle">原书版本</text>
+  <path class="ln-d" d="M60 46 V66"/>
+
+  <rect class="bx-b" x="420" y="146" width="320" height="36" rx="8"/>
+  <text class="lbl on-b" x="580" y="169" text-anchor="middle">当前官方支持的三个大版本：18 · 19 · 20</text>
+</svg>
+<figcaption>图 1-3　从原书的 15 到本教程的 20，中间隔了五个大版本</figcaption>
+</figure>
+
+<div class="box warn">
+  <div class="t">&#9888; 大版本之间互不兼容</div>
+  <p>
+    Odoo 的<strong>数据库</strong>和<strong>模块</strong>都绑定大版本：Odoo 20 的服务器打不开 Odoo 19 建的数据库，
+    为 Odoo 15 写的模块也不能直接装进 Odoo 20。从网上下载社区模块时，一定要确认它对应的版本分支（比如 <code>20.0</code>）。
+    这也是为什么书里的代码需要改写之后才能在 Odoo 20 上运行。
+  </p>
+</div>
+
+<p>
+  同一个大版本内部（例如 20.0 的各次小更新）只修 bug，<strong>保证 API 稳定</strong>：模型结构和视图元素的标识不会变，
+  你的自定义模块不会因为升级小版本而坏掉。而 <code>master</code> 分支是下一个大版本的开发中代码，随时在变，不要拿来做项目。
+</p>
+
+<h3>Odoo 的架构</h3>
+
+<p>理解 Odoo 应用由哪几层组成，对后面学习每一种组件都有帮助：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 400" role="img" aria-label="Odoo 的三层架构：表现层、逻辑层、数据层">
+  <text class="sm" x="20" y="24">表现层</text>
+  <rect class="bx-g" x="20" y="32" width="220" height="74" rx="10"/>
+  <text class="ttl on-g" x="130" y="60" text-anchor="middle">Web 客户端（后台）</text>
+  <text class="sm" x="130" y="80" text-anchor="middle">菜单 · 列表 · 表单 · 看板</text>
+  <text class="sm" x="130" y="96" text-anchor="middle">OWL 前端框架</text>
+
+  <rect class="bx-g" x="270" y="32" width="220" height="74" rx="10"/>
+  <text class="ttl on-g" x="380" y="60" text-anchor="middle">网站 / 门户（前台）</text>
+  <text class="sm" x="380" y="80" text-anchor="middle">控制器 + QWeb 模板</text>
+  <text class="sm" x="380" y="96" text-anchor="middle">给外部访客和客户用</text>
+
+  <rect class="bx-g" x="520" y="32" width="220" height="74" rx="10"/>
+  <text class="ttl on-g" x="630" y="60" text-anchor="middle">外部程序</text>
+  <text class="sm" x="630" y="80" text-anchor="middle">手机 App、其他系统</text>
+  <text class="sm" x="630" y="96" text-anchor="middle">通过外部 API 调用</text>
+
+  <path class="ln-g" d="M130 108 V150" marker-end="url(#ar-g)"/>
+  <path class="ln-g" d="M380 108 V150" marker-end="url(#ar-g)"/>
+  <path class="ln-g" d="M630 108 V150" marker-end="url(#ar-g)"/>
+  <text class="sm" x="140" y="134">RPC</text>
+  <text class="sm" x="390" y="134">HTTP</text>
+  <text class="sm" x="640" y="134">JSON-2 API</text>
+
+  <text class="sm" x="20" y="146">逻辑层</text>
+  <rect class="bx-a" x="20" y="154" width="720" height="100" rx="12"/>
+  <text class="ttl on-a" x="380" y="180" text-anchor="middle">Odoo 服务器（Python）</text>
+  <rect class="bx" x="44"  y="194" width="200" height="44" rx="8"/>
+  <text class="lbl" x="144" y="221" text-anchor="middle">业务逻辑：方法、计算、校验</text>
+  <rect class="bx" x="280" y="194" width="200" height="44" rx="8"/>
+  <text class="lbl" x="380" y="221" text-anchor="middle">ORM：模型 ⇄ 数据表</text>
+  <rect class="bx" x="516" y="194" width="200" height="44" rx="8"/>
+  <text class="lbl" x="616" y="221" text-anchor="middle">访问控制：ir.access</text>
+
+  <path class="ln-b" d="M380 256 V298" marker-end="url(#ar-b)"/>
+  <text class="sm" x="390" y="282">SQL</text>
+
+  <text class="sm" x="20" y="294">数据层</text>
+  <rect class="bx-b" x="150" y="302" width="300" height="74" rx="10"/>
+  <text class="ttl on-b" x="300" y="332" text-anchor="middle">PostgreSQL 数据库</text>
+  <text class="sm" x="300" y="354" text-anchor="middle">所有结构化数据</text>
+  <rect class="bx-b" x="480" y="302" width="200" height="74" rx="10"/>
+  <text class="ttl on-b" x="580" y="332" text-anchor="middle">filestore 目录</text>
+  <text class="sm" x="580" y="354" text-anchor="middle">附件、图片等二进制文件</text>
+  <path class="ln-d" d="M560 256 L580 298" marker-end="url(#ar)"/>
+</svg>
+<figcaption>图 1-4　Odoo 的三层架构。所有客户端都通过同一个服务器、同一套 ORM 访问数据</figcaption>
+</figure>
+
+<dl class="terms">
+  <dt>数据层</dt>
+  <dd>Odoo 只支持 <strong>PostgreSQL</strong> 一种数据库，这是有意的设计。附件、图片等二进制文件默认存在磁盘上一个叫 <strong>filestore</strong> 的目录里。
+      所以完整备份一个 Odoo 实例 = 数据库转储 + filestore 的拷贝，缺一不可。</dd>
+  <dt>ORM</dt>
+  <dd>对象关系映射（Object-Relational Mapping）。你几乎不用写 SQL：在 Python 里定义一个<strong>模型类</strong>，ORM 就帮你建表；
+      调用 <code>create()</code>、<code>search()</code>、<code>write()</code>、<code>unlink()</code> 就完成增、查、改、删。
+      ORM 同时负责权限检查和数据一致性，所以原则上只应该通过它访问数据库。</dd>
+  <dt>逻辑层</dt>
+  <dd>在 ORM 之上扩展的业务规则，比如在 <code>create()</code> 里自动设置默认值、写一个校验方法、自动计算某个字段。</dd>
+  <dt>表现层</dt>
+  <dd>Odoo 自带一个功能齐全的 Web 客户端（就是你登录后看到的后台），它通过 RPC 调用服务器。另有一个<strong>网站框架</strong>，
+      用控制器和 <strong>QWeb</strong> 模板生成面向公众的网页。服务器 API 是公开的，官方 Web 客户端用的 API，别的程序也能用。</dd>
+</dl>
+
+<h2 id="setup">准备一个 Odoo 来练手</h2>
+
+<p>这一章只需要一个能访问 Odoo 的浏览器。有三种选择，挑一个最省事的：</p>
+
+<div class="cards">
+  <div class="card"><span class="ic">&#9729;</span><h4>官方在线试用</h4><p>打开 <a href="https://www.odoo.com/trial">odoo.com</a>，点「免费试用」，随便选一个应用（比如 CRM）。零安装，适合本章。</p></div>
+  <div class="card"><span class="ic">&#128230;</span><h4>官方安装包</h4><p><a href="https://download.odoo.com">download.odoo.com</a> 提供 Windows 安装器、Debian/Ubuntu 的 deb 包和 RPM 包。</p></div>
+  <div class="card"><span class="ic">&#128051;</span><h4>Docker</h4><p>如果你本来就熟悉 Docker，这是最干净的本地方案。不熟就先别折腾。</p></div>
+</div>
+
+<div class="box note">
+  <div class="t">&#9432; 在线试用版用的是企业版</div>
+  <p>
+    官方在线试用数据库运行的是最新的 SaaS 版本（基于企业版），菜单里会多出一些社区版没有的东西（比如 Studio）。
+    这不影响本章的练习。从第 2 章开始，我们会在本机从源码装一个社区版，用它贯穿全书。
+  </p>
+</div>
+
+<h3>用 Docker 跑一个 Odoo 20</h3>
+
+<p>需要两个容器：一个 PostgreSQL，一个 Odoo。Odoo 20 要求 <strong>PostgreSQL 16 或更高</strong>：</p>
+
+<div class="code" data-lang="bash">
+<pre>
+# 1. 启动数据库容器
+docker run -d --name db \
+  -e POSTGRES_USER=odoo -e POSTGRES_PASSWORD=odoo -e POSTGRES_DB=postgres \
+  postgres:17
+
+# 2. 启动 Odoo 容器，连到上面的数据库，把 8069 端口映射出来
+docker run -t -p 8069:8069 --name odoo --link db:db odoo:20.0
+</pre>
+</div>
+
+<p>
+  看到服务器日志滚动之后，浏览器打开 <code>http://localhost:8069</code>，按提示创建一个数据库即可。
+  镜像标签以 <a href="https://hub.docker.com/_/odoo">Docker Hub 上的 odoo 官方镜像</a>为准。几个常用命令：
+</p>
+
+<div class="tw"><table>
+  <tr><th>命令</th><th>作用</th></tr>
+  <tr><td><code>docker stop odoo</code></td><td>停止容器</td></tr>
+  <tr><td><code>docker start -a odoo</code></td><td>启动容器，并把日志输出到当前终端</td></tr>
+  <tr><td><code>docker ps</code></td><td>列出正在运行的容器</td></tr>
+  <tr><td><code>docker rm -f odoo db</code></td><td>删掉两个容器，从头再来</td></tr>
+</table></div>
+
+<div class="box tip">
+  <div class="t">&#128161; 端口被占用？</div>
+  <p>如果 8069 已经被别的 Odoo 占了（比如 Windows 安装器装的服务），把 <code>-p 8069:8069</code> 改成 <code>-p 8070:8069</code>，然后访问 8070 端口。</p>
+</div>
+
+<h2 id="devmode">打开开发者模式</h2>
+
+<p>
+  <strong>开发者模式</strong>（也叫调试模式，debug mode）会在界面上暴露 Odoo 的内部配置：
+  每个字段的技术名、每个视图的 XML、菜单背后的动作……并允许你直接修改。它是本章的主要工具，
+  也是以后你写代码时<strong>查看「这个界面是怎么做出来的」</strong>最快的办法。
+</p>
+
+<p>打开方式有两种：</p>
+
+<ol class="steps">
+  <li>进入 <strong>设置（Settings）</strong>应用，拉到页面底部的 <strong>开发者工具（Developer Tools）</strong>区域，点 <strong>Activate the developer mode</strong>。</li>
+  <li>或者直接改地址栏：在网址后加上 <code>?debug=1</code>。例如 <code>http://localhost:8069/odoo?debug=1</code>。</li>
+</ol>
+
+<div class="box ver">
+  <div class="t">&#8682; 网址变了</div>
+  <p>
+    Odoo 15 的后台地址是 <code>/web#...</code>，书里让你改成 <code>/web?debug=1#...</code>。
+    从 Odoo 18 起后台改成了更易读的 <code>/odoo/...</code> 形式（如 <code>/odoo/contacts/7</code>），
+    所以现在写成 <code>/odoo?debug=1</code>。旧的 <code>/web</code> 地址仍然会自动跳转过去。
+  </p>
+</div>
+
+<p>打开之后界面上会多出这些东西：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 290" role="img" aria-label="开启开发者模式后界面上的变化">
+  <rect class="bx" x="20" y="20" width="720" height="250" rx="10"/>
+  <rect class="bx-p" x="20" y="20" width="720" height="44" rx="10"/>
+  <text class="ttl on-p" x="40" y="48">&#9638;  联系人</text>
+  <text class="lbl" x="150" y="48">联系人    配置</text>
+
+  <rect class="bx-a" x="560" y="30" width="34" height="26" rx="6"/>
+  <text class="on-a" x="577" y="48" text-anchor="middle">&#128027;</text>
+  <text class="lbl" x="610" y="48">&#128172;  &#9200;  &#128100;</text>
+
+  <path class="ln-a" d="M577 58 V96" marker-end="url(#ar-a)"/>
+  <rect class="bx-a" x="440" y="100" width="280" height="150" rx="8"/>
+  <text class="ttl on-a" x="456" y="124">调试菜单（随当前页面变化）</text>
+  <text class="sm" x="456" y="146">Action：编辑当前窗口动作</text>
+  <text class="sm" x="456" y="164">Fields：当前模型的全部字段</text>
+  <text class="sm" x="456" y="182">Model：当前模型的定义</text>
+  <text class="sm" x="456" y="200">Access Rights：当前模型的权限</text>
+  <text class="sm" x="456" y="218">View: Form / List …：编辑当前视图</text>
+  <text class="sm" x="456" y="236">Become Superuser · Leave Debug Mode</text>
+
+  <rect class="bx-d" x="40" y="90" width="370" height="160" rx="8"/>
+  <text class="lbl" x="56" y="114">表单里，鼠标悬停在字段标签上：</text>
+  <rect class="bx-b" x="56" y="128" width="338" height="104" rx="6"/>
+  <text class="sm mono on-b" x="70" y="150">Field: category_id</text>
+  <text class="sm mono" x="70" y="170">Type: many2many</text>
+  <text class="sm mono" x="70" y="190">Relation: res.partner.category</text>
+  <text class="sm mono" x="70" y="210">Widget: many2many_tags</text>
+</svg>
+<figcaption>图 1-5　开发者模式的两件「利器」：右上角的调试菜单（小虫子图标），以及字段上的技术提示</figcaption>
+</figure>
+
+<ul>
+  <li>顶部导航栏右侧出现一个<strong>小虫子图标</strong>，就是调试菜单。它的内容随当前页面变化。</li>
+  <li><strong>设置</strong>应用顶部出现<strong>技术（Technical）</strong>菜单 —— 所有底层配置的入口。</li>
+  <li>鼠标悬停在任意字段标签上，会弹出这个字段的技术信息：字段名、类型、关联模型、所用的组件（widget）等。</li>
+</ul>
+
+<p>
+  还有一个变体叫 <strong>Activate the developer mode (with assets)</strong>（网址里是 <code>?debug=assets</code>）。
+  平时浏览器加载的 JavaScript 和 CSS 是压缩合并过的，这个模式改为加载未压缩的单个文件，方便调试前端代码，代价是页面变慢。
+  只有调试 Web 客户端本身时才需要它。
+</p>
+
+<div class="box warn">
+  <div class="t">&#9888; 能力越大，责任越大</div>
+  <p>
+    开发者模式下的修改是直接作用在数据库上的。请在测试库里练习，不要在生产系统上随手改。
+    另外，这种「在界面上改」的方式很难纳入版本控制、自动测试和「测试环境 → 生产环境」的发布流程 ——
+    这正是我们后面要学用代码写模块的原因。本章把它当作理解 Odoo 内部结构的窗口和快速做原型的工具。
+  </p>
+</div>
+
+<div class="box note">
+  <div class="t">&#9432; 关于 Odoo Studio</div>
+  <p>
+    企业版和在线版有一个叫 <strong>Studio</strong> 的可视化应用构建器，能用拖拽完成本章的大部分操作。
+    社区版没有它，所以我们用开发者模式和「技术」菜单 —— 它们在所有版本里都有，只是更「技术」一些。
+  </p>
+</div>
+
+<h2 id="field">给已有模型加一个字段</h2>
+
+<p>
+  第一个需求：在联系人上加一个「是工作组成员？」的勾选框。联系人是 Odoo 核心自带的模型（技术名 <code>res.partner</code>），
+  如果主菜单里还没有「联系人」应用，先去 <strong>应用（Apps）</strong>里搜索 Contacts 并安装。
+</p>
+
+<h3>第一步：在模型上加字段</h3>
+
+<ol class="steps">
+  <li>打开 <strong>联系人</strong>应用，点调试菜单（小虫子）→ <strong>Fields</strong>。你会看到联系人模型现有的全部字段。</li>
+  <li>点 <strong>新建（New）</strong>，填写：
+    <ul>
+      <li>Field Name（字段名）：<code>x_is_work_team</code></li>
+      <li>Field Label（标签）：<code>Is Work Team?</code></li>
+      <li>Field Type（类型）：<code>boolean</code>（布尔，即勾选框）</li>
+    </ul>
+  </li>
+  <li>保存。</li>
+</ol>
+
+<div class="box key">
+  <div class="t">&#9733; 为什么一定要 <code>x_</code> 开头</div>
+  <p>
+    在界面上创建的模型和字段，技术名<strong>必须</strong>以 <code>x_</code> 开头。这样它们就和模块代码定义的东西永远不会重名，
+    Odoo 也能一眼认出哪些是「手工定制」。用代码写的模块没有这个限制。
+  </p>
+</div>
+
+<h3>第二步：把字段放到表单上</h3>
+
+<p>
+  字段已经存在于模型（也就是数据库表）里了，但界面上还看不到它 —— <strong>模型和视图是分开的</strong>。
+  我们要把它放进联系人的表单视图，比如放在「标签（Tags）」字段后面。
+</p>
+
+<ol class="steps">
+  <li>打开任意一个联系人的表单，把鼠标悬停在「标签」上，看到它的技术名是 <code>category_id</code>。这就是我们的「插入点」。</li>
+  <li>调试菜单 → <strong>View: Form</strong>，打开当前表单视图的定义。</li>
+  <li>不要直接改 <strong>Architecture</strong> 里的 XML！切到 <strong>Inherited Views（继承视图）</strong>标签页，添加一行，新建一个<strong>扩展视图</strong>：
+    <ul>
+      <li>View Name：<code>Contacts Form extensions for To-do App</code></li>
+      <li>Architecture：填入下面这段 XML</li>
+    </ul>
+  </li>
+  <li>保存，刷新页面，「Is Work Team?」就出现在标签下面了。</li>
+</ol>
+
+<div class="code" data-lang="xml" data-file="扩展视图的 Architecture">
+<pre>
+&lt;field name="category_id" position="after"&gt;
+    &lt;field name="x_is_work_team"/&gt;
+&lt;/field&gt;
+</pre>
+</div>
+
+<p>这段 XML 的意思是：「找到名为 <code>category_id</code> 的字段，在它<strong>之后</strong>插入 <code>x_is_work_team</code> 字段。」</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 270" role="img" aria-label="基础视图与扩展视图合并成最终视图">
+  <rect class="bx" x="20" y="30" width="210" height="200" rx="10"/>
+  <text class="ttl" x="125" y="54" text-anchor="middle">基础视图</text>
+  <text class="sm" x="125" y="72" text-anchor="middle">base.view_partner_form</text>
+  <rect class="bx-d" x="40" y="88"  width="170" height="26" rx="5"/><text class="sm mono" x="52" y="105">name</text>
+  <rect class="bx-d" x="40" y="120" width="170" height="26" rx="5"/><text class="sm mono" x="52" y="137">category_id</text>
+  <rect class="bx-d" x="40" y="152" width="170" height="26" rx="5"/><text class="sm mono" x="52" y="169">phone</text>
+  <rect class="bx-d" x="40" y="184" width="170" height="26" rx="5"/><text class="sm mono" x="52" y="201">email</text>
+
+  <rect class="bx-a" x="270" y="70" width="210" height="120" rx="10"/>
+  <text class="ttl on-a" x="375" y="94" text-anchor="middle">扩展视图</text>
+  <text class="sm" x="375" y="112" text-anchor="middle">定位：category_id</text>
+  <text class="sm" x="375" y="130" text-anchor="middle">位置：after（之后）</text>
+  <rect class="bx-a" x="290" y="144" width="170" height="26" rx="5"/><text class="sm mono on-a" x="302" y="161">x_is_work_team</text>
+
+  <path class="ln" d="M232 130 H266" marker-end="url(#ar)"/>
+  <path class="ln-a" d="M482 130 H516" marker-end="url(#ar-a)"/>
+  <text class="sm" x="249" y="122" text-anchor="middle">+</text>
+
+  <rect class="bx-g" x="520" y="14" width="220" height="232" rx="10"/>
+  <text class="ttl on-g" x="630" y="38" text-anchor="middle">用户看到的最终视图</text>
+  <rect class="bx-d" x="540" y="56"  width="180" height="26" rx="5"/><text class="sm mono" x="552" y="73">name</text>
+  <rect class="bx-d" x="540" y="88"  width="180" height="26" rx="5"/><text class="sm mono" x="552" y="105">category_id</text>
+  <rect class="bx-a" x="540" y="120" width="180" height="26" rx="5"/><text class="sm mono on-a" x="552" y="137">x_is_work_team</text>
+  <rect class="bx-d" x="540" y="152" width="180" height="26" rx="5"/><text class="sm mono" x="552" y="169">phone</text>
+  <rect class="bx-d" x="540" y="184" width="180" height="26" rx="5"/><text class="sm mono" x="552" y="201">email</text>
+</svg>
+<figcaption>图 1-6　扩展视图不复制原视图，只描述「在哪里、加什么」。Odoo 在显示时把它们合并起来</figcaption>
+</figure>
+
+<div class="box key">
+  <div class="t">&#9733; 为什么不直接改原视图</div>
+  <p>
+    原视图属于某个模块（这里是 <code>base</code>）。模块一升级，它的视图就会被模块文件里的版本覆盖，你直接改的内容会全部丢失。
+    扩展视图是独立的记录，升级不会碰它。<strong>「不改原件，叠加修改」</strong>是 Odoo 定制的核心思想，第 4 章会用代码系统地讲。
+  </p>
+</div>
+
+<h3>视图类型</h3>
+
+<p>刚才改的是<strong>表单视图</strong>。Odoo 的界面由多种视图组成，最常见的几种：</p>
+
+<div class="tw"><table>
+  <tr><th>视图</th><th>XML 根元素</th><th>用途</th></tr>
+  <tr><td>列表（List）</td><td><code>&lt;list&gt;</code></td><td>以表格形式浏览多条记录</td></tr>
+  <tr><td>表单（Form）</td><td><code>&lt;form&gt;</code></td><td>查看、编辑单条记录的全部细节</td></tr>
+  <tr><td>看板（Kanban）</td><td><code>&lt;kanban&gt;</code></td><td>以卡片展示记录，可按列分组（比如 CRM 的销售管道）。联系人应用默认就是看板</td></tr>
+  <tr><td>搜索（Search）</td><td><code>&lt;search&gt;</code></td><td>不直接显示数据，而是控制搜索框、筛选（Filters）和分组（Group By）的选项</td></tr>
+</table></div>
+
+<p>其他视图（日历、透视表、图表、活动……）在第 10 章介绍。</p>
+
+<div class="box ver">
+  <div class="t">&#8682; tree 改名为 list</div>
+  <p>
+    书里的列表视图根元素是 <code>&lt;tree&gt;</code>，视图类型也叫 Tree。从 Odoo 18 开始统一改名为 <code>&lt;list&gt;</code>，
+    动作里的 <code>view_mode</code> 也从 <code>tree,form</code> 变成了 <code>list,form</code>。本教程一律使用新名字。
+  </p>
+</div>
+
+<p>
+  所有视图定义都可以在 <strong>设置 → 技术 → 用户界面 → 视图</strong>里看到。更方便的办法是去
+  <strong>设置 → 技术 → 数据库结构 → 模型</strong>，找到 <code>res.partner</code>，打开它的「视图」标签页，这里只列这个模型的视图。
+</p>
+
+<p>
+  一个模型的同一种视图可以有<strong>多个基础视图</strong>（「继承自」字段为空的就是基础视图）。比如联系人就有
+  <code>base.view_partner_form</code> 和 <code>base.view_partner_simple_form</code> 两个表单。没有特别指定时，
+  Odoo 使用<strong>序号（Sequence）最小</strong>的那个；窗口动作也可以指定使用哪一个。
+</p>
+
+<h2 id="model">创建一个新模型</h2>
+
+<p>
+  模型是应用的骨架：它定义了数据结构，ORM 会为它在数据库里建一张表。我们的「待办事项」模型需要三个字段：描述、是否完成、工作组。
+</p>
+
+<p>
+  模型名用<strong>单数</strong>（「待办事项」而不是「待办事项们」）。技术名只能用字母和下划线，又因为是在界面上建的，必须加 <code>x_</code> 前缀，
+  所以叫 <code>x_todo_item</code>。
+</p>
+
+<ol class="steps">
+  <li>打开 <strong>设置 → 技术 → 数据库结构 → 模型</strong>，点 <strong>新建</strong>。</li>
+  <li>Model Description（模型描述）填 <code>To-do Item</code>，Model（技术名）填 <code>x_todo_item</code>。</li>
+  <li>字段列表里已经有一个 <code>x_name</code> 字段 —— 它是记录的「标题」，在列表和别处引用这条记录时显示。正好用作待办的描述，把它的标签改成 <code>Description</code> 之类即可。</li>
+  <li>添加一行，新建字段：Field Name <code>x_is_done</code>，Label <code>Is Done?</code>，Type <code>boolean</code>。</li>
+  <li>再添加一行，新建「工作组」字段：
+    <ul>
+      <li>Field Name：<code>x_work_team_ids</code></li>
+      <li>Field Label：<code>Work Team</code></li>
+      <li>Field Type：<code>many2many</code></li>
+      <li>Related Model（关联模型）：<code>res.partner</code></li>
+      <li>Domain（域）：<code>[('x_is_work_team', '=', True)]</code></li>
+    </ul>
+  </li>
+  <li>保存模型。</li>
+</ol>
+
+<h3>多对多关系</h3>
+
+<p>
+  「工作组」比前两个字段复杂：它<strong>指向另一个模型</strong>的记录，而且可以选多个。
+  一个待办可以有多位协作者，一位联系人也可以参与多个待办 —— 这就是<strong>多对多（many2many）</strong>关系。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 250" role="img" aria-label="待办事项与联系人之间的多对多关系，通过中间表实现">
+  <rect class="bx-a" x="20" y="40" width="200" height="170" rx="10"/>
+  <text class="ttl on-a" x="120" y="64" text-anchor="middle">x_todo_item</text>
+  <text class="sm mono" x="36" y="92">id</text>
+  <text class="sm mono" x="36" y="114">x_name    "买鸡蛋"</text>
+  <text class="sm mono" x="36" y="136">x_is_done  ☐</text>
+  <text class="sm mono on-a" x="36" y="158">x_work_team_ids</text>
+  <text class="sm" x="36" y="180">（不是真实列，</text>
+  <text class="sm" x="36" y="196">　由中间表表示）</text>
+
+  <rect class="bx-d" x="280" y="70" width="200" height="110" rx="10"/>
+  <text class="ttl" x="380" y="94" text-anchor="middle">中间表</text>
+  <text class="sm" x="380" y="112" text-anchor="middle">（ORM 自动创建）</text>
+  <text class="sm mono" x="300" y="138">todo_id | partner_id</text>
+  <text class="sm mono" x="300" y="158">   1    |    7</text>
+  <text class="sm mono" x="300" y="174">   1    |    9</text>
+
+  <rect class="bx-b" x="540" y="40" width="200" height="170" rx="10"/>
+  <text class="ttl on-b" x="640" y="64" text-anchor="middle">res.partner</text>
+  <text class="sm mono" x="556" y="92">id</text>
+  <text class="sm mono" x="556" y="114">name</text>
+  <text class="sm mono on-b" x="556" y="136">x_is_work_team  ☑</text>
+  <text class="sm" x="556" y="166">只有勾上它的联系人</text>
+  <text class="sm" x="556" y="184">才能被选进工作组</text>
+
+  <path class="ln-a" d="M222 125 H276" marker-end="url(#ar-a)"/>
+  <path class="ln-b" d="M538 125 H484" marker-end="url(#ar-b)"/>
+  <text class="sm" x="380" y="232" text-anchor="middle">一个待办 ↔ 多个联系人；一个联系人 ↔ 多个待办</text>
+</svg>
+<figcaption>图 1-7　多对多字段在数据库里由一张「中间表」实现，Relation Table / Column 1 / Column 2 这几个属性默认值就够用</figcaption>
+</figure>
+
+<h3>域（Domain）：Odoo 的筛选条件语法</h3>
+
+<p>
+  <code>Domain</code> 属性是可选的，用来限制「可以选哪些记录」。这里我们只允许选勾了「工作组成员」的联系人。
+  域表达式是 Odoo 特有的语法：<strong>一个由三元组组成的列表</strong>，每个三元组是一个条件。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 170" role="img" aria-label="域表达式三元组的结构：字段名、运算符、值">
+  <text class="mono" x="380" y="54" text-anchor="middle" style="font-size:20px">[ ( 'x_is_work_team' ,  '=' ,  True ) ]</text>
+  <path class="ln-a" d="M268 66 V96"/>
+  <path class="ln-p" d="M418 66 V96"/>
+  <path class="ln-g" d="M500 66 V96"/>
+  <rect class="bx-a" x="188" y="100" width="160" height="50" rx="8"/>
+  <text class="ttl on-a" x="268" y="122" text-anchor="middle">字段名</text>
+  <text class="sm" x="268" y="140" text-anchor="middle">要比较哪个字段</text>
+  <rect class="bx-p" x="358" y="100" width="120" height="50" rx="8"/>
+  <text class="ttl on-p" x="418" y="122" text-anchor="middle">运算符</text>
+  <text class="sm" x="418" y="140" text-anchor="middle">= != &gt; in like …</text>
+  <rect class="bx-g" x="488" y="100" width="110" height="50" rx="8"/>
+  <text class="ttl on-g" x="543" y="122" text-anchor="middle">值</text>
+  <text class="sm" x="543" y="140" text-anchor="middle">和什么比</text>
+  <text class="sm" x="40" y="30">外层方括号 = 条件列表；多个条件默认是「并且」</text>
+</svg>
+<figcaption>图 1-8　域表达式的解剖。第 7 章会完整讲解它的全部语法</figcaption>
+</figure>
+
+<div class="box tip">
+  <div class="t">&#128161; 不会写域？让 Odoo 帮你生成</div>
+  <p>
+    在列表视图的搜索框里用「筛选 → 添加自定义筛选」，Odoo 会弹出一个可视化的条件编辑器，开发者模式下还会同时显示对应的域代码。
+    照着它抄，是学习域语法最快的方式。
+  </p>
+</div>
+
+<p>
+  保存模型后，打开它会发现字段列表里多了几个你没建的字段：<code>id</code>、<code>create_uid</code>（创建人）、<code>create_date</code>（创建时间）、
+  <code>write_uid</code>（最后修改人）、<code>write_date</code>（最后修改时间）。ORM 给<strong>每个</strong>模型都自动加上它们，用于审计追踪。
+  待会儿做「每人只看自己的待办」时就要用到 <code>create_uid</code>。
+</p>
+
+<h2 id="menu">菜单和窗口动作</h2>
+
+<p>
+  模型有了，但用户还没有入口。我们要创建一个顶级菜单「To-do」，点击后直接打开待办列表。
+</p>
+
+<ol class="steps">
+  <li>打开 <strong>设置 → 技术 → 用户界面 → 菜单项</strong>，点新建：Menu 填 <code>To-do</code>，Parent Menu（上级菜单）留空。</li>
+  <li>Action（动作）一栏，类型选 <code>ir.actions.act_window</code>，在旁边的输入框里输入 <code>To-do Items</code>，下拉中选「创建并编辑…」。</li>
+  <li>在弹出的动作表单里，Action Name 填 <code>To-do Items</code>，Model（目标模型）填 <code>x_todo_item</code>。保存动作，再保存菜单。</li>
+</ol>
+
+<p>刷新浏览器……菜单并没有出现。为什么？因为<strong>当前用户还没有被授权访问这个模型</strong>。权限在下一节解决，我们先把菜单和动作的关系搞清楚。</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 240" role="img" aria-label="菜单项指向窗口动作，窗口动作再打开模型的视图">
+  <rect class="bx-p" x="20" y="80" width="160" height="70" rx="10"/>
+  <text class="ttl on-p" x="100" y="108" text-anchor="middle">菜单项</text>
+  <text class="sm mono" x="100" y="128" text-anchor="middle">ir.ui.menu</text>
+
+  <rect class="bx-a" x="250" y="60" width="220" height="110" rx="10"/>
+  <text class="ttl on-a" x="360" y="86" text-anchor="middle">窗口动作</text>
+  <text class="sm mono" x="360" y="104" text-anchor="middle">ir.actions.act_window</text>
+  <text class="sm" x="268" y="128">res_model：打开哪个模型</text>
+  <text class="sm" x="268" y="146">view_mode：list,form</text>
+  <text class="sm" x="268" y="162">domain / context：可选</text>
+
+  <rect class="bx-g" x="540" y="30" width="200" height="44" rx="8"/>
+  <text class="lbl on-g" x="640" y="57" text-anchor="middle">列表视图</text>
+  <rect class="bx-g" x="540" y="94" width="200" height="44" rx="8"/>
+  <text class="lbl on-g" x="640" y="121" text-anchor="middle">表单视图</text>
+  <rect class="bx-g" x="540" y="158" width="200" height="44" rx="8"/>
+  <text class="lbl on-g" x="640" y="185" text-anchor="middle">搜索视图（控制搜索框）</text>
+
+  <path class="ln-p" d="M182 115 H246" marker-end="url(#ar-p)"/>
+  <text class="sm" x="214" y="106" text-anchor="middle">点击</text>
+  <path class="ln-a" d="M472 100 L536 56" marker-end="url(#ar-a)"/>
+  <path class="ln-a" d="M472 115 H536" marker-end="url(#ar-a)"/>
+  <path class="ln-a" d="M472 130 L536 178" marker-end="url(#ar-a)"/>
+  <text class="sm" x="20" y="226">只有「叶子」菜单（没有子菜单的那一级）才挂动作；动作的名字就是打开后页面的标题</text>
+</svg>
+<figcaption>图 1-9　菜单 → 动作 → 视图：用户点菜单，菜单触发动作，动作决定打开哪个模型、用哪些视图</figcaption>
+</figure>
+
+<p>动作有好几种类型，最重要的三种：</p>
+<ul>
+  <li><strong>窗口动作</strong>（<code>ir.actions.act_window</code>）：打开视图展示数据，最常用。</li>
+  <li><strong>报表动作</strong>（<code>ir.actions.report</code>）：生成报表，第 12 章。</li>
+  <li><strong>服务器动作</strong>（<code>ir.actions.server</code>）：在服务器上执行一段自动化逻辑。</li>
+</ul>
+
+<div class="box tip">
+  <div class="t">&#128161; 快捷方式</div>
+  <p>在任何页面打开调试菜单 → <strong>Action</strong>，就能直接编辑「打开当前页面的那个窗口动作」，不用去技术菜单里找。</p>
+</div>
+
+<h2 id="security">访问权限</h2>
+
+<p>
+  Odoo 内置了严格的访问控制：用户只能用被授权的功能。新建的模型默认<strong>谁都不能访问</strong> —— 包括管理员。
+  （Odoo 12 之前管理员可以绕过权限，现在不行了。）
+</p>
+
+<p>访问控制建立在两个概念上：</p>
+
+<dl class="terms">
+  <dt>用户组（Group）</dt>
+  <dd>一组用户的集合。权限是授予「组」的，用户属于哪些组，就拥有哪些权限。组可以<strong>隐含（imply）</strong>其他组：
+      成为 A 组成员，就自动成为它所隐含的 B 组成员，权限叠加。一般每个应用至少提供「用户」和「管理员」两个组。</dd>
+  <dt>访问规则（Access）</dt>
+  <dd>Odoo 20 用一个统一的模型 <code>ir.access</code> 描述「谁、对哪个模型、能做哪些操作（增/查/改/删）、限于哪些记录（域）」。</dd>
+</dl>
+
+<div class="box ver">
+  <div class="t">&#8682; 权限系统在 Odoo 20 里重做了</div>
+  <p>
+    书里（以及 Odoo 19 以前）有两套东西：<strong>访问控制列表</strong>（<code>ir.model.access</code>，管模型级别的增删改查）和
+    <strong>记录规则</strong>（<code>ir.rule</code>，用域限制能访问哪些记录），要分开配置。
+    Odoo 20 把两者合并成了一个模型 <code>ir.access</code>：一条访问规则同时包含「操作」和「域」两部分。
+    界面上原来的 Record Rules 菜单也不见了，统一在 <strong>设置 → 技术 → 安全 → Access Rights</strong>。
+    另外，用户组表单里原来的「应用」字段，现在叫<strong>作用域（Scope）</strong>，对应 <code>res.groups.privilege</code>。
+  </p>
+</div>
+
+<h3>第一步：创建用户组</h3>
+
+<p>
+  进入 <strong>设置 → 用户与公司 → 组</strong>（这个菜单需要开发者模式），新建：
+</p>
+<ul>
+  <li>Name：<code>To-Do User</code></li>
+  <li>在 <strong>Dependencies（依赖）</strong>标签页加一行，选择 <code>Role / User</code>（即内部用户组，技术标识 <code>base.group_user</code>）</li>
+</ul>
+
+<p>
+  这样，「To-Do User」组就<strong>隐含</strong>了内部用户组：加入 To-Do User 的人自动拥有内部用户的全部权限（比如读取联系人），
+  所以我们不需要再单独给联系人模型授权。应用的用户组通常都会这样继承内部用户组。
+</p>
+
+<h3>第二步：创建访问规则</h3>
+
+<p>需求是「每个人只能看到并操作自己创建的待办」。在 Odoo 20 里，<strong>一条</strong>访问规则就能表达：</p>
+
+<ol class="steps">
+  <li>打开 <strong>设置 → 技术 → 安全 → Access Rights</strong>，点新建。</li>
+  <li>名称：<code>To-do User: own items</code>。</li>
+  <li>Model：<code>To-do Item</code>；Group：<code>To-Do User</code>。</li>
+  <li>Operations 标签页：勾上 Create、Read、Update、Delete 四项。</li>
+  <li>Domain：<code>[('create_uid', '=', user.id)]</code>，保存。</li>
+</ol>
+
+<p>
+  域里的 <code>user</code> 是一个特殊变量，代表<strong>当前登录的用户</strong>记录，可以用点号访问它的属性，比如 <code>user.id</code>。
+  <code>create_uid</code> 是 ORM 自动维护的「创建人」字段。所以这个域的意思就是「创建人是我」。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 330" role="img" aria-label="Odoo 20 访问控制：用户属于组，组通过 ir.access 获得带域的操作权限">
+  <rect class="bx" x="20" y="120" width="130" height="60" rx="10"/>
+  <text class="ttl" x="85" y="146" text-anchor="middle">用户</text>
+  <text class="sm" x="85" y="166" text-anchor="middle">Mitchell Admin</text>
+
+  <rect class="bx-p" x="200" y="60" width="170" height="60" rx="10"/>
+  <text class="ttl on-p" x="285" y="86" text-anchor="middle">To-Do User</text>
+  <text class="sm" x="285" y="106" text-anchor="middle">我们新建的组</text>
+
+  <rect class="bx-p" x="200" y="190" width="170" height="60" rx="10"/>
+  <text class="ttl on-p" x="285" y="216" text-anchor="middle">Role / User</text>
+  <text class="sm mono" x="285" y="236" text-anchor="middle">base.group_user</text>
+
+  <path class="ln" d="M152 140 L196 96" marker-end="url(#ar)"/>
+  <text class="sm" x="150" y="108">属于</text>
+  <path class="ln-p" d="M285 122 V186" marker-end="url(#ar-p)"/>
+  <text class="sm on-p" x="294" y="160">隐含（implies）</text>
+
+  <rect class="bx-a" x="430" y="30" width="310" height="120" rx="10"/>
+  <text class="ttl on-a" x="446" y="54">ir.access：To-do User: own items</text>
+  <text class="sm" x="446" y="78">model：x_todo_item</text>
+  <text class="sm" x="446" y="98">group：To-Do User</text>
+  <text class="sm" x="446" y="118">operation：crud（增 查 改 删）</text>
+  <text class="sm mono" x="446" y="138">domain：[('create_uid','=',user.id)]</text>
+
+  <rect class="bx-b" x="430" y="180" width="310" height="80" rx="10"/>
+  <text class="ttl on-b" x="446" y="204">ir.access（base 模块自带）</text>
+  <text class="sm" x="446" y="226">model：res.partner · group：Role / User</text>
+  <text class="sm" x="446" y="246">operation：r（只读），等等</text>
+
+  <path class="ln-a" d="M372 90 H426" marker-end="url(#ar-a)"/>
+  <path class="ln-b" d="M372 220 H426" marker-end="url(#ar-b)"/>
+  <text class="lbl" x="20" y="300">结果：Mitchell 能看到 To-do 菜单，能增删改查自己创建的待办，也能读联系人（来自隐含的组）</text>
+</svg>
+<figcaption>图 1-10　用户 → 组 →（隐含的组）→ 访问规则。权限沿着「隐含」关系一路叠加</figcaption>
+</figure>
+
+<h3>「许可」与「限制」</h3>
+
+<p>Odoo 20 的访问规则分成两类，判断依据只有一个：<strong>有没有填 Group</strong>。</p>
+
+<div class="vs">
+  <div class="new">
+    <div class="h">许可（Permission）：填了 Group</div>
+    <div style="padding:10px 14px;font-size:14px">
+      给这个组的成员<strong>授予</strong>某些操作，域限定作用于哪些记录。<br>
+      一个用户命中多条许可时，它们之间是<strong>「或」</strong>：任意一条允许就可以。
+    </div>
+  </div>
+  <div class="old">
+    <div class="h">限制（Restriction）：Group 留空</div>
+    <div style="padding:10px 14px;font-size:14px">
+      对<strong>所有人</strong>生效、无法绕过的全局限制，最典型的是多公司隔离。<br>
+      多条限制之间是<strong>「且」</strong>：必须全部满足。
+    </div>
+  </div>
+</div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 210" role="img" aria-label="许可之间是或的关系，限制之间是且的关系，最终结果是两者的交集">
+  <rect class="bx-g" x="20" y="30" width="150" height="40" rx="8"/><text class="lbl on-g" x="95" y="55" text-anchor="middle">许可 A 的域</text>
+  <rect class="bx-g" x="20" y="90" width="150" height="40" rx="8"/><text class="lbl on-g" x="95" y="115" text-anchor="middle">许可 B 的域</text>
+  <rect class="bx-g" x="220" y="60" width="80" height="40" rx="20"/><text class="ttl on-g" x="260" y="85" text-anchor="middle">或</text>
+  <path class="ln-g" d="M172 50 L216 74"/><path class="ln-g" d="M172 110 L216 88"/>
+
+  <rect class="bx-r" x="20" y="150" width="150" height="40" rx="8"/><text class="lbl on-r" x="95" y="175" text-anchor="middle">全部限制的域</text>
+  <rect class="bx-r" x="220" y="150" width="80" height="40" rx="20"/><text class="ttl on-r" x="260" y="175" text-anchor="middle">且</text>
+  <path class="ln-r" d="M172 170 H216"/>
+
+  <rect class="bx-a" x="380" y="100" width="80" height="40" rx="20"/><text class="ttl on-a" x="420" y="125" text-anchor="middle">且</text>
+  <path class="ln-g" d="M302 80 L376 112" marker-end="url(#ar-g)"/>
+  <path class="ln-r" d="M302 170 L376 130" marker-end="url(#ar-r)"/>
+  <rect class="bx-a" x="520" y="90" width="220" height="60" rx="10"/>
+  <text class="ttl on-a" x="630" y="116" text-anchor="middle">用户实际能操作的记录</text>
+  <text class="sm" x="630" y="136" text-anchor="middle">（针对某一种操作，如「改」）</text>
+  <path class="ln-a" d="M462 120 H516" marker-end="url(#ar-a)"/>
+</svg>
+<figcaption>图 1-11　一次操作能否进行：（命中的许可之一允许）且（所有限制都满足）。一条许可都没命中，就是「没有权限」</figcaption>
+</figure>
+
+<h3>第三步：把自己加进组</h3>
+
+<ol class="steps">
+  <li>进入 <strong>设置 → 用户与公司 → 用户</strong>，打开 <strong>Mitchell Admin</strong>（默认管理员）。</li>
+  <li>在 <strong>访问权限（Access Rights）</strong>标签页找到 To-Do User，勾上并保存。</li>
+  <li>刷新浏览器。To-do 菜单出现了！</li>
+</ol>
+
+<p>
+  点进去，你会发现即使我们还没建任何视图，Odoo 也能显示列表和表单 —— 框架会为没有视图的模型<strong>自动生成</strong>简单的默认视图。
+  用管理员和 Demo 用户各建几条待办试试：每个人只能看到自己的。
+</p>
+
+<h3>超级用户</h3>
+
+<p>
+  Odoo 内部还有一个<strong>超级用户</strong>，叫 <strong>OdooBot</strong>，数据库 ID 为 1。它<strong>绕过所有权限检查</strong>，
+  供系统内部操作使用。它没有登录密码，但管理员可以从调试菜单选择 <strong>Become Superuser</strong> 临时切换成它；
+  在登录页（<code>/web/login?debug=1</code>）下方也有 <strong>Log in as superuser</strong>。
+  进入超级用户模式后，右上角会显示黄黑相间的警示条纹。
+</p>
+
+<div class="box warn">
+  <div class="t">&#9888; 能不用就不用</div>
+  <p>超级用户无视一切权限，在多公司等场景下很容易造出不一致的数据。只有在确实需要时才用，用完立即退出。</p>
+</div>
+
+<h2 id="views">创建视图</h2>
+
+<p>自动生成的视图太简陋了。我们来写自己的列表视图、表单视图和搜索视图。它们都在 <strong>设置 → 技术 → 用户界面 → 视图</strong>里新建。</p>
+
+<h3>列表视图</h3>
+
+<p>新建视图：View Name <code>To-do List View</code>，View Type <code>List</code>，Model <code>x_todo_item</code>，Architecture 填：</p>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;list&gt;
+    &lt;field name="x_name"/&gt;
+    &lt;field name="x_is_done"/&gt;
+&lt;/list&gt;
+</pre>
+</div>
+
+<p>结构很简单：一个 <code>&lt;list&gt;</code> 元素，里面每个 <code>&lt;field&gt;</code> 是一列。</p>
+
+<h3>表单视图</h3>
+
+<p>再新建一个：View Name <code>To-do Form View</code>，View Type <code>Form</code>，Model <code>x_todo_item</code>：</p>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;form&gt;
+    &lt;group&gt;
+        &lt;field name="x_name"/&gt;
+        &lt;field name="x_is_done"/&gt;
+        &lt;field name="x_work_team_ids"
+               widget="many2many_tags"
+               context="{'default_x_is_work_team': True}"/&gt;
+    &lt;/group&gt;
+&lt;/form&gt;
+</pre>
+</div>
+
+<p>这里有两个值得注意的属性：</p>
+<ul>
+  <li><code>widget="many2many_tags"</code>：多对多字段默认显示成一个子列表，换成这个<strong>组件</strong>后显示为一排「标签」，更紧凑。</li>
+  <li><code>context="{'default_x_is_work_team': True}"</code>：关系字段允许用户直接在下拉框里<strong>新建</strong>一个联系人。
+      既然只有工作组成员才能被选，那新建的联系人就该默认勾上这个标记。<code>default_字段名</code> 这种上下文键就是用来<strong>设置默认值</strong>的。</li>
+</ul>
+
+<div class="box note">
+  <div class="t">&#9432; 不填 View Type 也行</div>
+  <p>Odoo 会根据 Architecture 的根元素自动识别视图类型。</p>
+</div>
+
+<h3>搜索视图</h3>
+
+<p>
+  列表上方的搜索框，以及它下面的「筛选」「分组」选项，都由<strong>搜索视图</strong>控制。我们加一个「未完成」筛选：
+</p>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;search&gt;
+    &lt;filter name="item_not_done"
+            string="Not Done"
+            domain="[('x_is_done', '=', False)]"/&gt;
+&lt;/search&gt;
+</pre>
+</div>
+
+<p>保存后刷新待办列表，「筛选」下拉里就有 Not Done 了。注意这里又用到了域：一个筛选就是一个带名字的域。</p>
+
+<h3>默认开启筛选</h3>
+
+<p>
+  如果希望一打开列表就只看未完成的，但用户仍可以手动取消，可以在<strong>窗口动作的上下文</strong>里设置默认筛选：
+</p>
+
+<ol class="steps">
+  <li>打开待办列表，调试菜单 → <strong>Action</strong>。</li>
+  <li>在 Context Value（上下文）里填：<code>{'search_default_item_not_done': True}</code>，保存。</li>
+</ol>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 200" role="img" aria-label="动作上下文中的 search_default 前缀激活搜索视图中同名的筛选">
+  <rect class="bx-a" x="20" y="40" width="300" height="80" rx="10"/>
+  <text class="ttl on-a" x="36" y="66">窗口动作的 context</text>
+  <text class="mono" x="36" y="96">{'search_default_<tspan class="on-a">item_not_done</tspan>': True}</text>
+
+  <rect class="bx-g" x="440" y="40" width="300" height="80" rx="10"/>
+  <text class="ttl on-g" x="456" y="66">搜索视图</text>
+  <text class="mono" x="456" y="96">&lt;filter name="<tspan class="on-g">item_not_done</tspan>" …/&gt;</text>
+
+  <path class="ln-a" d="M322 80 H436" marker-end="url(#ar-a)"/>
+  <text class="sm" x="380" y="70" text-anchor="middle">按名字匹配</text>
+
+  <rect class="bx-d" x="20" y="146" width="720" height="40" rx="8"/>
+  <text class="lbl" x="380" y="171" text-anchor="middle">对比：动作的 Domain 也能过滤记录，但那是「写死」的，用户无法取消；search_default_ 只是预选一个筛选</text>
+</svg>
+<figcaption>图 1-12　<code>search_default_</code> 前缀 + 筛选的 <code>name</code> = 默认勾选这个筛选</figcaption>
+</figure>
+
+<p>
+  <code>search_default_</code> 前缀告诉搜索视图「默认选中名为 item_not_done 的筛选」。
+  前面表单里的 <code>default_</code> 前缀设置字段默认值，这里的 <code>search_default_</code> 设置默认筛选 —— 上下文（context）是
+  Odoo 里到处都在用的「传递额外信息」的机制，以后会反复见到。
+</p>
+
+<h2 id="summary">小结</h2>
+
+<ul>
+  <li>Odoo 是开源的业务应用平台，也是开发框架。社区版是地基，企业版和社区模块都是叠在上面的模块。</li>
+  <li>大版本每年一个、互不兼容；本教程用 Odoo 20，书中的 Odoo 15 写法会在紫色框里标注差异。</li>
+  <li>三层架构：PostgreSQL + filestore 存数据，Python 服务器通过 ORM 承载业务逻辑，Web 客户端 / 网站 / 外部程序负责表现。</li>
+  <li>开发者模式（<code>?debug=1</code>）暴露字段技术名、视图 XML、动作和权限，是你最常用的侦查工具。</li>
+  <li>一个最小的应用 = <strong>模型</strong>（数据）+ <strong>访问规则</strong>（谁能用）+ <strong>菜单和动作</strong>（入口）+ <strong>视图</strong>（界面）。</li>
+  <li>不要修改别人的视图，用<strong>扩展视图</strong>叠加修改。</li>
+  <li>Odoo 20 用 <code>ir.access</code> 统一了访问控制：有组的是「许可」（彼此为或），没组的是「限制」（彼此为且）。</li>
+</ul>
+
+<div class="exercise">
+  <h3>动手练习</h3>
+  <ol>
+    <li>给待办模型再加一个「截止日期」字段（类型 <code>date</code>），把它加到列表和表单视图里。</li>
+    <li>在搜索视图里加一个按「是否完成」分组的选项。提示：<code>&lt;filter name="group_done" string="完成状态" context="{'group_by': 'x_is_done'}"/&gt;</code>。</li>
+    <li>用 Demo 用户登录，确认他看不到 To-do 菜单；把他加进 To-Do User 组后再试。</li>
+    <li>打开 <strong>设置 → 技术 → 安全 → Access Rights</strong>，搜索模型 <code>res.partner</code>，看看 Odoo 自带了哪些关于联系人的访问规则，哪些是「许可」，哪些是「限制」。</li>
+    <li>用调试菜单查看「销售」或「CRM」应用里任意一个表单的视图 XML，试着找出其中你在本章见过的元素。</li>
+  </ol>
+</div>
+<div id="pager"></div>
+</main>
+</div>
+<script src="assets/site.js"></script>
+</body>
+</html>

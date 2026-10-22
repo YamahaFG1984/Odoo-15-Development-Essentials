@@ -1,0 +1,788 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 12 章 · PDF 报表 — Odoo 20 开发入门</title>
+<meta name="description" content="用服务端 QWeb 生成可打印的 PDF 报表：安装 PDF 引擎、报表动作、布局与纸张格式、Bootstrap 网格排版、字段组件、合计与累计、多语言，以及自定义报表模型。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-chapter="12">
+<div id="app">
+<aside id="sidebar"></aside>
+<main>
+<span class="chapter-eyebrow">第 12 章</span>
+<h1>PDF 报表</h1>
+<p class="lede">
+  界面再好用，有些场合还是需要「打印出来」：发给客户的报价单、随货的送货单、盖章存档的合同。
+  Odoo 的报表就是用 <strong>QWeb</strong> 生成 HTML，再转换成 PDF。所以上一章学的模板技能可以直接用来设计报表，
+  只是这一次模板在<strong>服务器</strong>上渲染，表达式写的是 Python。
+</p>
+
+<div class="goals">
+  <h4>本章目标</h4>
+  <ul>
+    <li>安装 PDF 转换引擎（wkhtmltopdf），了解 Odoo 20 新的引擎机制</li>
+    <li>用报表动作把报表放进「打印」菜单，设置纸张格式</li>
+    <li>用标准布局模板和 Bootstrap 网格设计报表内容</li>
+    <li>使用字段组件、图片、合计、累计、多语言</li>
+    <li>写一个自定义报表模型，为报表准备任意数据</li>
+  </ul>
+</div>
+
+<div id="chapter-toc"></div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 210" role="img" aria-label="报表生成流程：打印菜单、报表动作、服务端 QWeb 渲染 HTML、PDF 引擎转换">
+  <rect class="bx-g" x="20" y="60" width="130" height="70" rx="10"/>
+  <text class="ttl on-g" x="85" y="88" text-anchor="middle">🖨 打印菜单</text>
+  <text class="sm" x="85" y="110" text-anchor="middle">选中几本书</text>
+
+  <rect class="bx-p" x="185" y="50" width="150" height="90" rx="10"/>
+  <text class="ttl on-p" x="260" y="76" text-anchor="middle">报表动作</text>
+  <text class="sm mono" x="260" y="98" text-anchor="middle">ir.actions.report</text>
+  <text class="sm" x="260" y="118" text-anchor="middle">模板名 · 纸张格式</text>
+
+  <rect class="bx-a" x="370" y="50" width="180" height="90" rx="10"/>
+  <text class="ttl on-a" x="460" y="76" text-anchor="middle">服务端 QWeb</text>
+  <text class="sm" x="460" y="98" text-anchor="middle">docs = 选中的记录</text>
+  <text class="sm" x="460" y="118" text-anchor="middle">渲染出 HTML</text>
+
+  <rect class="bx-b" x="585" y="50" width="155" height="90" rx="10"/>
+  <text class="ttl on-b" x="662" y="76" text-anchor="middle">PDF 引擎</text>
+  <text class="sm" x="662" y="98" text-anchor="middle">wkhtmltopdf</text>
+  <text class="sm" x="662" y="118" text-anchor="middle">HTML → PDF</text>
+
+  <path class="ln" d="M152 95 H181" marker-end="url(#ar)"/>
+  <path class="ln" d="M337 95 H366" marker-end="url(#ar)"/>
+  <path class="ln" d="M552 95 H581" marker-end="url(#ar)"/>
+  <text class="sm" x="380" y="180" text-anchor="middle">开发时把报表类型设为 qweb-html，就能在浏览器里直接看到 HTML，方便排查</text>
+</svg>
+<figcaption>图 12-1　一份报表的诞生</figcaption>
+</figure>
+
+<h2 id="engine">安装 PDF 引擎</h2>
+
+<p>
+  Odoo 报表本质上是 HTML 页面，转换成 PDF 需要一个外部工具。默认使用 <strong>wkhtmltopdf</strong>（WebKit HTML to PDF）。
+  它的版本很挑剔：某些版本有已知问题（比如页眉页脚不显示），而发行版自带的包往往不合适。推荐使用官方打包的 <strong>0.12.6.1（with patched qt）</strong> 版本。
+</p>
+
+<ol class="steps">
+  <li>先检查系统里是否已经装了别的版本：<code>wkhtmltopdf --version</code>。如果不是推荐版本，先卸载：<code>sudo apt remove --purge wkhtmltopdf</code>。</li>
+  <li>到 <a href="https://github.com/wkhtmltopdf/packaging/releases">wkhtmltopdf/packaging 的发布页</a>下载对应系统的包。Ubuntu 24.04 可以使用为 22.04（jammy）打包的版本。</li>
+  <li>安装，并自动补齐依赖。</li>
+  <li>确认版本。</li>
+</ol>
+
+<div class="code" data-lang="bash">
+<pre>
+wget https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-3/wkhtmltox_0.12.6.1-3.jammy_amd64.deb -O /tmp/wkhtml.deb
+sudo apt install -y /tmp/wkhtml.deb
+wkhtmltopdf --version
+wkhtmltopdf 0.12.6.1 (with patched qt)
+</pre>
+</div>
+
+<p>
+  装好以后，Odoo 启动日志里就不会再出现 <code>You need Wkhtmltopdf to print a pdf version of the reports.</code>。
+  注意另一条提示：如果用 <code>--workers=1</code> 运行，生成 PDF 会失败 —— 渲染 PDF 时 wkhtmltopdf 要回头向 Odoo 请求样式和图片，至少需要两个工作进程（开发时默认的多线程模式没有这个问题）。
+</p>
+
+<div class="box ver">
+  <div class="t">&#8682; PDF 引擎变成了可插拔的</div>
+  <p>
+    Odoo 19.4 起把报表引擎拆成了独立模块：<code>base_report_wkhtmltox</code>（wkhtmltopdf，自动安装，仍是默认）和可选的 <code>base_report_paper_muncher</code>
+    —— Odoo 自研的新渲染引擎 <a href="https://odoo.github.io/paper-muncher/">Paper Muncher</a>。安装后者后，报表类型里会多出「PDF (Paper Muncher)」
+    （<code>qweb-pdf-paper-muncher</code>）。在 wkhtmltopdf 早已停止维护的背景下，这是值得关注的方向；本章仍以默认引擎为准。
+  </p>
+</div>
+
+<h2 id="action">报表动作</h2>
+
+<p>
+  我们给图书馆应用做一份「书目」报表：列出书名、出版社、出版日期、出版社地址和作者。按惯例，报表文件放在模块的 <code>reports/</code> 目录。
+  第一步是<strong>报表动作</strong> —— 它之于报表，就像窗口动作之于视图。报表动作存在 <code>ir.actions.report</code> 模型里，可以在 <strong>设置 → 技术 → 动作 → 报表</strong>中查看。
+</p>
+
+<div class="code" data-lang="xml" data-file="library_app/reports/library_book_report.xml">
+<pre>
+&lt;odoo&gt;
+    &lt;record id="action_library_book_report" model="ir.actions.report"&gt;
+        &lt;field name="name"&gt;Book Catalog&lt;/field&gt;
+        &lt;field name="model"&gt;library.book&lt;/field&gt;
+        &lt;field name="report_type"&gt;qweb-pdf&lt;/field&gt;
+        &lt;field name="report_name"&gt;library_app.book_catalog&lt;/field&gt;
+        &lt;field name="binding_model_id" ref="model_library_book"/&gt;
+        &lt;field name="binding_type"&gt;report&lt;/field&gt;
+    &lt;/record&gt;
+&lt;/odoo&gt;
+</pre>
+</div>
+
+<p>记得把文件加入清单的 <code>data</code>。现在在书的列表里选中记录，顶部的 <strong>⚙ 操作</strong>旁边会出现 <strong>🖨 打印</strong>菜单，里面有「Book Catalog」。</p>
+
+<div class="tw"><table>
+  <tr><th>字段</th><th>含义</th></tr>
+  <tr><td><code>name</code></td><td>报表标题</td></tr>
+  <tr><td><code>model</code></td><td>报表基于哪个模型</td></tr>
+  <tr><td><code>report_type</code></td><td><code>qweb-pdf</code>、<code>qweb-html</code> 或 <code>qweb-text</code>。<strong>开发时用 <code>qweb-html</code></strong>，直接在浏览器里看渲染出的 HTML，调好了再改回 PDF</td></tr>
+  <tr><td><code>report_name</code></td><td>QWeb 模板的 XML ID。这里<strong>必须写完整</strong>的 <code>模块名.标识符</code></td></tr>
+  <tr><td><code>binding_model_id</code> / <code>binding_type</code></td><td>出现在哪个模型的打印菜单里；<code>binding_type</code> 设为 <code>report</code>（不设就进「操作」菜单）</td></tr>
+  <tr><td><code>print_report_name</code></td><td>生成的文件名，Python 表达式，<code>object</code> 代表当前记录，如 <code>'Book - %s' % object.name</code></td></tr>
+  <tr><td><code>attachment</code> / <code>attachment_use</code></td><td>把生成的 PDF 存为附件（文件名表达式）；再次打印时直接用存好的附件而不重新生成（适合发票这类不该变的文件）</td></tr>
+  <tr><td><code>paperformat_id</code></td><td>使用的纸张格式</td></tr>
+  <tr><td><code>group_ids</code></td><td>哪些用户组能使用这个报表（书中为旧名 <code>groups_id</code>）</td></tr>
+  <tr><td><code>multi</code></td><td>为 True 时，在表单视图的打印菜单里不显示</td></tr>
+</table></div>
+
+<div class="box note">
+  <div class="t">&#9432; &lt;report&gt; 快捷标签</div>
+  <p>早期版本可以用 <code>&lt;report&gt;</code> 快捷标签定义报表动作，Odoo 14 起废弃，现在统一用 <code>&lt;record model="ir.actions.report"&gt;</code>。</p>
+</div>
+
+<h2 id="template">报表模板的骨架</h2>
+
+<p>报表模板就是普通的 QWeb 模板，但要嵌套几个标准的容器模板，确保分页、页眉页脚正确：</p>
+
+<div class="code" data-lang="xml" data-file="每条记录一份文档的写法">
+<pre>
+&lt;template id="book_catalog"&gt;
+    &lt;t t-call="web.html_container"&gt;
+        &lt;t t-foreach="docs" t-as="o"&gt;
+            &lt;t t-call="web.external_layout"&gt;
+                &lt;div class="page"&gt;
+                    &lt;!-- 一条记录的内容 --&gt;
+                &lt;/div&gt;
+            &lt;/t&gt;
+        &lt;/t&gt;
+    &lt;/t&gt;
+&lt;/template&gt;
+</pre>
+</div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 300" role="img" aria-label="报表模板的嵌套结构：html_container 包含 external_layout，再包含 page">
+  <rect class="bx-d" x="20" y="20" width="720" height="260" rx="12"/>
+  <text class="sm mono" x="36" y="42">web.html_container　HTML 文档骨架、加载报表样式</text>
+  <rect class="bx-p" x="50" y="56" width="660" height="210" rx="10"/>
+  <text class="sm mono on-p" x="66" y="78">web.external_layout　按公司设置生成页眉 / 页脚</text>
+  <rect class="bx" x="80" y="92" width="600" height="40" rx="6"/>
+  <text class="sm" x="380" y="117" text-anchor="middle">页眉：公司 Logo、名称、地址（来自公司设置）</text>
+  <rect class="bx-a" x="80" y="140" width="600" height="76" rx="6"/>
+  <text class="sm mono on-a" x="96" y="162">&lt;div class="page"&gt;</text>
+  <text class="sm" x="380" y="192" text-anchor="middle">你的报表内容</text>
+  <rect class="bx" x="80" y="224" width="600" height="32" rx="6"/>
+  <text class="sm" x="380" y="245" text-anchor="middle">页脚：联系方式、页码</text>
+</svg>
+<figcaption>图 12-2　三层嵌套：文档容器 → 公司布局 → 页面内容</figcaption>
+</figure>
+
+<ul>
+  <li><code>web.html_container</code>：生成支撑一个 HTML 文档的基本结构。</li>
+  <li><code>web.external_layout</code>：按当前公司的「文档布局」设置生成页眉页脚，适合对外的单据。</li>
+  <li><code>web.internal_layout</code>：只有简单的页眉，适合内部使用的报表。<code>web.basic_layout</code> 则完全没有页眉页脚。</li>
+  <li><code>docs</code>：要生成报表的记录集。通常用 <code>t-foreach</code> 遍历它。</li>
+</ul>
+
+<p>
+  上面的写法是<strong>每条记录一份文档</strong>（各有页眉页脚，适合发票、订单）。书目是一份<strong>列表</strong>：整份文档只有一个页眉页脚，每本书一行。
+  所以把循环移到 <code>page</code> 里面：
+</p>
+
+<div class="code" data-lang="xml" data-file="一份列表文档的写法">
+<pre>
+&lt;template id="book_catalog"&gt;
+    &lt;t t-call="web.html_container"&gt;
+        &lt;t t-call="web.external_layout"&gt;
+            &lt;div class="page"&gt;
+                &lt;!-- 表头 --&gt;
+                &lt;t t-foreach="docs" t-as="o"&gt;
+                    &lt;!-- 每本书一行 --&gt;
+                &lt;/t&gt;
+                &lt;!-- 表尾：合计 --&gt;
+            &lt;/div&gt;
+        &lt;/t&gt;
+    &lt;/t&gt;
+&lt;/template&gt;
+</pre>
+</div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 220" role="img" aria-label="循环在 layout 外面时每条记录一页；循环在 page 里面时整份文档一页列表">
+  <text class="ttl" x="20" y="24">foreach 在 layout 外：每条记录一份文档</text>
+  <rect class="bx" x="20" y="40" width="100" height="140" rx="6"/><rect class="bx-d" x="30" y="50" width="80" height="16"/><rect class="bx-a" x="30" y="74" width="80" height="70"/><rect class="bx-d" x="30" y="152" width="80" height="16"/>
+  <rect class="bx" x="135" y="40" width="100" height="140" rx="6"/><rect class="bx-d" x="145" y="50" width="80" height="16"/><rect class="bx-a" x="145" y="74" width="80" height="70"/><rect class="bx-d" x="145" y="152" width="80" height="16"/>
+  <rect class="bx" x="250" y="40" width="100" height="140" rx="6"/><rect class="bx-d" x="260" y="50" width="80" height="16"/><rect class="bx-a" x="260" y="74" width="80" height="70"/><rect class="bx-d" x="260" y="152" width="80" height="16"/>
+  <text class="sm" x="185" y="205" text-anchor="middle">书 1　　书 2　　书 3</text>
+
+  <text class="ttl" x="420" y="24">foreach 在 page 里：一份文档，多行</text>
+  <rect class="bx" x="460" y="40" width="240" height="140" rx="6"/>
+  <rect class="bx-d" x="470" y="50" width="220" height="16"/>
+  <rect class="bx-b" x="470" y="72" width="220" height="12"/>
+  <rect class="bx-a" x="470" y="90" width="220" height="12"/>
+  <rect class="bx-a" x="470" y="106" width="220" height="12"/>
+  <rect class="bx-a" x="470" y="122" width="220" height="12"/>
+  <rect class="bx-g" x="470" y="140" width="220" height="12"/>
+  <rect class="bx-d" x="470" y="158" width="220" height="14"/>
+  <text class="sm" x="580" y="205" text-anchor="middle">表头 · 每本书一行 · 合计</text>
+</svg>
+<figcaption>图 12-3　循环放在哪里，决定了报表是「一叠单据」还是「一张清单」</figcaption>
+</figure>
+
+<h3>文档布局</h3>
+
+<p>
+  使用 <code>external_layout</code> 的报表，外观由用户在 <strong>设置 → 通用设置 → 公司 → 文档布局</strong>里配置：
+  点 <strong>配置文档布局</strong>打开配置器，可以选择版式、上传 Logo、设置颜色和字体，并实时预览。所以报表模板只负责内容，样式交给每家公司自己定。
+</p>
+
+<h3>纸张格式</h3>
+
+<p>
+  Odoo 自带欧洲 A4、美国 Letter 等纸张格式，存储在 <code>report.paperformat</code> 模型中（<strong>设置 → 技术 → 报表 → 纸张格式</strong>）。
+  书目的栏目比较多，我们定义一个横向的 A4：
+</p>
+
+<div class="code" data-lang="xml" data-file="library_book_report.xml（放在文件开头）">
+<pre>
+&lt;record id="paperformat_euro_landscape" model="report.paperformat"&gt;
+    &lt;field name="name"&gt;A4 Landscape&lt;/field&gt;
+    &lt;field name="format"&gt;A4&lt;/field&gt;
+    &lt;field name="orientation"&gt;Landscape&lt;/field&gt;
+    &lt;field name="margin_top"&gt;40&lt;/field&gt;
+    &lt;field name="margin_bottom"&gt;32&lt;/field&gt;
+    &lt;field name="margin_left"&gt;7&lt;/field&gt;
+    &lt;field name="margin_right"&gt;7&lt;/field&gt;
+    &lt;field name="header_line" eval="False"/&gt;
+    &lt;field name="header_spacing"&gt;35&lt;/field&gt;
+    &lt;field name="dpi"&gt;90&lt;/field&gt;
+&lt;/record&gt;
+</pre>
+</div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 240" role="img" aria-label="纸张格式的页边距与页眉间距">
+  <rect class="bx" x="200" y="20" width="360" height="200" rx="4"/>
+  <rect class="bx-d" x="212" y="58" width="336" height="130"/>
+  <rect class="bx-p" x="212" y="28" width="336" height="24"/>
+  <text class="sm on-p" x="380" y="45" text-anchor="middle">页眉（header_spacing 控制它占多高）</text>
+  <text class="sm" x="380" y="128" text-anchor="middle">页面内容区域</text>
+  <path class="ln-a" d="M580 20 V58" marker-start="url(#ar-a)" marker-end="url(#ar-a)"/>
+  <text class="sm on-a" x="590" y="44">margin_top</text>
+  <path class="ln-a" d="M580 188 V220" marker-start="url(#ar-a)" marker-end="url(#ar-a)"/>
+  <text class="sm on-a" x="590" y="208">margin_bottom</text>
+  <path class="ln-a" d="M200 230 H212" />
+  <text class="sm on-a" x="120" y="128">margin_left →</text>
+  <text class="sm on-a" x="565" y="128">← margin_right</text>
+  <text class="sm" x="20" y="40">format: A4</text>
+  <text class="sm" x="20" y="60">orientation:</text>
+  <text class="sm" x="20" y="76">Landscape</text>
+  <text class="sm" x="20" y="96">dpi: 90</text>
+</svg>
+<figcaption>图 12-4　纸张格式的主要参数（单位：毫米）</figcaption>
+</figure>
+
+<p>这是 <code>base</code> 模块里欧洲 A4 格式（<code>data/report_paperformat_data.xml</code>）的副本，只把方向改成了横向。在报表动作上引用它：</p>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;record id="action_library_book_report" model="ir.actions.report"&gt;
+    &lt;field name="name"&gt;Book Catalog&lt;/field&gt;
+    &lt;field name="model"&gt;library.book&lt;/field&gt;
+    &lt;field name="report_type"&gt;qweb-pdf&lt;/field&gt;
+    &lt;field name="report_name"&gt;library_app.book_catalog&lt;/field&gt;
+    &lt;field name="binding_model_id" ref="model_library_book"/&gt;
+    &lt;field name="binding_type"&gt;report&lt;/field&gt;
+    &lt;field name="paperformat_id" ref="paperformat_euro_landscape"/&gt;
+&lt;/record&gt;
+</pre>
+</div>
+
+<p>不指定纸张格式时，使用公司设置里的默认格式。</p>
+
+<h2 id="content">设计报表内容</h2>
+
+<h3>服务端渲染上下文</h3>
+
+<p>报表模板在服务器上用 Python 实现的 QWeb 渲染，表达式是 <strong>Python</strong>。模板里可以使用这些变量：</p>
+
+<div class="tw"><table>
+  <tr><th>变量</th><th>含义</th></tr>
+  <tr><td><code>docs</code></td><td>要生成报表的记录集 —— 最重要的一个</td></tr>
+  <tr><td><code>doc_ids</code> / <code>doc_model</code></td><td>记录的 ID 列表 / 模型名</td></tr>
+  <tr><td><code>user</code></td><td>运行报表的用户</td></tr>
+  <tr><td><code>res_company</code></td><td>当前公司</td></tr>
+  <tr><td><code>web_base_url</code></td><td>Odoo 服务器的基础网址</td></tr>
+  <tr><td><code>time</code></td><td>Python 的 <code>time</code> 模块</td></tr>
+  <tr><td><code>context_timestamp</code></td><td>把 UTC 时间转换成用户时区的函数</td></tr>
+</table></div>
+
+<p>
+  和看板最大的不同：这里拿到的是<strong>真正的记录集</strong>，可以用点号一路访问关联数据，比如 <code>o.publisher_id.country_id.name</code>，
+  也可以调用记录的方法、使用 <code>len()</code>、列表推导等任何 Python 表达式。
+</p>
+
+<h3>表头和数据行</h3>
+
+<p>
+  报表用 HTML + <strong>Bootstrap 5</strong> 排版。Bootstrap 的网格系统把一行分成 12 列，每个单元格用 <code>col-N</code> 指定占几列，一行加起来正好 12：
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 150" role="img" aria-label="Bootstrap 十二列网格：书目的五个栏目分别占 3、2、2、3、2 列">
+  <g>
+    <rect class="bx-a" x="20" y="30" width="177" height="44" rx="4"/><text class="lbl on-a" x="108" y="57" text-anchor="middle">col-3 书名</text>
+    <rect class="bx-b" x="200" y="30" width="117" height="44" rx="4"/><text class="lbl on-b" x="258" y="57" text-anchor="middle">col-2 出版社</text>
+    <rect class="bx-b" x="320" y="30" width="117" height="44" rx="4"/><text class="lbl on-b" x="378" y="57" text-anchor="middle">col-2 日期</text>
+    <rect class="bx-g" x="440" y="30" width="177" height="44" rx="4"/><text class="lbl on-g" x="528" y="57" text-anchor="middle">col-3 出版社地址</text>
+    <rect class="bx-p" x="620" y="30" width="120" height="44" rx="4"/><text class="lbl on-p" x="680" y="57" text-anchor="middle">col-2 作者</text>
+  </g>
+  <path class="ln-d" d="M20 96 H740"/>
+  <text class="sm" x="20" y="116">1　2　3　4　5　6　7　8　9　10　11　12　（3 + 2 + 2 + 3 + 2 = 12）</text>
+</svg>
+<figcaption>图 12-5　用 12 列网格安排报表的栏目</figcaption>
+</figure>
+
+<div class="code" data-lang="xml" data-file="&lt;div class=&quot;page&quot;&gt; 的内容">
+<pre>
+&lt;div class="page"&gt;
+    &lt;div class="container"&gt;
+        &lt;!-- 表头 --&gt;
+        &lt;div class="row bg-primary text-white fw-bold"&gt;
+            &lt;div class="col-3"&gt;Title&lt;/div&gt;
+            &lt;div class="col-2"&gt;Publisher&lt;/div&gt;
+            &lt;div class="col-2"&gt;Date&lt;/div&gt;
+            &lt;div class="col-3"&gt;Publisher Address&lt;/div&gt;
+            &lt;div class="col-2"&gt;Authors&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;!-- 每本书一行 --&gt;
+        &lt;t t-foreach="docs" t-as="o"&gt;
+            &lt;div class="row border-bottom py-1"&gt;
+                &lt;div class="col-3"&gt;
+                    &lt;h5&gt;&lt;span t-field="o.name"/&gt;&lt;/h5&gt;
+                &lt;/div&gt;
+                &lt;div class="col-2"&gt;
+                    &lt;span t-field="o.publisher_id"/&gt;
+                &lt;/div&gt;
+                &lt;div class="col-2"&gt;
+                    &lt;span t-field="o.date_published" t-options="{'widget': 'date'}"/&gt;
+                &lt;/div&gt;
+                &lt;div class="col-3"&gt;
+                    &lt;div t-field="o.publisher_id"
+                         t-options='{"widget": "contact",
+                                     "fields": ["address", "email", "phone", "website"],
+                                     "no_marker": true}'/&gt;
+                &lt;/div&gt;
+                &lt;div class="col-2"&gt;
+                    &lt;!-- 作者，见下文 --&gt;
+                &lt;/div&gt;
+            &lt;/div&gt;
+        &lt;/t&gt;
+        &lt;!-- 表尾，见下文 --&gt;
+    &lt;/div&gt;
+&lt;/div&gt;
+</pre>
+</div>
+
+<div class="box tip">
+  <div class="t">&#128161; 网格还是表格？</div>
+  <p>
+    上面沿用书里的网格写法。对规整的表格数据，用 HTML 表格往往更省事、跨页也更稳：
+    <code>&lt;table class="table table-sm"&gt;&lt;thead&gt;…&lt;/thead&gt;&lt;tbody&gt;&lt;tr t-foreach="docs" t-as="o"&gt;…&lt;/tr&gt;&lt;/tbody&gt;&lt;/table&gt;</code>，
+    表头在每一页都会自动重复。Odoo 自己的销售订单、发票报表都是这样写的。
+  </p>
+</div>
+
+<h3>t-field 与字段组件</h3>
+
+<p>
+  <code>t-field</code> 输出记录字段的值，并按字段类型和用户语言正确格式化（日期格式、货币符号、多对一显示名称……）。
+  它可以配合 <code>t-options</code> 选择<strong>组件</strong>和选项：
+</p>
+
+<div class="tw"><table>
+  <tr><th>组件</th><th>用途与常用选项</th></tr>
+  <tr><td><code>date</code> / <code>datetime</code></td><td>日期 / 日期时间；<code>format</code> 自定义格式</td></tr>
+  <tr><td><code>monetary</code></td><td>金额；<code>display_currency</code> 指定币种</td></tr>
+  <tr><td><code>contact</code></td><td>联系人卡片；<code>fields</code> 选择显示 name、address、phone、email、website 等，<code>no_marker</code> 去掉图标</td></tr>
+  <tr><td><code>image</code></td><td>图片；<code>style</code>、<code>width</code> 等</td></tr>
+  <tr><td><code>duration</code> / <code>float_time</code></td><td>时长</td></tr>
+  <tr><td><code>barcode</code></td><td>条形码 / 二维码</td></tr>
+  <tr><td><code>relative</code></td><td>相对时间（「3 天前」）</td></tr>
+</table></div>
+
+<div class="box tip">
+  <div class="t">&#128161; 文档不全时看源码</div>
+  <p>
+    所有服务端字段组件定义在源码 <code>odoo/addons/base/models/ir_qweb_fields.py</code> 里：每个继承 <code>ir.qweb.field</code> 的类就是一种组件，
+    它的 <code>get_available_options()</code> 方法列出了支持的选项。
+  </p>
+</div>
+
+<h3>图片</h3>
+
+<p>最后一栏显示作者及其头像。在多对多字段上循环，用 <code>image</code> 组件渲染联系人的 <code>image_128</code> 字段：</p>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;ul class="list-unstyled"&gt;
+    &lt;li t-foreach="o.author_ids" t-as="author"&gt;
+        &lt;span t-field="author.image_128"
+              t-options="{'widget': 'image', 'style': 'max-width: 32px'}"/&gt;
+        &lt;span t-field="author.name"/&gt;
+    &lt;/li&gt;
+&lt;/ul&gt;
+</pre>
+</div>
+
+<h3>合计</h3>
+
+<p>报表常常需要合计。在 <code>t-foreach</code> 循环结束之后加一行表尾，统计书的数量和不重复的作者数量：</p>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;div class="row fw-bold"&gt;
+    &lt;div class="col-3"&gt;&lt;t t-out="len(docs)"/&gt; Books&lt;/div&gt;
+    &lt;div class="col-7"/&gt;
+    &lt;div class="col-2"&gt;&lt;t t-out="len(docs.author_ids)"/&gt; Authors&lt;/div&gt;
+&lt;/div&gt;
+</pre>
+</div>
+
+<p>
+  <code>docs.author_ids</code> 在多条记录上取关系字段，得到所有书的作者的<strong>并集</strong>（不重复），<code>len()</code> 就是作者数。
+  求和也一样简单，比如 <code>&lt;t t-out="sum(docs.mapped('copies'))"/&gt;</code>。当然，如果模型本身就有算好的合计字段，直接用它更好。
+</p>
+
+<h3>累计值</h3>
+
+<p>
+  有时需要在循环中逐行累加，比如显示「到目前为止，有多少本书没有出版社」。在循环前用 <code>t-set</code> 初始化变量，在循环里更新并显示：
+</p>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;!-- 循环前：初始化 --&gt;
+&lt;t t-set="missing_count" t-value="0"/&gt;
+&lt;t t-foreach="docs" t-as="o"&gt;
+    &lt;div class="row"&gt;
+        ...
+        &lt;div class="col-2"&gt;
+            &lt;span t-field="o.publisher_id"/&gt;
+            &lt;!-- 循环中：累加并显示 --&gt;
+            &lt;t t-set="missing_count" t-value="missing_count + int(not o.publisher_id)"/&gt;
+            &lt;p class="small text-muted"&gt;(accum. &lt;t t-out="missing_count"/&gt;)&lt;/p&gt;
+        &lt;/div&gt;
+        ...
+    &lt;/div&gt;
+&lt;/t&gt;
+</pre>
+</div>
+
+<p>服务端 QWeb 的循环也提供辅助变量：<code>o_index</code>、<code>o_size</code>、<code>o_first</code>、<code>o_last</code>、<code>o_odd</code>、<code>o_even</code> 等，可以用来做斑马纹之类的效果。</p>
+
+<h3>多语言</h3>
+
+<p>
+  报表默认使用当前用户的语言。但有时文档应该使用<strong>客户</strong>的语言打印 —— 比如中国员工给法国客户打印报价单。
+  QWeb 的 <code>t-call</code> 可以搭配 <code>t-lang</code>，用指定的语言渲染被调用的模板。我们再加一个「用图书馆本地语言打印」的报表：
+</p>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;record id="action_library_book_report_native" model="ir.actions.report"&gt;
+    &lt;field name="name"&gt;Native Language Book Catalog&lt;/field&gt;
+    &lt;field name="model"&gt;library.book&lt;/field&gt;
+    &lt;field name="report_type"&gt;qweb-pdf&lt;/field&gt;
+    &lt;field name="report_name"&gt;library_app.book_catalog_native&lt;/field&gt;
+    &lt;field name="binding_model_id" ref="model_library_book"/&gt;
+    &lt;field name="binding_type"&gt;report&lt;/field&gt;
+    &lt;field name="paperformat_id" ref="paperformat_euro_landscape"/&gt;
+&lt;/record&gt;
+
+&lt;template id="book_catalog_native"&gt;
+    &lt;t t-call="library_app.book_catalog" t-lang="res_company.partner_id.lang"/&gt;
+&lt;/template&gt;
+</pre>
+</div>
+
+<p>
+  新模板只做一件事：以公司联系人的语言（<code>res_company.partner_id.lang</code>）调用原来的书目模板。
+  <code>t-lang</code> 只能和 <code>t-call</code> 写在同一个元素上。（书中这里把 <code>partner_id</code> 误拼成了 <code>parter_id</code>。）
+</p>
+
+<div class="box ver">
+  <div class="t">&#8682; 服务端 t-call 的传参方式</div>
+  <p>
+    Odoo 19.1 起，<strong>服务端</strong> QWeb 推荐把传给子模板的参数直接写成 <code>t-call</code> 元素的属性，而不是在它内部用 <code>t-set</code>：
+  </p>
+  <div class="code" data-lang="xml"><pre>
+&lt;!-- 普通属性：值是 Python 表达式 --&gt;
+&lt;t t-call="library_app.book_line" book="o" show_authors="True"/&gt;
+&lt;!-- 以 .f 结尾：值是格式化字符串（等同 t-valuef） --&gt;
+&lt;t t-call="library_app.section" title.f="Books of {{ o.name }}"/&gt;
+&lt;!-- 以 .translate 结尾：可翻译的文字 --&gt;
+&lt;t t-call="library_app.section" title.translate="Book Catalog"/&gt;
+</pre></div>
+  <p>
+    <code>odoo-bin upgrade_code</code> 带有自动转换脚本（<code>19.1-00-t-call.py</code>）。<code>t-call</code> 元素内部的内容仍然可以在子模板里用 <code>t-out="0"</code> 输出。
+    看板等<strong>客户端</strong>模板不受影响，仍用第 11 章的写法。
+  </p>
+</div>
+
+<h2 id="custom">自定义报表</h2>
+
+<p>
+  默认情况下，报表拿到的是用户选中的记录（<code>docs</code>）。有时需要为报表准备任意的数据结构，比如分组、汇总、来自其他模型的数据。这时用<strong>自定义报表</strong>。
+</p>
+
+<p>
+  例子：「按出版社列书」报表。在联系人列表里选中几个出版社，打印出每家出版的书。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 260" role="img" aria-label="自定义报表：同名的抽象模型提供 _get_report_values，返回值成为模板变量">
+  <rect class="bx-g" x="20" y="90" width="140" height="70" rx="10"/>
+  <text class="ttl on-g" x="90" y="118" text-anchor="middle">打印</text>
+  <text class="sm" x="90" y="140" text-anchor="middle">选中 3 个出版社</text>
+
+  <rect class="bx-p" x="200" y="20" width="250" height="80" rx="10"/>
+  <text class="ttl on-p" x="325" y="44" text-anchor="middle">报表动作</text>
+  <text class="sm mono" x="325" y="66" text-anchor="middle">report_name =</text>
+  <text class="sm mono" x="325" y="86" text-anchor="middle">library_app.publisher_report</text>
+
+  <rect class="bx-a" x="200" y="140" width="250" height="100" rx="10"/>
+  <text class="ttl on-a" x="325" y="164" text-anchor="middle">抽象模型（按名字约定找到）</text>
+  <text class="sm mono" x="325" y="188" text-anchor="middle" style="font-size:11px">report.library_app.publisher_report</text>
+  <text class="sm mono" x="325" y="210" text-anchor="middle">_get_report_values(docids, data)</text>
+  <text class="sm" x="325" y="230" text-anchor="middle">→ {"publisher_books": [...]}</text>
+
+  <rect class="bx-b" x="510" y="80" width="230" height="110" rx="10"/>
+  <text class="ttl on-b" x="625" y="104" text-anchor="middle">QWeb 模板</text>
+  <text class="sm mono" x="625" y="128" text-anchor="middle">publisher_report</text>
+  <text class="sm" x="625" y="152" text-anchor="middle">可以直接使用变量</text>
+  <text class="sm mono" x="625" y="172" text-anchor="middle">publisher_books</text>
+
+  <path class="ln" d="M162 110 L196 70" marker-end="url(#ar)"/>
+  <path class="ln-a" d="M325 102 V136" marker-end="url(#ar-a)"/>
+  <text class="sm" x="333" y="124">存在同名模型吗？</text>
+  <path class="ln-a" d="M452 190 L506 150" marker-end="url(#ar-a)"/>
+</svg>
+<figcaption>图 12-6　报表引擎会寻找名为 <code>report.&lt;report_name&gt;</code> 的模型，用它的返回值作为模板变量</figcaption>
+</figure>
+
+<h3>准备数据</h3>
+
+<div class="code" data-lang="py" data-file="library_app/reports/library_publisher_report.py">
+<pre>
+from odoo import api, models
+
+
+class PublisherReport(models.AbstractModel):
+    _name = "report.library_app.publisher_report"
+    _description = "Books by Publisher Report"
+
+    @api.model
+    def _get_report_values(self, docids, data=None):
+        books = self.env["library.book"].search([("publisher_id", "in", docids)])
+        publisher_books = [
+            (publisher, books.filtered(lambda book: book.publisher_id == publisher))
+            for publisher in books.publisher_id
+        ]
+        return {
+            "publisher_books": publisher_books,
+        }
+</pre>
+</div>
+
+<p>让模块加载这个文件：</p>
+<ul>
+  <li>新建 <code>reports/__init__.py</code>，内容 <code>from . import library_publisher_report</code>；</li>
+  <li>在模块的 <code>__init__.py</code> 里加上 <code>from . import reports</code>。</li>
+</ul>
+
+<p>要点：</p>
+<ul>
+  <li>它是 <code>AbstractModel</code>：没有表，不存数据，只负责计算。</li>
+  <li><strong>名字是约定好的</strong>：<code>report.</code> + 报表模板的完整 XML ID。报表引擎运行时会去找这个名字的模型，找到了就调用它的 <code>_get_report_values()</code>。</li>
+  <li><code>docids</code> 是用户选中的记录 ID 列表。报表基于 <code>res.partner</code>，所以这里是联系人 ID。<code>data</code> 是从向导等地方传来的额外参数（这里没用到）。</li>
+  <li>方法返回的字典里每个键都会成为模板里的变量。这里 <code>publisher_books</code> 是一个「(出版社记录, 它的书的记录集)」二元组列表。</li>
+</ul>
+
+<h3>报表模板</h3>
+
+<div class="code" data-lang="xml" data-file="library_app/reports/library_publisher_report.xml">
+<pre>
+&lt;odoo&gt;
+    &lt;record id="action_publisher_report" model="ir.actions.report"&gt;
+        &lt;field name="name"&gt;Books by Publisher&lt;/field&gt;
+        &lt;field name="model"&gt;res.partner&lt;/field&gt;
+        &lt;field name="report_type"&gt;qweb-pdf&lt;/field&gt;
+        &lt;field name="report_name"&gt;library_app.publisher_report&lt;/field&gt;
+        &lt;field name="binding_model_id" ref="base.model_res_partner"/&gt;
+        &lt;field name="binding_type"&gt;report&lt;/field&gt;
+    &lt;/record&gt;
+
+    &lt;template id="publisher_report"&gt;
+        &lt;t t-call="web.html_container"&gt;
+            &lt;t t-call="web.external_layout"&gt;
+                &lt;div class="page"&gt;
+                    &lt;div class="container"&gt;
+                        &lt;h1&gt;Books by Publisher&lt;/h1&gt;
+                        &lt;t t-foreach="publisher_books" t-as="group"&gt;
+                            &lt;h2 t-field="group[0].name"/&gt;
+                            &lt;ul&gt;
+                                &lt;li t-foreach="group[1]" t-as="book"&gt;
+                                    &lt;b&gt;&lt;span t-field="book.name"/&gt;&lt;/b&gt;
+                                    &lt;span t-field="book.author_ids"/&gt;
+                                &lt;/li&gt;
+                            &lt;/ul&gt;
+                        &lt;/t&gt;
+                    &lt;/div&gt;
+                &lt;/div&gt;
+            &lt;/t&gt;
+        &lt;/t&gt;
+    &lt;/template&gt;
+&lt;/odoo&gt;
+</pre>
+</div>
+
+<p>
+  模板里没有使用 <code>docs</code>，而是遍历自定义的 <code>publisher_books</code>：<code>group[0]</code> 是出版社，<code>group[1]</code> 是它的书。
+  把 XML 文件加入清单，升级模块后，在联系人列表里选中记录（或打开某个出版社的表单），打印菜单里就有「Books by Publisher」了。
+</p>
+
+<h2 id="final">完整的书目报表</h2>
+
+<p>把前面的片段组合起来，<code>reports/library_book_report.xml</code> 的完整内容如下：</p>
+
+<div class="code" data-lang="xml" data-file="library_app/reports/library_book_report.xml">
+<pre>
+&lt;odoo&gt;
+    &lt;record id="paperformat_euro_landscape" model="report.paperformat"&gt;
+        &lt;field name="name"&gt;A4 Landscape&lt;/field&gt;
+        &lt;field name="format"&gt;A4&lt;/field&gt;
+        &lt;field name="orientation"&gt;Landscape&lt;/field&gt;
+        &lt;field name="margin_top"&gt;40&lt;/field&gt;
+        &lt;field name="margin_bottom"&gt;32&lt;/field&gt;
+        &lt;field name="margin_left"&gt;7&lt;/field&gt;
+        &lt;field name="margin_right"&gt;7&lt;/field&gt;
+        &lt;field name="header_line" eval="False"/&gt;
+        &lt;field name="header_spacing"&gt;35&lt;/field&gt;
+        &lt;field name="dpi"&gt;90&lt;/field&gt;
+    &lt;/record&gt;
+
+    &lt;record id="action_library_book_report" model="ir.actions.report"&gt;
+        &lt;field name="name"&gt;Book Catalog&lt;/field&gt;
+        &lt;field name="model"&gt;library.book&lt;/field&gt;
+        &lt;field name="report_type"&gt;qweb-pdf&lt;/field&gt;
+        &lt;field name="report_name"&gt;library_app.book_catalog&lt;/field&gt;
+        &lt;field name="binding_model_id" ref="model_library_book"/&gt;
+        &lt;field name="binding_type"&gt;report&lt;/field&gt;
+        &lt;field name="paperformat_id" ref="paperformat_euro_landscape"/&gt;
+    &lt;/record&gt;
+
+    &lt;template id="book_catalog"&gt;
+        &lt;t t-call="web.html_container"&gt;
+            &lt;t t-call="web.external_layout"&gt;
+                &lt;t t-set="missing_count" t-value="0"/&gt;
+                &lt;div class="page"&gt;
+                    &lt;div class="container"&gt;
+                        &lt;div class="row bg-primary text-white fw-bold"&gt;
+                            &lt;div class="col-3"&gt;Title&lt;/div&gt;
+                            &lt;div class="col-2"&gt;Publisher&lt;/div&gt;
+                            &lt;div class="col-2"&gt;Date&lt;/div&gt;
+                            &lt;div class="col-3"&gt;Publisher Address&lt;/div&gt;
+                            &lt;div class="col-2"&gt;Authors&lt;/div&gt;
+                        &lt;/div&gt;
+                        &lt;t t-foreach="docs" t-as="o"&gt;
+                            &lt;div class="row border-bottom py-1"&gt;
+                                &lt;div class="col-3"&gt;&lt;h5&gt;&lt;span t-field="o.name"/&gt;&lt;/h5&gt;&lt;/div&gt;
+                                &lt;div class="col-2"&gt;
+                                    &lt;span t-field="o.publisher_id"/&gt;
+                                    &lt;t t-set="missing_count" t-value="missing_count + int(not o.publisher_id)"/&gt;
+                                    &lt;p class="small text-muted"&gt;(accum. &lt;t t-out="missing_count"/&gt;)&lt;/p&gt;
+                                &lt;/div&gt;
+                                &lt;div class="col-2"&gt;
+                                    &lt;span t-field="o.date_published" t-options="{'widget': 'date'}"/&gt;
+                                &lt;/div&gt;
+                                &lt;div class="col-3"&gt;
+                                    &lt;div t-field="o.publisher_id"
+                                         t-options='{"widget": "contact", "fields": ["address", "email", "phone", "website"], "no_marker": true}'/&gt;
+                                &lt;/div&gt;
+                                &lt;div class="col-2"&gt;
+                                    &lt;ul class="list-unstyled"&gt;
+                                        &lt;li t-foreach="o.author_ids" t-as="author"&gt;
+                                            &lt;span t-field="author.image_128"
+                                                  t-options="{'widget': 'image', 'style': 'max-width: 32px'}"/&gt;
+                                            &lt;span t-field="author.name"/&gt;
+                                        &lt;/li&gt;
+                                    &lt;/ul&gt;
+                                &lt;/div&gt;
+                            &lt;/div&gt;
+                        &lt;/t&gt;
+                        &lt;div class="row fw-bold"&gt;
+                            &lt;div class="col-3"&gt;&lt;t t-out="len(docs)"/&gt; Books&lt;/div&gt;
+                            &lt;div class="col-7"/&gt;
+                            &lt;div class="col-2"&gt;&lt;t t-out="len(docs.author_ids)"/&gt; Authors&lt;/div&gt;
+                        &lt;/div&gt;
+                    &lt;/div&gt;
+                &lt;/div&gt;
+            &lt;/t&gt;
+        &lt;/t&gt;
+    &lt;/template&gt;
+
+    &lt;record id="action_library_book_report_native" model="ir.actions.report"&gt;
+        &lt;field name="name"&gt;Native Language Book Catalog&lt;/field&gt;
+        &lt;field name="model"&gt;library.book&lt;/field&gt;
+        &lt;field name="report_type"&gt;qweb-pdf&lt;/field&gt;
+        &lt;field name="report_name"&gt;library_app.book_catalog_native&lt;/field&gt;
+        &lt;field name="binding_model_id" ref="model_library_book"/&gt;
+        &lt;field name="binding_type"&gt;report&lt;/field&gt;
+        &lt;field name="paperformat_id" ref="paperformat_euro_landscape"/&gt;
+    &lt;/record&gt;
+
+    &lt;template id="book_catalog_native"&gt;
+        &lt;t t-call="library_app.book_catalog" t-lang="res_company.partner_id.lang"/&gt;
+    &lt;/template&gt;
+&lt;/odoo&gt;
+</pre>
+</div>
+
+<div class="box ver">
+  <div class="t">&#8682; Bootstrap 5</div>
+  <p>
+    书里报表用的是 Bootstrap 4，Odoo 16 起升级到 Bootstrap 5（Odoo 20 为 5.3）。常见的改名：<code>text-right</code> → <code>text-end</code>、<code>ml-*</code>/<code>mr-*</code> → <code>ms-*</code>/<code>me-*</code>、
+    <code>font-weight-bold</code> → <code>fw-bold</code>、<code>badge-pill badge-info</code> → <code>rounded-pill text-bg-info</code>。
+  </p>
+</div>
+
+<h2 id="summary">小结</h2>
+
+<ul>
+  <li>报表 = 服务端 QWeb 渲染的 HTML + PDF 引擎转换。默认引擎 wkhtmltopdf 推荐 0.12.6.1（patched qt）；Odoo 20 还提供可选的 Paper Muncher 引擎。</li>
+  <li>报表动作（<code>ir.actions.report</code>）指定模型、模板、类型和纸张格式，<code>binding_model_id</code> + <code>binding_type="report"</code> 把它放进打印菜单。</li>
+  <li>模板骨架：<code>web.html_container</code> → <code>web.external_layout</code> → <code>&lt;div class="page"&gt;</code>；循环的位置决定是「每条一份」还是「一份清单」。</li>
+  <li>渲染上下文里有 <code>docs</code>、<code>user</code>、<code>res_company</code> 等，表达式是 Python，记录集可以随意导航。</li>
+  <li><code>t-field</code> + <code>t-options</code> 格式化字段；合计用 Python 表达式，累计用循环里的 <code>t-set</code>；<code>t-lang</code> 换语言。</li>
+  <li>自定义报表：名为 <code>report.&lt;模板 XML ID&gt;</code> 的抽象模型，实现 <code>_get_report_values()</code> 返回模板变量。</li>
+</ul>
+
+<div class="exercise">
+  <h3>动手练习</h3>
+  <ol>
+    <li>安装 wkhtmltopdf，按本章做出书目报表。先用 <code>qweb-html</code> 调好样式，再改回 <code>qweb-pdf</code>。</li>
+    <li>把书目报表改写成 HTML 表格版本，并在每一页重复表头。</li>
+    <li>给报表动作加上 <code>print_report_name</code>，让下载的文件名为「Book Catalog - 日期.pdf」。</li>
+    <li>为借书单做一份「借书凭证」报表：每张借书单一份文档，列出会员信息和借的每一本书，底部留签名栏。</li>
+    <li>在「按出版社列书」报表里，给每家出版社加上书的数量和最早 / 最晚的出版年份。</li>
+    <li>把「借书凭证」中「每一本书一行」的部分抽成一个子模板，用 Odoo 20 的属性传参方式 <code>t-call</code> 它。</li>
+  </ol>
+</div>
+<div id="pager"></div>
+</main>
+</div>
+<script src="assets/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,636 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 14 章 · 内置模型 — Odoo 20 开发入门</title>
+<meta name="description" content="认识 Odoo 自带的核心模型：联系人、用户与公司、访问安全、数据库结构、界面元素、系统参数与公司相关字段、消息与活动，并学会用「技术」菜单查看它们。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-chapter="14">
+<div id="app">
+<aside id="sidebar"></aside>
+<main>
+<span class="chapter-eyebrow">第 14 章</span>
+<h1>内置模型</h1>
+<p class="lede">
+  新建一个数据库时，即使一个应用都不装，里面也已经有几百个模型：联系人、用户、公司、菜单、视图、动作……
+  我们在前面的章节里一直在<em>使用</em>它们（比如 <code>res.partner</code>、<code>ir.ui.view</code>），这一章换个角度，
+  把它们摊开来看：每个模型存什么、彼此怎么关联，以及在哪个菜单里能看到它们。
+</p>
+
+<div class="goals">
+  <h4>本章目标</h4>
+  <ul>
+    <li>看懂模型名前缀 <code>res.</code>、<code>ir.</code>、<code>mail.</code> 的含义</li>
+    <li>掌握联系人、用户、公司这组「主数据」模型的关系</li>
+    <li>认识描述「Odoo 自身」的信息仓库模型：安全、数据库结构、界面元素</li>
+    <li>了解系统参数、默认值和公司相关字段在 Odoo 20 里如何存储</li>
+    <li>理解消息、关注者、活动背后的数据模型</li>
+  </ul>
+</div>
+
+<div id="chapter-toc"></div>
+
+<h2 id="prefixes">先看懂模型名的前缀</h2>
+
+<p>
+  Odoo 的模型名通常是 <code>前缀.名字</code> 的形式，前缀告诉你它属于哪一类：
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 240" role="img" aria-label="模型名前缀：res 资源、ir 信息仓库、mail 消息">
+  <rect class="bx-b" x="20" y="24" width="230" height="190" rx="12"/>
+  <text class="ttl mono on-b" x="135" y="56" text-anchor="middle">res.*</text>
+  <text class="lbl on-b" x="135" y="80" text-anchor="middle">资源（resource）</text>
+  <text class="sm" x="135" y="110" text-anchor="middle">业务的「主数据」</text>
+  <text class="sm mono" x="135" y="138" text-anchor="middle">res.partner</text>
+  <text class="sm mono" x="135" y="160" text-anchor="middle">res.users · res.company</text>
+  <text class="sm mono" x="135" y="182" text-anchor="middle">res.country · res.currency</text>
+
+  <rect class="bx-p" x="265" y="24" width="230" height="190" rx="12"/>
+  <text class="ttl mono on-p" x="380" y="56" text-anchor="middle">ir.*</text>
+  <text class="lbl on-p" x="380" y="80" text-anchor="middle">信息仓库（information repository）</text>
+  <text class="sm" x="380" y="110" text-anchor="middle">描述 Odoo 自己的配置</text>
+  <text class="sm mono" x="380" y="138" text-anchor="middle">ir.model · ir.ui.view</text>
+  <text class="sm mono" x="380" y="160" text-anchor="middle">ir.actions.* · ir.access</text>
+  <text class="sm mono" x="380" y="182" text-anchor="middle">ir.config_parameter</text>
+
+  <rect class="bx-g" x="510" y="24" width="230" height="190" rx="12"/>
+  <text class="ttl mono on-g" x="625" y="56" text-anchor="middle">mail.*</text>
+  <text class="lbl on-g" x="625" y="80" text-anchor="middle">消息（Discuss 应用）</text>
+  <text class="sm" x="625" y="110" text-anchor="middle">聊天记录、关注者、活动</text>
+  <text class="sm mono" x="625" y="138" text-anchor="middle">mail.message</text>
+  <text class="sm mono" x="625" y="160" text-anchor="middle">mail.followers</text>
+  <text class="sm mono" x="625" y="182" text-anchor="middle">mail.activity</text>
+</svg>
+<figcaption>图 14-1　三大类内置模型。其他前缀一般就是应用名，比如 <code>sale.order</code>、<code>project.task</code></figcaption>
+</figure>
+
+<p>
+  要查看这些模型，先打开<strong>开发者模式</strong>（第 1 章），然后进入 <strong>设置 → 技术</strong>（Settings → Technical）菜单。
+  本章出现的大部分模型都在这里有对应的菜单项。
+</p>
+
+<h3>怎么读本章的关系图</h3>
+
+<p>本章用简化的实体关系图（ERD）表示模型之间的关系，约定如下：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 170" role="img" aria-label="关系图图例：实线箭头为多对一，双向箭头为多对多，虚线为软引用">
+  <rect class="bx" x="20" y="20" width="110" height="36" rx="8"/><text class="sm mono" x="75" y="43" text-anchor="middle">A</text>
+  <rect class="bx" x="230" y="20" width="110" height="36" rx="8"/><text class="sm mono" x="285" y="43" text-anchor="middle">B</text>
+  <path class="ln" d="M132 38 H226" marker-end="url(#ar)"/>
+  <text class="lbl" x="370" y="43">多对一（Many2one）：A 的一个字段指向一条 B</text>
+
+  <rect class="bx" x="20" y="70" width="110" height="36" rx="8"/><text class="sm mono" x="75" y="93" text-anchor="middle">A</text>
+  <rect class="bx" x="230" y="70" width="110" height="36" rx="8"/><text class="sm mono" x="285" y="93" text-anchor="middle">B</text>
+  <path class="ln" d="M134 88 H226" marker-start="url(#ar)" marker-end="url(#ar)"/>
+  <text class="lbl" x="370" y="93">多对多（Many2many）</text>
+
+  <rect class="bx" x="20" y="120" width="110" height="36" rx="8"/><text class="sm mono" x="75" y="143" text-anchor="middle">A</text>
+  <rect class="bx" x="230" y="120" width="110" height="36" rx="8"/><text class="sm mono" x="285" y="143" text-anchor="middle">任意记录</text>
+  <path class="ln-d" d="M132 138 H226" marker-end="url(#ar)"/>
+  <text class="lbl" x="370" y="143">软引用：用「模型名 + id」两个字段指向，没有数据库外键</text>
+</svg>
+<figcaption>图 14-2　关系图图例。模型名都用单数，即使 Odoo 里有的模型名是复数（如 <code>res.users</code>）</figcaption>
+</figure>
+
+<h2 id="contacts">联系人数据模型</h2>
+
+<p>
+  <strong>联系人</strong>（<code>res.partner</code>）是 Odoo 里最核心的模型之一：凡是需要表示一个人、一个组织或一个地址的地方都用它。
+  客户、供应商、联系人、发票地址、送货地址都是 partner；用户和公司的姓名、邮箱、地址也存放在各自关联的 partner 上。
+  这个模型由 <code>base</code> 模块提供，但相关菜单要安装「联系人」（Contacts）应用后才出现。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 330" role="img" aria-label="联系人数据模型关系图">
+  <rect class="bx-b" x="290" y="130" width="180" height="70" rx="10"/>
+  <text class="ttl mono on-b" x="380" y="160" text-anchor="middle">res.partner</text>
+  <text class="sm" x="380" y="182" text-anchor="middle">联系人 / 公司 / 地址</text>
+  <path class="ln" d="M440 130 C 470 90, 330 90, 350 126" marker-end="url(#ar)"/>
+  <text class="sm mono" x="400" y="96" text-anchor="middle">parent_id（所属公司）</text>
+
+  <rect class="bx" x="20" y="40" width="200" height="50" rx="8"/>
+  <text class="lbl mono" x="120" y="62" text-anchor="middle">res.partner.category</text>
+  <text class="sm" x="120" y="80" text-anchor="middle">标签</text>
+  <path class="ln" d="M222 70 L292 140" marker-start="url(#ar)" marker-end="url(#ar)"/>
+
+  <rect class="bx" x="20" y="140" width="200" height="50" rx="8"/>
+  <text class="lbl mono" x="120" y="162" text-anchor="middle">res.partner.industry</text>
+  <text class="sm" x="120" y="180" text-anchor="middle">行业</text>
+  <path class="ln" d="M288 165 H224" marker-end="url(#ar)"/>
+
+  <rect class="bx" x="20" y="250" width="200" height="50" rx="8"/>
+  <text class="lbl mono" x="120" y="272" text-anchor="middle">res.partner.bank</text>
+  <text class="sm" x="120" y="290" text-anchor="middle">银行账户（含银行名、BIC）</text>
+  <path class="ln" d="M222 270 L300 202" marker-end="url(#ar)"/>
+
+  <rect class="bx" x="540" y="40" width="200" height="50" rx="8"/>
+  <text class="lbl mono" x="640" y="62" text-anchor="middle">res.country.state</text>
+  <text class="sm" x="640" y="80" text-anchor="middle">省 / 州</text>
+  <path class="ln" d="M472 150 L538 80" marker-end="url(#ar)"/>
+
+  <rect class="bx" x="540" y="140" width="200" height="50" rx="8"/>
+  <text class="lbl mono" x="640" y="162" text-anchor="middle">res.country</text>
+  <text class="sm" x="640" y="180" text-anchor="middle">国家</text>
+  <path class="ln" d="M472 165 H536" marker-end="url(#ar)"/>
+  <path class="ln" d="M640 92 V136" marker-end="url(#ar)"/>
+
+  <rect class="bx" x="540" y="250" width="95" height="50" rx="8"/>
+  <text class="sm mono" x="587" y="272" text-anchor="middle">res.currency</text>
+  <text class="sm" x="587" y="290" text-anchor="middle">货币</text>
+  <path class="ln" d="M600 192 L590 246" marker-end="url(#ar)"/>
+  <rect class="bx" x="645" y="250" width="95" height="50" rx="8"/>
+  <text class="sm mono" x="692" y="268" text-anchor="middle">res.country</text>
+  <text class="sm mono" x="692" y="286" text-anchor="middle">.group</text>
+  <path class="ln" d="M680 194 L692 246" marker-start="url(#ar)" marker-end="url(#ar)"/>
+</svg>
+<figcaption>图 14-3　联系人数据模型。<code>parent_id</code> 让联系人可以挂在一个公司类型的联系人下面</figcaption>
+</figure>
+
+<div class="tw"><table>
+  <tr><th>模型</th><th>说明</th><th>在哪里看</th></tr>
+  <tr><td><code>res.partner</code></td><td>联系人。<code>is_company</code> 区分个人和公司，<code>parent_id</code> 指向所属公司，<code>commercial_partner_id</code> 算出「真正做生意的那个实体」</td><td>联系人应用</td></tr>
+  <tr><td><code>res.partner.category</code></td><td>联系人标签，可以有层级</td><td>联系人 → 配置 → 标签</td></tr>
+  <tr><td><code>res.partner.industry</code></td><td>行业分类（预置了欧盟 NACE 分类）</td><td>联系人 → 配置 → 行业</td></tr>
+  <tr><td><code>res.partner.bank</code></td><td>银行账户，属于某个联系人</td><td>联系人 → 配置 → 银行账户</td></tr>
+  <tr><td><code>res.country</code></td><td>国家：ISO 代码、电话区号、货币、地址格式。新建数据库时自动填好</td><td>联系人 → 配置 → 本地化 → 国家</td></tr>
+  <tr><td><code>res.country.state</code></td><td>省、州等行政区</td><td>… → 本地化 → 省/州</td></tr>
+  <tr><td><code>res.country.group</code></td><td>国家分组，比如「欧洲」，用于税、价格表等规则</td><td>… → 本地化 → 国家组</td></tr>
+  <tr><td><code>res.currency</code></td><td>货币。预置了全部货币，用到的需要激活</td><td>开票 / 会计 → 配置 → 货币</td></tr>
+</table></div>
+
+<div class="box ver">
+  <div class="t">&#8682; Odoo 20 变化</div>
+  <p>
+    书中的「银行」模型 <code>res.bank</code> 在 Odoo 20 已经不存在了：银行名称、BIC（SWIFT 代码）和地址直接存放在银行账户 <code>res.partner.bank</code>
+    的 <code>bank_name</code>、<code>bank_bic</code> 等字段上，不再需要先维护一份「银行」清单。
+  </p>
+</div>
+
+<h2 id="users-companies">用户与公司数据模型</h2>
+
+<p>
+  用户和公司在 <strong>设置 → 用户和公司</strong> 菜单里管理。它们都有一个隐藏的「影子」联系人：
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 330" role="img" aria-label="用户与公司数据模型关系图">
+  <rect class="bx-b" x="290" y="20" width="180" height="60" rx="10"/>
+  <text class="ttl mono on-b" x="380" y="48" text-anchor="middle">res.partner</text>
+  <text class="sm" x="380" y="68" text-anchor="middle">姓名、邮箱、头像、地址</text>
+
+  <rect class="bx-a" x="60" y="150" width="200" height="70" rx="10"/>
+  <text class="ttl mono on-a" x="160" y="180" text-anchor="middle">res.users</text>
+  <text class="sm" x="160" y="202" text-anchor="middle">登录名、密码、偏好</text>
+
+  <rect class="bx-g" x="500" y="150" width="200" height="70" rx="10"/>
+  <text class="ttl mono on-g" x="600" y="180" text-anchor="middle">res.company</text>
+  <text class="sm" x="600" y="202" text-anchor="middle">公司、货币、Logo</text>
+
+  <path class="ln" d="M180 148 L320 82" marker-end="url(#ar)"/>
+  <text class="sm mono" x="110" y="104">partner_id</text>
+  <text class="sm" x="110" y="122">（委托继承）</text>
+  <path class="ln" d="M580 148 L440 82" marker-end="url(#ar)"/>
+  <text class="sm mono" x="506" y="104">partner_id</text>
+
+  <path class="ln" d="M262 172 H496" marker-end="url(#ar)"/>
+  <text class="sm mono" x="380" y="164" text-anchor="middle">company_id（当前默认公司）</text>
+  <path class="ln" d="M264 204 H496" marker-start="url(#ar)" marker-end="url(#ar)"/>
+  <text class="sm mono" x="380" y="222" text-anchor="middle">company_ids（允许的公司）</text>
+
+  <path class="ln" d="M690 222 C 740 270, 650 300, 620 226" marker-end="url(#ar)"/>
+  <text class="sm mono" x="640" y="300" text-anchor="middle">parent_id（分支机构）</text>
+
+  <rect class="bx-p" x="60" y="260" width="200" height="56" rx="10"/>
+  <text class="ttl mono on-p" x="160" y="286" text-anchor="middle">res.groups</text>
+  <text class="sm" x="160" y="305" text-anchor="middle">权限组</text>
+  <path class="ln" d="M160 224 V256" marker-start="url(#ar)" marker-end="url(#ar)"/>
+  <text class="sm mono" x="170" y="245">group_ids</text>
+</svg>
+<figcaption>图 14-4　用户和公司都通过 <code>partner_id</code> 关联到一个联系人，联系方式保存在那里</figcaption>
+</figure>
+
+<ul>
+  <li><strong>用户</strong> <code>res.users</code>：登录 Odoo 的账号。它用第 4 章讲过的<strong>委托继承</strong>（<code>_inherits</code>）关联 <code>res.partner</code>，
+      所以 <code>user.name</code>、<code>user.email</code> 其实读的是对应联系人的字段。</li>
+  <li><strong>公司</strong> <code>res.company</code>：组织本身和与公司相关的配置（货币、Logo、报表抬头等）。新数据库自带一家公司，XML ID 是 <code>base.main_company</code>。
+      公司可以通过 <code>parent_id</code> 组成「总公司 – 分支机构」层级。</li>
+  <li><strong>权限组</strong> <code>res.groups</code>：用户属于若干个组，从组获得权限。只有在开发者模式下才能看到「组」菜单。</li>
+</ul>
+
+<div class="box tip">
+  <div class="t">为什么用户背后要有一个联系人？</div>
+  <p>
+    因为很多地方只关心「一个人」，不关心他是不是能登录：消息的作者、文档的关注者、被 @ 的人都是 partner。
+    这样内部用户、门户用户、完全不登录的外部联系人可以用同一种方式处理。第 13 章的门户用户就是从联系人「升级」来的。
+  </p>
+</div>
+
+<h2 id="security">访问安全相关模型</h2>
+
+<p>
+  用户通过权限组获得对功能和数据的访问权。在 Odoo 20 里，相关模型在 <strong>设置 → 技术 → 安全</strong>（需开发者模式）下：
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 300" role="img" aria-label="访问安全数据模型关系图">
+  <rect class="bx-a" x="20" y="120" width="150" height="60" rx="10"/>
+  <text class="ttl mono on-a" x="95" y="148" text-anchor="middle">res.users</text>
+  <text class="sm" x="95" y="168" text-anchor="middle">用户</text>
+
+  <rect class="bx-p" x="240" y="120" width="170" height="60" rx="10"/>
+  <text class="ttl mono on-p" x="325" y="148" text-anchor="middle">res.groups</text>
+  <text class="sm" x="325" y="168" text-anchor="middle">权限组</text>
+  <path class="ln" d="M172 150 H236" marker-start="url(#ar)" marker-end="url(#ar)"/>
+  <text class="sm mono" x="204" y="140" text-anchor="middle">group_ids</text>
+  <path class="ln" d="M380 120 C 420 70, 260 70, 290 116" marker-end="url(#ar)"/>
+  <text class="sm mono" x="335" y="62" text-anchor="middle">implied_ids（包含的组）</text>
+
+  <rect class="bx" x="240" y="230" width="170" height="54" rx="10"/>
+  <text class="lbl mono" x="325" y="254" text-anchor="middle">res.groups.privilege</text>
+  <text class="sm" x="325" y="272" text-anchor="middle">权限项（用户表单上的一行）</text>
+  <path class="ln" d="M325 182 V226" marker-end="url(#ar)"/>
+
+  <rect class="bx-r" x="490" y="40" width="250" height="100" rx="10"/>
+  <text class="ttl mono on-r" x="615" y="66" text-anchor="middle">ir.access</text>
+  <text class="sm" x="615" y="88" text-anchor="middle">哪个组 · 哪个模型 · 什么操作</text>
+  <text class="sm" x="615" y="108" text-anchor="middle">· 哪些记录（域）</text>
+  <text class="sm" x="615" y="128" text-anchor="middle">组留空 = 对所有人的限制</text>
+  <path class="ln" d="M488 100 L412 136" marker-end="url(#ar)"/>
+  <text class="sm mono" x="452" y="104" text-anchor="middle">group_id</text>
+
+  <rect class="bx" x="490" y="200" width="250" height="56" rx="10"/>
+  <text class="lbl mono" x="615" y="224" text-anchor="middle">ir.model</text>
+  <text class="sm" x="615" y="244" text-anchor="middle">模型</text>
+  <path class="ln" d="M615 142 V196" marker-end="url(#ar)"/>
+  <text class="sm mono" x="660" y="174" text-anchor="middle">model_id</text>
+</svg>
+<figcaption>图 14-5　Odoo 20 的访问安全：一条 <code>ir.access</code> 同时描述了模型权限和记录范围</figcaption>
+</figure>
+
+<div class="tw"><table>
+  <tr><th>模型</th><th>说明</th><th>菜单</th></tr>
+  <tr><td><code>res.groups</code></td><td>权限组。<code>implied_ids</code> 表示「属于本组就自动属于那些组」，比如「图书馆经理」包含「图书馆用户」</td><td>设置 → 用户和公司 → 组</td></tr>
+  <tr><td><code>res.groups.privilege</code></td><td>把同一应用的几个组归为一项「权限」，在用户表单上显示为一个下拉框（如「图书馆：用户 / 经理」）</td><td>设置 → 技术 → 安全 → 权限</td></tr>
+  <tr><td><code>ir.access</code></td><td>访问规则：组 + 模型 + 操作（c/r/u/d）+ 可选的域</td><td>设置 → 技术 → 安全 → 访问权限</td></tr>
+</table></div>
+
+<div class="vs">
+  <div class="old">
+    <div class="h">Odoo 15（书中）</div>
+    <div class="code" data-lang="text"><pre>
+res.groups
+  ├─ ir.model.access   组对模型的 CRUD 权限
+  └─ ir.rule           用域限制能操作哪些记录
+</pre></div>
+  </div>
+  <div class="new">
+    <div class="h">Odoo 20</div>
+    <div class="code" data-lang="text"><pre>
+res.groups ── privilege_id ──&gt; res.groups.privilege
+  └─ ir.access         组 + 模型 + 操作 + 域，一条搞定
+</pre></div>
+  </div>
+</div>
+
+<div class="box ver">
+  <div class="t">&#8682; Odoo 20 变化</div>
+  <p>
+    <code>ir.model.access</code> 和 <code>ir.rule</code> 合并为 <code>ir.access</code>（详见第 3 章）；组的分类从 <code>category_id</code> 改为通过「权限」
+    <code>res.groups.privilege</code> 归类；字段改名：组的 <code>users</code> → <code>user_ids</code>，用户的 <code>groups_id</code> → <code>group_ids</code>。
+  </p>
+</div>
+
+<h2 id="database-structure">数据库结构模型</h2>
+
+<p>
+  <code>ir.</code> 开头的「信息仓库」模型描述的是 Odoo <strong>自身</strong>：装了哪些模型、每个模型有哪些字段、每条数据的 XML ID 是什么。
+  它们在 <strong>设置 → 技术 → 数据库结构</strong> 和 <strong>设置 → 技术 → 序列与标识符</strong> 菜单下：
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 320" role="img" aria-label="数据库结构数据模型关系图">
+  <rect class="bx-p" x="290" y="20" width="180" height="60" rx="10"/>
+  <text class="ttl mono on-p" x="380" y="48" text-anchor="middle">ir.model</text>
+  <text class="sm" x="380" y="68" text-anchor="middle">一个模型</text>
+
+  <rect class="bx" x="40" y="130" width="190" height="56" rx="10"/>
+  <text class="lbl mono" x="135" y="154" text-anchor="middle">ir.model.fields</text>
+  <text class="sm" x="135" y="174" text-anchor="middle">字段</text>
+  <path class="ln" d="M180 128 L300 82" marker-end="url(#ar)"/>
+
+  <rect class="bx" x="40" y="240" width="190" height="56" rx="10"/>
+  <text class="lbl mono" x="135" y="262" text-anchor="middle">ir.model.fields</text>
+  <text class="sm mono" x="135" y="282" text-anchor="middle">.selection（选项）</text>
+  <path class="ln" d="M135 238 V190" marker-end="url(#ar)"/>
+
+  <rect class="bx" x="285" y="130" width="190" height="56" rx="10"/>
+  <text class="lbl mono" x="380" y="154" text-anchor="middle">ir.model.constraint</text>
+  <text class="sm" x="380" y="174" text-anchor="middle">数据库约束</text>
+  <path class="ln" d="M380 128 V84" marker-end="url(#ar)"/>
+
+  <rect class="bx" x="530" y="130" width="190" height="56" rx="10"/>
+  <text class="lbl mono" x="625" y="154" text-anchor="middle">ir.model.relation</text>
+  <text class="sm" x="625" y="174" text-anchor="middle">多对多关系表</text>
+  <path class="ln" d="M580 128 L460 82" marker-end="url(#ar)"/>
+
+  <rect class="bx-g" x="285" y="240" width="190" height="56" rx="10"/>
+  <text class="lbl mono on-g" x="380" y="262" text-anchor="middle">ir.model.data</text>
+  <text class="sm" x="380" y="282" text-anchor="middle">XML ID</text>
+  <rect class="bx-g" x="530" y="240" width="190" height="56" rx="10"/>
+  <text class="lbl mono on-g" x="625" y="262" text-anchor="middle">ir.attachment</text>
+  <text class="sm" x="625" y="282" text-anchor="middle">附件</text>
+
+  <rect class="bx-d" x="560" y="20" width="180" height="60" rx="10"/>
+  <text class="lbl" x="650" y="46" text-anchor="middle">任意记录</text>
+  <text class="sm mono" x="650" y="66" text-anchor="middle">model + res_id</text>
+  <path class="ln-d" d="M477 248 L598 84" marker-end="url(#ar)"/>
+  <path class="ln-d" d="M722 262 C 752 220, 752 120, 700 84" marker-end="url(#ar)"/>
+</svg>
+<figcaption>图 14-6　模型、字段、约束都是记录；XML ID 和附件用「模型名 + id」软引用任意记录</figcaption>
+</figure>
+
+<div class="tw"><table>
+  <tr><th>模型</th><th>说明</th></tr>
+  <tr><td><code>ir.model</code></td><td>已安装的每个模型一条记录，大多对应一张数据库表。「所属应用」字段列出参与定义它的模块</td></tr>
+  <tr><td><code>ir.model.fields</code></td><td>每个字段一条记录。开发者菜单里的「查看字段」打开的就是它（书里写成了 <code>ir.model.field</code>，少了 s）</td></tr>
+  <tr><td><code>ir.model.constraint</code> / <code>ir.model.relation</code></td><td>模块创建的数据库约束和多对多关系表，卸载模块时据此清理</td></tr>
+  <tr><td><code>ir.model.data</code></td><td><strong>外部标识符</strong>（XML ID）：把 <code>library_app.book_odoo</code> 这样的名字映射到具体数据库里的 id。菜单：技术 → 序列与标识符 → 外部标识符</td></tr>
+  <tr><td><code>ir.sequence</code></td><td>自动编号规则，比如销售订单号 <code>S00042</code></td></tr>
+  <tr><td><code>ir.attachment</code></td><td>所有附件和二进制字段（图片等）统一存放的地方</td></tr>
+  <tr><td><code>decimal.precision</code></td><td>小数精度配置，比如「产品价格保留 2 位小数」</td></tr>
+</table></div>
+
+<div class="box tip">
+  <div class="t">「这条记录的 XML ID 是什么？」</div>
+  <p>
+    打开任意一条记录，点开发者工具（虫子图标）→「数据」→「查看元数据」，能看到它的 XML ID、创建者、最后修改时间。
+    写继承视图时需要知道父视图的 XML ID，就用这个方法查。
+  </p>
+</div>
+
+<h2 id="ui">界面相关模型</h2>
+
+<p>
+  菜单、视图、动作也都是存在数据库里的记录——这正是我们在模块的 XML 文件里用 <code>&lt;record&gt;</code> 创建它们的原因。
+  它们在 <strong>设置 → 技术 → 用户界面</strong> 和 <strong>设置 → 技术 → 动作</strong> 下：
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 320" role="img" aria-label="界面与动作数据模型关系图">
+  <rect class="bx-b" x="20" y="40" width="170" height="60" rx="10"/>
+  <text class="ttl mono on-b" x="105" y="68" text-anchor="middle">ir.ui.menu</text>
+  <text class="sm" x="105" y="88" text-anchor="middle">菜单（树形）</text>
+  <path class="ln" d="M150 40 C 180 0, 40 0, 70 36" marker-end="url(#ar)"/>
+  <text class="sm mono" x="105" y="14" text-anchor="middle">parent_id</text>
+
+  <rect class="bx-a" x="270" y="20" width="220" height="60" rx="10"/>
+  <text class="lbl mono on-a" x="380" y="46" text-anchor="middle">ir.actions.act_window</text>
+  <text class="sm" x="380" y="66" text-anchor="middle">窗口动作：打开视图</text>
+  <rect class="bx-a" x="270" y="100" width="220" height="60" rx="10"/>
+  <text class="lbl mono on-a" x="380" y="126" text-anchor="middle">ir.actions.report</text>
+  <text class="sm" x="380" y="146" text-anchor="middle">报表动作</text>
+  <rect class="bx-a" x="270" y="180" width="220" height="60" rx="10"/>
+  <text class="lbl mono on-a" x="380" y="206" text-anchor="middle">ir.actions.server</text>
+  <text class="sm" x="380" y="226" text-anchor="middle">服务器动作：执行操作 / 代码</text>
+  <rect class="bx" x="270" y="260" width="220" height="50" rx="10"/>
+  <text class="lbl mono" x="380" y="282" text-anchor="middle">ir.cron</text>
+  <text class="sm" x="380" y="300" text-anchor="middle">定时任务（委托继承服务器动作）</text>
+  <path class="ln" d="M380 258 V244" marker-end="url(#ar)"/>
+
+  <path class="ln-d" d="M192 70 C 230 70, 230 50, 266 50" marker-end="url(#ar)"/>
+  <text class="sm mono" x="200" y="120">action</text>
+  <path class="ln-d" d="M192 80 C 230 90, 230 130, 266 130" marker-end="url(#ar)"/>
+  <path class="ln-d" d="M192 90 C 220 120, 230 200, 266 210" marker-end="url(#ar)"/>
+
+  <rect class="bx-g" x="570" y="60" width="170" height="70" rx="10"/>
+  <text class="ttl mono on-g" x="655" y="90" text-anchor="middle">ir.ui.view</text>
+  <text class="sm" x="655" y="112" text-anchor="middle">视图 / QWeb 模板</text>
+  <path class="ln" d="M700 60 C 740 20, 600 20, 620 56" marker-end="url(#ar)"/>
+  <text class="sm mono" x="655" y="16" text-anchor="middle">inherit_id</text>
+  <path class="ln" d="M492 50 L566 86" marker-start="url(#ar)" marker-end="url(#ar)"/>
+  <path class="ln-d" d="M492 130 L566 108" marker-end="url(#ar)"/>
+  <text class="sm" x="560" y="160">报表通过模板名</text>
+  <text class="sm" x="560" y="178">找到 QWeb 视图</text>
+</svg>
+<figcaption>图 14-7　菜单触发动作，窗口动作再打开视图；视图可以继承视图</figcaption>
+</figure>
+
+<div class="tw"><table>
+  <tr><th>模型</th><th>说明</th></tr>
+  <tr><td><code>ir.ui.menu</code></td><td>菜单项，组成树形结构。叶子菜单通过 <code>action</code> 字段触发一个动作</td></tr>
+  <tr><td><code>ir.ui.view</code></td><td>视图定义及其扩展：表单、列表、看板……以及 QWeb 模板（报表、网页都在这里）</td></tr>
+  <tr><td><code>ir.actions.actions</code></td><td>所有动作类型的基础模型，一般不直接使用</td></tr>
+  <tr><td><code>ir.actions.act_window</code></td><td>窗口动作，最常用：用一组视图（列表 + 表单……）展示某个模型</td></tr>
+  <tr><td><code>ir.actions.report</code></td><td>报表动作（第 12 章）</td></tr>
+  <tr><td><code>ir.actions.server</code></td><td>服务器动作：创建 / 修改记录、发消息、调用 Webhook、执行 Python 代码等</td></tr>
+  <tr><td><code>ir.actions.client</code></td><td>客户端动作：打开一个前端注册的 OWL 组件（比如 Discuss 界面）</td></tr>
+  <tr><td><code>ir.cron</code></td><td>定时任务：按计划执行一个服务器动作（设置 → 技术 → 自动化 → 计划的动作）</td></tr>
+</table></div>
+
+<div class="box tip">
+  <div class="t">排查问题的好帮手</div>
+  <p>
+    某个视图显示不对？到「技术 → 用户界面 → 视图」里按模型搜索，就能看到它的主视图和所有继承视图，以及每一个来自哪个模块。
+    这比在源代码里一个个 grep 快得多。
+  </p>
+</div>
+
+<h2 id="parameters">系统参数、默认值与公司相关字段</h2>
+
+<p><strong>设置 → 技术 → 参数</strong> 菜单下有几个保存「配置」的模型：</p>
+
+<ul>
+  <li><strong>系统参数</strong> <code>ir.config_parameter</code>：一个简单的「键 → 值」表，存全局配置。例如 <code>web.base.url</code> 保存服务器的公网地址，
+      邮件模板里生成链接时就用它。代码里这样读取：</li>
+</ul>
+
+<div class="code" data-lang="py">
+<pre>
+ICP = self.env["ir.config_parameter"].sudo()
+base_url = ICP.get_str("web.base.url")
+batch_size = ICP.get_int("mail.batch_size", 50)   # 第二个参数是默认值
+ICP.set_bool("my_module.feature_enabled", True)
+</pre>
+</div>
+
+<div class="box ver">
+  <div class="t">&#8682; Odoo 20 变化</div>
+  <p>
+    书中（以及大量旧代码）使用的 <code>get_param()</code> / <code>set_param()</code> 在 Odoo 20 被按类型拆分的方法取代：
+    <code>get_str()</code>、<code>get_int()</code>、<code>get_float()</code>、<code>get_bool()</code> 和对应的 <code>set_*()</code>，
+    取出来的值直接就是正确的 Python 类型，不用再自己转换。只想要服务器地址的话，记录上的 <code>record.get_base_url()</code> 更方便。
+  </p>
+</div>
+
+<ul>
+  <li><strong>默认值</strong> <code>ir.default</code>：用户在界面上「设为默认值」或模块数据里设置的字段默认值，可以按用户、按公司区分。</li>
+</ul>
+
+<h3>公司相关字段（property 字段）</h3>
+
+<p>
+  在多公司环境中，有些字段对同一条记录、在不同公司下需要有不同的值。比如同一个客户，在 A 公司记到「应收账款 1122」科目，
+  在 B 公司记到另一个科目。这种字段用 <code>company_dependent=True</code> 声明：
+</p>
+
+<div class="code" data-lang="py">
+<pre>
+property_account_receivable_id = fields.Many2one(
+    "account.account",
+    company_dependent=True,
+)
+</pre>
+</div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 250" role="img" aria-label="公司相关字段的存储方式：Odoo 15 用 ir.property 表，Odoo 20 用表内 jsonb 列">
+  <text class="ttl" x="190" y="30" text-anchor="middle">Odoo 15：单独的 ir.property 表</text>
+  <rect class="bx" x="30" y="46" width="320" height="38" rx="6"/>
+  <text class="sm mono" x="44" y="70">res.partner（表里没有这个列）</text>
+  <rect class="bx-d" x="30" y="100" width="320" height="120" rx="8"/>
+  <text class="sm mono" x="44" y="124">ir.property</text>
+  <text class="sm mono" x="44" y="148">res_id=res.partner,62  公司 A → 1122</text>
+  <text class="sm mono" x="44" y="170">res_id=res.partner,62  公司 B → 2211</text>
+  <text class="sm mono" x="44" y="192">res_id=（空）          公司 A → 默认值</text>
+  <path class="ln-d" d="M190 86 V96" />
+
+  <text class="ttl on-g" x="570" y="30" text-anchor="middle">Odoo 20：表内的 jsonb 列</text>
+  <rect class="bx-g" x="400" y="46" width="340" height="100" rx="8"/>
+  <text class="sm mono" x="414" y="70">res_partner</text>
+  <text class="sm mono" x="414" y="96">id = 62</text>
+  <text class="sm mono" x="414" y="120">property_account_receivable_id =</text>
+  <text class="sm mono" x="434" y="140">{"1": 1122, "2": 2211}</text>
+  <rect class="bx" x="400" y="162" width="340" height="58" rx="8"/>
+  <text class="sm mono" x="414" y="186">ir.default</text>
+  <text class="sm" x="414" y="208">公司没有单独设值时，用这里的默认值兜底</text>
+</svg>
+<figcaption>图 14-8　公司相关字段的存储：键是公司 id，值是该公司下的字段值</figcaption>
+</figure>
+
+<div class="box ver">
+  <div class="t">&#8682; Odoo 20 变化</div>
+  <p>
+    书中讲的「公司属性」模型 <code>ir.property</code> 在 Odoo 18 被移除。现在公司相关字段直接存成模型表里的一个 <strong>jsonb</strong> 列（以公司 id 为键），
+    读写、搜索都快得多；某公司没有值时的后备默认值存放在 <code>ir.default</code>。对开发者来说，声明方式 <code>company_dependent=True</code> 没变。
+  </p>
+</div>
+
+<h2 id="messaging">消息与活动数据模型</h2>
+
+<p>
+  表单底部的「聊天器」（chatter）背后是 Discuss 应用（技术名 <code>mail</code>）提供的一组模型，相关菜单在 <strong>设置 → 技术 → 讨论</strong> 下。
+  第 8 章我们给借书单继承了 <code>mail.thread</code> 和 <code>mail.activity.mixin</code>，就是接入了这套模型：
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 340" role="img" aria-label="消息与活动数据模型关系图">
+  <rect class="bx-d" x="280" y="20" width="200" height="66" rx="10"/>
+  <text class="ttl" x="380" y="46" text-anchor="middle">任意业务记录</text>
+  <text class="sm" x="380" y="68" text-anchor="middle">继承 mail.thread / activity.mixin</text>
+
+  <rect class="bx-b" x="20" y="140" width="190" height="66" rx="10"/>
+  <text class="ttl mono on-b" x="115" y="168" text-anchor="middle">mail.message</text>
+  <text class="sm" x="115" y="190" text-anchor="middle">消息 / 备注 / 变更记录</text>
+  <path class="ln-d" d="M150 138 L300 88" marker-end="url(#ar)"/>
+  <text class="sm mono" x="120" y="100">model + res_id</text>
+
+  <rect class="bx" x="20" y="260" width="190" height="56" rx="10"/>
+  <text class="lbl mono" x="115" y="284" text-anchor="middle">mail.message.subtype</text>
+  <text class="sm" x="115" y="304" text-anchor="middle">子类型：备注 / 讨论 / …</text>
+  <path class="ln" d="M115 208 V256" marker-end="url(#ar)"/>
+
+  <rect class="bx-g" x="285" y="150" width="190" height="56" rx="10"/>
+  <text class="lbl mono on-g" x="380" y="174" text-anchor="middle">mail.followers</text>
+  <text class="sm" x="380" y="194" text-anchor="middle">关注者</text>
+  <path class="ln-d" d="M380 148 V90" marker-end="url(#ar)"/>
+  <rect class="bx" x="285" y="260" width="190" height="56" rx="10"/>
+  <text class="lbl mono" x="380" y="284" text-anchor="middle">res.partner</text>
+  <text class="sm" x="380" y="304" text-anchor="middle">谁在关注</text>
+  <path class="ln" d="M380 208 V256" marker-end="url(#ar)"/>
+  <path class="ln" d="M282 200 L214 266" marker-start="url(#ar)" marker-end="url(#ar)"/>
+  <text class="sm" x="262" y="246">订阅的子类型</text>
+
+  <rect class="bx-a" x="550" y="140" width="190" height="66" rx="10"/>
+  <text class="ttl mono on-a" x="645" y="168" text-anchor="middle">mail.activity</text>
+  <text class="sm" x="645" y="190" text-anchor="middle">计划活动（待办）</text>
+  <path class="ln-d" d="M610 138 L460 88" marker-end="url(#ar)"/>
+  <text class="sm mono" x="590" y="106">res_model + res_id</text>
+  <rect class="bx" x="550" y="260" width="190" height="56" rx="10"/>
+  <text class="lbl mono" x="645" y="284" text-anchor="middle">mail.activity.type</text>
+  <text class="sm" x="645" y="304" text-anchor="middle">电话 / 会议 / 待办…</text>
+  <path class="ln" d="M645 208 V256" marker-end="url(#ar)"/>
+</svg>
+<figcaption>图 14-9　消息、关注者和活动都用「模型名 + id」软引用业务记录，所以任何模型都能接入</figcaption>
+</figure>
+
+<div class="tw"><table>
+  <tr><th>模型</th><th>说明</th></tr>
+  <tr><td><code>mail.message</code></td><td>每一条消息：发送的邮件、内部备注、字段变更日志、系统通知</td></tr>
+  <tr><td><code>mail.message.subtype</code></td><td>消息子类型。基本的有「备注」（内部）、「讨论」（对外）、「活动」；应用还可以定义自己的，比如「借书单已完成」</td></tr>
+  <tr><td><code>mail.followers</code></td><td>某条记录的关注者，以及每个关注者订阅了哪些子类型。新消息的子类型在订阅列表里，关注者才会收到通知</td></tr>
+  <tr><td><code>mail.activity</code></td><td>计划活动：给某人安排在某天对某条记录做某事</td></tr>
+  <tr><td><code>mail.activity.type</code></td><td>活动类型：邮件、电话、会议、待办……可以自行配置</td></tr>
+  <tr><td><code>discuss.channel</code></td><td>Discuss 里的频道和私聊（Odoo 17 之前叫 <code>mail.channel</code>）</td></tr>
+</table></div>
+
+<h3>字段变更跟踪</h3>
+
+<p>
+  在继承了 <code>mail.thread</code> 的模型上，给字段加 <code>tracking=True</code>，字段值改变时 chatter 里就会自动记一条「旧值 → 新值」：
+</p>
+
+<div class="code" data-lang="py">
+<pre>
+stage_id = fields.Many2one("library.checkout.stage", tracking=True)
+</pre>
+</div>
+
+<div class="box warn">
+  <div class="t">书中的小错误</div>
+  <p>书里写的字段属性是 <code>tracked=True</code>，正确的写法是 <code>tracking=True</code>（也可以写一个整数，表示显示顺序）。</p>
+</div>
+
+<div class="box ver">
+  <div class="t">&#8682; Odoo 20 变化</div>
+  <p>
+    书里说变更日志存放在 <code>mail.tracking.value</code> 模型。Odoo 20 里，「旧值 → 新值」默认直接渲染进消息正文，<code>mail</code> 模块本身不再有这个模型；
+    如果需要可供查询、审计的结构化变更记录，可以安装 <strong>Discuss Tracking</strong>（<code>mail_tracking</code>）模块，它会重新提供 <code>mail.tracking.value</code> 模型和对应菜单。
+  </p>
+</div>
+
+<p>
+  多数时候，我们只需要调用几个 API（<code>message_post()</code>、<code>activity_schedule()</code> 等，见第 8 章），不用关心数据怎么存。
+  但当你需要精细控制「谁在什么情况下收到通知」时，理解子类型和关注者订阅的关系就很有用了。
+</p>
+
+<h2 id="summary">小结</h2>
+
+<ul>
+  <li><code>res.*</code> 是业务主数据，<code>ir.*</code> 描述 Odoo 自身，<code>mail.*</code> 是消息系统。在开发者模式下的「设置 → 技术」菜单里可以查看它们。</li>
+  <li><code>res.partner</code> 是一切「人、组织、地址」的基础；用户和公司都通过 <code>partner_id</code> 关联一个联系人。</li>
+  <li>访问安全：用户属于 <code>res.groups</code>，组之间可以包含（<code>implied_ids</code>），Odoo 20 用 <code>ir.access</code> 一张表描述模型权限和记录范围。</li>
+  <li>模型、字段、XML ID、菜单、视图、动作都是数据库里的记录，这就是 Odoo 可以在界面上自定义、在 XML 里声明的基础。</li>
+  <li>系统参数存在 <code>ir.config_parameter</code>；公司相关字段在 Odoo 20 存为表内 jsonb 列，后备默认值在 <code>ir.default</code>。</li>
+  <li>消息、关注者、活动都用「模型名 + id」软引用业务记录；字段变更跟踪用 <code>tracking=True</code>。</li>
+</ul>
+
+<div class="exercise">
+  <h3>动手练习</h3>
+  <ol>
+    <li>打开开发者模式，在「技术 → 数据库结构 → 模型」里找到 <code>library.book</code>，查看它有哪些字段、来自哪些模块。</li>
+    <li>在「技术 → 序列与标识符 → 外部标识符」里搜索 <code>library_app</code>，看看第 3 章的 XML 文件创建了哪些记录。</li>
+    <li>在「技术 → 用户界面 → 视图」里找出 <code>library.book</code> 的表单视图，有几个继承视图？分别来自哪个模块？</li>
+    <li>在「技术 → 参数 → 系统参数」里找到 <code>web.base.url</code>。想一想：部署到生产环境后，为什么要确认这个值是正确的公网地址？</li>
+    <li>给借书单的 <code>stage_id</code> 和 <code>member_id</code> 字段加上 <code>tracking=True</code>，修改一张借书单，观察 chatter 里出现的变更记录。</li>
+  </ol>
+</div>
+<div id="pager"></div>
+</main>
+</div>
+<script src="assets/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,734 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 9 章 · 外部 API — Odoo 20 开发入门</title>
+<meta name="description" content="用 Odoo 19 引入的 JSON-2 API 和 API Key，从外部程序读写 Odoo 数据，并写一个命令行图书客户端；同时了解已废弃的 XML-RPC / JSON-RPC 以及迁移方法。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-chapter="9">
+<div id="app">
+<aside id="sidebar"></aside>
+<main>
+<span class="chapter-eyebrow">第 9 章</span>
+<h1>外部 API</h1>
+<p class="lede">
+  Odoo 服务器对外开放了一套 API：Web 客户端能做的事，别的程序也能做。用它可以写脚本批量导入导出数据，
+  也可以把 Odoo 和其他系统（网店、仓储系统、BI 工具……）连接起来，让 Odoo 充当它们的「后端」。
+  这一章先探索 API，再用 Python 写一个管理书目的命令行小程序。
+</p>
+
+<div class="goals">
+  <h4>本章目标</h4>
+  <ul>
+    <li>理解 Odoo 外部 API 的现状：新的 <strong>JSON-2 API</strong> 与已废弃的 XML-RPC / JSON-RPC</li>
+    <li>创建 API Key，用 HTTP 请求调用任意模型的公开方法</li>
+    <li>掌握 <code>search_read</code>、<code>read</code>、<code>create</code>、<code>write</code>、<code>unlink</code> 等常用调用</li>
+    <li>理解「每次调用一个事务」带来的设计约束</li>
+    <li>写一个分层的命令行客户端，并能在新旧两种协议之间切换</li>
+  </ul>
+</div>
+
+<div id="chapter-toc"></div>
+
+<div class="box ver">
+  <div class="t">&#8682; 这一章和原书差别最大</div>
+  <p>
+    原书全部使用 <strong>XML-RPC</strong>（<code>/xmlrpc/2/common</code>、<code>/xmlrpc/2/object</code>）和基于 JSON-RPC 的 <strong>OdooRPC</strong> 库。
+    Odoo 19 推出了全新的 <strong>JSON-2 API</strong>，同时宣布：<code>/xmlrpc</code>、<code>/xmlrpc/2</code>、<code>/jsonrpc</code> 三个端点<strong>已废弃</strong>，
+    其中数据库服务（db）在 Odoo 20 已经移除，模型调用服务（common、object）计划在 <strong>Odoo 22（2028 年秋）</strong>移除。
+    在 Odoo 20 上调用旧端点仍然可以工作，但每次调用都会在服务器日志里留下一条废弃警告。新项目请直接使用 JSON-2。
+  </p>
+</div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 190" role="img" aria-label="Odoo 外部 API 的演变时间线">
+  <path class="ln" d="M30 90 H730"/>
+  <circle cx="80" cy="90" r="7" class="bx"/>
+  <circle cx="250" cy="90" r="7" class="bx"/>
+  <circle cx="420" cy="90" r="8" class="bx-a"/>
+  <circle cx="560" cy="90" r="8" class="bx-a"/>
+  <circle cx="700" cy="90" r="8" class="bx-r"/>
+  <text class="ttl" x="80" y="68" text-anchor="middle">早期</text>
+  <text class="ttl" x="250" y="68" text-anchor="middle">Odoo 14</text>
+  <text class="ttl on-a" x="420" y="68" text-anchor="middle">Odoo 19</text>
+  <text class="ttl on-a" x="560" y="68" text-anchor="middle">Odoo 20</text>
+  <text class="ttl on-r" x="700" y="68" text-anchor="middle">Odoo 22</text>
+  <text class="sm" x="80" y="116" text-anchor="middle">XML-RPC / JSON-RPC</text>
+  <text class="sm" x="80" y="132" text-anchor="middle">账号 + 密码</text>
+  <text class="sm" x="250" y="116" text-anchor="middle">引入 API Key</text>
+  <text class="sm" x="250" y="132" text-anchor="middle">可代替密码</text>
+  <text class="sm" x="420" y="116" text-anchor="middle">JSON-2 API 上线</text>
+  <text class="sm" x="420" y="132" text-anchor="middle">旧端点标记废弃</text>
+  <text class="sm" x="560" y="116" text-anchor="middle">旧 db 服务移除</text>
+  <text class="sm" x="560" y="132" text-anchor="middle">（本教程版本）</text>
+  <text class="sm" x="700" y="116" text-anchor="middle">计划移除</text>
+  <text class="sm" x="700" y="132" text-anchor="middle">/xmlrpc /jsonrpc</text>
+  <text class="sm" x="380" y="176" text-anchor="middle">注意：只是「外部 API」端点被废弃；模块里自己写的 @route(type="jsonrpc") 控制器不受影响</text>
+</svg>
+<figcaption>图 9-1　外部 API 的演变</figcaption>
+</figure>
+
+<h2 id="project">学习项目：书目命令行工具</h2>
+
+<p>我们要写一个以 Odoo 为后端的命令行（CLI）小程序，功能刻意保持简单，好把注意力放在「怎么和 Odoo 对话」上：</p>
+<ul>
+  <li>按书名搜索并列出书</li>
+  <li>添加新书</li>
+  <li>修改书名</li>
+  <li>删除书</li>
+</ul>
+
+<div class="code" data-lang="bash">
+<pre>
+$ python3 library.py add "Moby-Dick"
+Book added with ID 3 for title Moby-Dick.
+$ python3 library.py list "moby"
+3 Moby-Dick
+$ python3 library.py set 3 "Moby Dick"
+Title of Book ID 3 set to Moby Dick.
+$ python3 library.py del 3
+Book with ID 3 was deleted.
+</pre>
+</div>
+
+<p>
+  客户端用 Python 写，这样不必再学一门语言。但 JSON-2 就是普通的「HTTP + JSON」，任何语言（JavaScript、Go、Java、PHP、甚至 <code>curl</code>）都能调用，原理完全一样。
+  客户端机器上需要 Python 3 和 <code>requests</code> 库：
+</p>
+
+<div class="code" data-lang="bash">
+<pre>
+python3 --version
+pip install requests
+</pre>
+</div>
+
+<div class="box note">
+  <div class="t">&#9432; Windows 一体化安装包的用户</div>
+  <p>Odoo 的 Windows 安装包里内嵌了一个 Python，但它不对系统开放。写客户端程序需要另外安装 Python（可以从 Microsoft Store 或 python.org 安装）。</p>
+</div>
+
+<h2 id="json2">JSON-2 API 入门</h2>
+
+<p>JSON-2 的设计非常直接：<strong>把模型名和方法名放进 URL，把参数放进 JSON 请求体，用 API Key 认证</strong>。</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 370" role="img" aria-label="一个 JSON-2 请求的组成：URL、请求头、请求体，以及对应的服务端代码">
+  <rect class="bx-a" x="20" y="20" width="720" height="44" rx="8"/>
+  <text class="mono" x="36" y="47">POST  https://library.example.com/json/2/<tspan class="on-b">res.partner</tspan>/<tspan class="on-g">search_read</tspan></text>
+  <text class="sm on-b" x="372" y="84" text-anchor="middle">↑ 模型名</text>
+  <text class="sm on-g" x="458" y="84" text-anchor="middle">↑ 方法名</text>
+
+  <rect class="bx-p" x="20" y="96" width="350" height="120" rx="10"/>
+  <text class="ttl on-p" x="36" y="120">请求头</text>
+  <text class="sm mono" x="36" y="144">Authorization: bearer &lt;API Key&gt;</text>
+  <text class="sm mono" x="36" y="164">Content-Type: application/json</text>
+  <text class="sm mono" x="36" y="184">X-Odoo-Database: library　（多库时）</text>
+  <text class="sm mono" x="36" y="204">User-Agent: library-cli</text>
+
+  <rect class="bx-g" x="390" y="96" width="350" height="120" rx="10"/>
+  <text class="ttl on-g" x="406" y="120">请求体（JSON 对象）</text>
+  <text class="sm mono" x="406" y="144">"ids": [...]　　方法作用的记录</text>
+  <text class="sm mono" x="406" y="164">"context": {"lang": "zh_CN"}</text>
+  <text class="sm mono" x="406" y="184">"domain": [["name","ilike","odoo"]]</text>
+  <text class="sm mono" x="406" y="204">"fields": ["name"]　其余参数都按名字传</text>
+
+  <path class="ln" d="M380 220 V246" marker-end="url(#ar)"/>
+  <rect class="bx-b" x="20" y="250" width="720" height="100" rx="10"/>
+  <text class="ttl on-b" x="36" y="274">服务器上相当于执行</text>
+  <text class="sm mono" x="36" y="300">env["res.partner"].with_context({"lang": "zh_CN"}).browse(ids)</text>
+  <text class="sm mono" x="36" y="320">    .search_read(domain=[("name", "ilike", "odoo")], fields=["name"])</text>
+  <text class="sm" x="36" y="340">以 API Key 所属用户的身份、权限运行；返回值序列化为 JSON（记录集会被转成 ID 列表）</text>
+</svg>
+<figcaption>图 9-2　一个 JSON-2 请求的全部组成</figcaption>
+</figure>
+
+<h3>第一步：创建 API Key</h3>
+
+<p>JSON-2 不接受用户名和密码，只认 <strong>API Key</strong>：</p>
+
+<ol class="steps">
+  <li>登录 Odoo，点右上角头像 → <strong>我的偏好（Preferences）</strong>。</li>
+  <li>打开 <strong>安全（Security）</strong>标签页，在 API Keys 一栏点 <strong>Create API Key</strong>，按提示确认密码。</li>
+  <li>填写描述（比如「library-cli」）和有效期，点 <strong>Generate Key</strong>。</li>
+  <li><strong>立即复制</strong>显示出来的密钥 —— 它只显示这一次，之后无法再查看。</li>
+</ol>
+
+<div class="box warn">
+  <div class="t">&#9888; 像对待密码一样对待 API Key</div>
+  <ul>
+    <li>不要写进代码、不要提交到 Git。放在环境变量或专门的密钥管理工具里。</li>
+    <li>密钥最长有效期为 3 个月，需要定期轮换。交互式试用时设短一点（比如一天）。</li>
+    <li>密钥泄露或丢失，立刻在同一页面删除它，再生成新的。</li>
+    <li>给系统集成用的密钥，最好属于一个专门的<strong>机器人用户</strong>：只授予它需要的最小权限，并把它的登录密码留空（禁止用账号密码登录）。审计字段里也能清楚地看出哪些修改来自集成。</li>
+  </ul>
+</div>
+
+<p>在终端里把密钥放进环境变量，后面的例子都从这里读取：</p>
+
+<div class="code" data-lang="bash">
+<pre>
+export ODOO_URL="http://localhost:8069"
+export ODOO_DB="library"
+export ODOO_API_KEY="粘贴你的密钥"
+</pre>
+</div>
+
+<h3>第二步：确认能连通</h3>
+
+<p>
+  服务器版本信息不需要认证。旧 API 里的 <code>common.version()</code>，现在是一个普通的 HTTP 端点：
+</p>
+
+<div class="code" data-lang="bash">
+<pre>
+$ curl -s $ODOO_URL/web/version
+{"version_info": [20, 0, 0, "final", 0, ""], "version": "20.0"}
+</pre>
+</div>
+
+<h3>第三步：第一次调用</h3>
+
+<p>打开 Python 交互式命令行：</p>
+
+<div class="code" data-lang="py">
+<pre>
+&gt;&gt;&gt; import os, requests
+&gt;&gt;&gt; BASE_URL = os.environ["ODOO_URL"] + "/json/2"
+&gt;&gt;&gt; headers = {
+...     "Authorization": "bearer " + os.environ["ODOO_API_KEY"],
+...     "X-Odoo-Database": os.environ["ODOO_DB"],
+...     "User-Agent": "library-cli",
+... }
+&gt;&gt;&gt; r = requests.post(f"{BASE_URL}/res.users/search_count", headers=headers, json={"domain": []})
+&gt;&gt;&gt; r.raise_for_status()
+&gt;&gt;&gt; r.json()
+5
+</pre>
+</div>
+
+<p>
+  <code>requests.post(..., json=...)</code> 会自动把字典编码成 JSON 并设置 <code>Content-Type: application/json</code>。
+  调用成功时返回 200 状态码，响应体就是方法返回值的 JSON。
+</p>
+
+<div class="box note">
+  <div class="t">&#9432; 什么时候需要 X-Odoo-Database</div>
+  <p>
+    一个 Odoo 服务器上有多个数据库、并且没有配置按域名选择数据库（<code>dbfilter</code>）时，必须用这个请求头告诉服务器用哪个库。
+    只有一个库，或者每个库有自己的域名时，可以省略。
+  </p>
+</div>
+
+<h3>谁在调用？</h3>
+
+<p>
+  旧 API 先调用 <code>authenticate()</code> 拿到用户 ID，之后每次调用都要传数据库名、用户 ID 和密码。JSON-2 不需要这些：用户由 API Key 决定。
+  想知道当前是谁，可以调用 <code>res.users</code> 的 <code>context_get</code>：
+</p>
+
+<div class="code" data-lang="py">
+<pre>
+&gt;&gt;&gt; requests.post(f"{BASE_URL}/res.users/context_get", headers=headers, json={}).json()
+{'lang': 'en_US', 'tz': 'Europe/Brussels', 'uid': 2}
+</pre>
+</div>
+
+<h2 id="calls">常用调用</h2>
+
+<p>
+  所有<strong>公开</strong>的模型方法都可以调用 —— 也就是名字不以下划线开头、没有被标记为 <code>@api.private</code> 的方法。
+  这包括 ORM 的通用方法，也包括你自己写的业务方法（比如第 3 章的 <code>button_check_isbn</code>）。
+</p>
+
+<p>为了少写重复代码，先定义一个小函数：</p>
+
+<div class="code" data-lang="py">
+<pre>
+&gt;&gt;&gt; def call(model, method, **params):
+...     r = requests.post(f"{BASE_URL}/{model}/{method}", headers=headers, json=params)
+...     r.raise_for_status()
+...     return r.json()
+</pre>
+</div>
+
+<h3>查询：search、read、search_read</h3>
+
+<p>
+  服务器端代码用 <code>search()</code> 得到记录集，再读取字段。但记录集对象没法通过网络传输，所以外部调用时：
+  <code>search</code> 返回的是 <strong>ID 列表</strong>；读取数据要用 <code>read</code>，它返回的是<strong>字典列表</strong>。
+</p>
+
+<div class="code" data-lang="py">
+<pre>
+&gt;&gt;&gt; call("res.users", "search", domain=[("login", "=", "admin")])
+[2]
+&gt;&gt;&gt; call("res.users", "read", ids=[2], fields=["login", "name", "company_id"])
+[{'id': 2, 'login': 'admin', 'name': 'Mitchell Admin', 'company_id': [1, 'YourCompany']}]
+</pre>
+</div>
+
+<p>
+  注意多对一字段的值：它是一个 <code>[ID, 显示名称]</code> 的二元组，比如 <code>[1, 'YourCompany']</code>。对多字段则是 ID 列表。
+</p>
+
+<p>
+  「先搜索、再读取」需要两次请求，而且两次请求之间数据可能被别人改掉（比如某条记录被删了，<code>read</code> 就会报错）。
+  <code>search_read</code> 把两步合成一步，在同一个事务里完成，<strong>这是读取数据最常用的方法</strong>：
+</p>
+
+<div class="code" data-lang="py">
+<pre>
+&gt;&gt;&gt; call("res.users", "search_read",
+...      domain=[("login", "=", "admin")],
+...      fields=["login", "name"])
+[{'id': 2, 'login': 'admin', 'name': 'Mitchell Admin'}]
+</pre>
+</div>
+
+<div class="tw"><table>
+  <tr><th><code>search_read</code> 参数</th><th>含义</th></tr>
+  <tr><td><code>domain</code></td><td>域表达式（JSON 里元组写成数组）</td></tr>
+  <tr><td><code>fields</code></td><td>要读取的字段列表。<strong>务必写明</strong>：不写会读取全部字段，可能触发大量计算、传输大量数据</td></tr>
+  <tr><td><code>offset</code> / <code>limit</code></td><td>分页</td></tr>
+  <tr><td><code>order</code></td><td>排序，如 <code>"name desc"</code></td></tr>
+</table></div>
+
+<h3>写入：create、write、unlink</h3>
+
+<div class="code" data-lang="py">
+<pre>
+&gt;&gt;&gt; ids = call("res.partner", "create", vals_list=[{"name": "Packt Pub"}])
+&gt;&gt;&gt; ids
+[49]
+&gt;&gt;&gt; call("res.partner", "write", ids=ids, vals={"name": "Packt Publishing"})
+True
+&gt;&gt;&gt; call("res.partner", "read", ids=ids, fields=["name"])
+[{'id': 49, 'name': 'Packt Publishing'}]
+&gt;&gt;&gt; call("res.partner", "unlink", ids=ids)
+True
+&gt;&gt;&gt; call("res.partner", "read", ids=ids, fields=["name"])
+[]
+</pre>
+</div>
+
+<p>
+  JSON-2 里<strong>所有参数都按名字传</strong>，名字就是 Python 方法签名里的参数名：<code>create(vals_list)</code>、<code>write(vals)</code>、<code>read(fields)</code>……
+  <code>create</code> 返回的是新建的记录集，JSON-2 自动把记录集转换成 ID 列表，所以得到 <code>[49]</code>。
+  不知道参数名时，去看方法的源码，或者看下面介绍的 <code>/doc</code> 页面。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 270" role="img" aria-label="服务器端代码和对应的 JSON-2 调用对照">
+  <rect class="bx-b" x="20" y="20" width="350" height="230" rx="12"/>
+  <text class="ttl on-b" x="195" y="46" text-anchor="middle">服务器端 Python</text>
+  <text class="sm mono" x="36" y="80">Partner.search(domain)</text>
+  <text class="sm mono" x="36" y="114">records.read(["name"])</text>
+  <text class="sm mono" x="36" y="148">Partner.create([{...}])</text>
+  <text class="sm mono" x="36" y="182">records.write({...})</text>
+  <text class="sm mono" x="36" y="216">records.unlink()</text>
+
+  <rect class="bx-g" x="390" y="20" width="350" height="230" rx="12"/>
+  <text class="ttl on-g" x="565" y="46" text-anchor="middle">JSON-2：URL 末段 + 请求体</text>
+  <text class="sm mono" x="406" y="80">/search  {"domain": [...]}</text>
+  <text class="sm mono" x="406" y="114">/read    {"ids": [..], "fields": ["name"]}</text>
+  <text class="sm mono" x="406" y="148">/create  {"vals_list": [{...}]}</text>
+  <text class="sm mono" x="406" y="182">/write   {"ids": [..], "vals": {...}}</text>
+  <text class="sm mono" x="406" y="216">/unlink  {"ids": [..]}</text>
+
+  <path class="ln-d" d="M300 76 H400"/>
+  <path class="ln-d" d="M300 110 H400"/>
+  <path class="ln-d" d="M300 144 H400"/>
+  <path class="ln-d" d="M300 178 H400"/>
+  <path class="ln-d" d="M300 212 H400"/>
+</svg>
+<figcaption>图 9-3　记录集变成 <code>ids</code>，位置参数变成命名参数，其余一一对应</figcaption>
+</figure>
+
+<h3>上下文与错误</h3>
+
+<p>上下文通过请求体里的 <code>context</code> 键传入，比如读取中文的翻译值、或者连已归档的记录一起搜索：</p>
+
+<div class="code" data-lang="py">
+<pre>
+&gt;&gt;&gt; call("library.book", "search_read",
+...      context={"lang": "zh_CN", "active_test": False},
+...      domain=[], fields=["name", "active"])
+</pre>
+</div>
+
+<p>出错时，服务器返回 4xx / 5xx 状态码，响应体是一个描述错误的 JSON 对象：</p>
+
+<div class="code" data-lang="text">
+<pre>
+HTTP/1.1 401 Unauthorized
+{
+  "name": "werkzeug.exceptions.Unauthorized",
+  "message": "Invalid apikey",
+  "arguments": ["Invalid apikey", 401],
+  "context": {},
+  "debug": "Traceback (most recent call last): ..."
+}
+</pre>
+</div>
+
+<p>
+  <code>name</code> 是 Python 异常的完整类名，<code>message</code> 是错误信息。业务代码里抛出的 <code>UserError</code>、<code>ValidationError</code>、权限不足的 <code>AccessError</code>
+  都会这样返回给调用方。客户端应该检查状态码，并把 <code>message</code> 展示给用户。
+</p>
+
+<h3>动态 API 文档：/doc</h3>
+
+<p>
+  Odoo 20 自带一个 <code>api_doc</code> 模块（自动安装），在 <code>http://localhost:8069/doc</code> 提供<strong>根据当前数据库生成的</strong> API 文档：
+  列出所有模型、字段、可调用的方法及其参数，还能直接在页面上试着调用，并生成 Python、JavaScript、curl 等语言的示例代码。
+  你的自定义模型（比如 <code>library.book</code>）也会出现在里面。这是查参数名最快的地方。
+</p>
+
+<h2 id="transactions">每次调用一个事务</h2>
+
+<p>
+  每一次 JSON-2 调用都在自己的数据库事务里运行：成功就提交，出错就回滚。<strong>没有办法把多次调用放进同一个事务。</strong>这对设计集成方案有直接影响：
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 290" role="img" aria-label="多次调用无法保证一致性，应该在服务端写一个方法一次完成">
+  <text class="ttl on-r" x="20" y="26">✘ 在客户端拼凑多步操作</text>
+  <rect class="bx" x="20" y="40" width="140" height="44" rx="8"/><text class="sm" x="90" y="67" text-anchor="middle">① 查库存 = 1</text>
+  <rect class="bx-r" x="200" y="40" width="200" height="44" rx="8"/><text class="sm on-r" x="300" y="60" text-anchor="middle">（另一个请求抢先</text><text class="sm on-r" x="300" y="76" text-anchor="middle">把最后一本借走了）</text>
+  <rect class="bx" x="440" y="40" width="140" height="44" rx="8"/><text class="sm" x="510" y="67" text-anchor="middle">② 创建借书单</text>
+  <rect class="bx-r" x="620" y="40" width="120" height="44" rx="8"/><text class="sm on-r" x="680" y="67" text-anchor="middle">数据不一致</text>
+  <path class="ln" d="M162 62 H196" marker-end="url(#ar)"/>
+  <path class="ln" d="M402 62 H436" marker-end="url(#ar)"/>
+  <path class="ln-r" d="M582 62 H616" marker-end="url(#ar-r)"/>
+  <text class="sm" x="20" y="108">每个箭头之间都是独立的事务，中间的空隙里任何事都可能发生</text>
+
+  <text class="ttl on-g" x="20" y="156">✔ 在服务端写一个方法，一次调用完成</text>
+  <rect class="bx-g" x="20" y="170" width="220" height="56" rx="8"/>
+  <text class="sm mono" x="130" y="194" text-anchor="middle">POST /json/2/</text>
+  <text class="sm mono" x="130" y="212" text-anchor="middle">library.checkout/action_borrow</text>
+  <rect class="bx-g" x="290" y="160" width="450" height="76" rx="10"/>
+  <text class="ttl on-g" x="515" y="184" text-anchor="middle">一个事务</text>
+  <text class="sm" x="515" y="206" text-anchor="middle">检查库存 → 创建借书单 → 改阶段 → 发消息</text>
+  <text class="sm" x="515" y="224" text-anchor="middle">要么全部成功提交，要么全部回滚</text>
+  <path class="ln-g" d="M242 198 H286" marker-end="url(#ar-g)"/>
+  <text class="sm" x="380" y="270" text-anchor="middle">这正是 Odoo 业务模型里有那么多 action_xxx 方法（如 sale.order 的 action_confirm）的原因</text>
+</svg>
+<figcaption>图 9-4　需要一致性的多步操作，应该封装成一个服务端方法</figcaption>
+</figure>
+
+<p>
+  <code>search_read</code> 本身就是这个思路的例子：它在一个事务里完成搜索和读取，不会出现「搜到了、读的时候却没了」的问题。
+  涉及预订、付款、库存这类对一致性敏感的操作时，一定要在模块里写一个专门的方法，让外部程序只调用一次。
+</p>
+
+<div class="box tip">
+  <div class="t">&#128161; 外部调用不会触发 onchange</div>
+  <p>
+    客户端常常想「模拟用户在表单上录入」。但直接 <code>create()</code> 不会执行那些只挂在表单上的 onchange 逻辑。
+    解决办法：在服务端尽量使用可写计算字段（第 8 章）而不是经典 onchange；或者写一个服务端方法，内部完成创建并执行需要的逻辑。
+  </p>
+</div>
+
+<h2 id="client">实现客户端</h2>
+
+<p>客户端分成两层：一层负责和 Odoo 通信（<code>LibraryAPI</code> 类），一层负责命令行交互（<code>library.py</code>）。这样以后换一种通信方式，界面代码不用动：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 240" role="img" aria-label="客户端的分层结构：命令行界面、LibraryAPI 接口、两种实现">
+  <rect class="bx-a" x="270" y="20" width="220" height="56" rx="10"/>
+  <text class="ttl on-a" x="380" y="44" text-anchor="middle">library.py</text>
+  <text class="sm" x="380" y="64" text-anchor="middle">命令行：list / add / set / del</text>
+
+  <rect class="bx-p" x="220" y="100" width="320" height="50" rx="10"/>
+  <text class="ttl on-p" x="380" y="122" text-anchor="middle">LibraryAPI 接口</text>
+  <text class="sm mono" x="380" y="140" text-anchor="middle">search_read · create · write · unlink</text>
+
+  <rect class="bx-g" x="60" y="174" width="280" height="56" rx="10"/>
+  <text class="ttl on-g" x="200" y="198" text-anchor="middle">library_json2.py</text>
+  <text class="sm" x="200" y="218" text-anchor="middle">JSON-2 + API Key（推荐）</text>
+
+  <rect class="bx-d" x="420" y="174" width="280" height="56" rx="10"/>
+  <text class="ttl" x="560" y="198" text-anchor="middle">library_xmlrpc.py</text>
+  <text class="sm" x="560" y="218" text-anchor="middle">XML-RPC（已废弃，Odoo 22 前可用）</text>
+
+  <path class="ln-a" d="M380 78 V96" marker-end="url(#ar-a)"/>
+  <path class="ln-p" d="M320 152 L240 172" marker-end="url(#ar-p)"/>
+  <path class="ln-d" d="M440 152 L520 172" marker-end="url(#ar)"/>
+</svg>
+<figcaption>图 9-5　改一行 import 就能切换实现</figcaption>
+</figure>
+
+<h3>通信层：JSON-2 实现</h3>
+
+<div class="code" data-lang="py" data-file="client_app/library_json2.py">
+<pre>
+import os
+
+import requests
+
+
+class LibraryAPI:
+    """通过 Odoo JSON-2 API 访问 library.book 模型。"""
+
+    def __init__(self, url, db, api_key, model="library.book"):
+        self.base_url = f"{url}/json/2/{model}"
+        self.session = requests.Session()
+        self.session.headers.update({
+            "Authorization": f"bearer {api_key}",
+            "X-Odoo-Database": db,
+            "User-Agent": "library-cli",
+        })
+
+    def _call(self, method, **params):
+        response = self.session.post(f"{self.base_url}/{method}", json=params, timeout=30)
+        if not response.ok:
+            # 把 Odoo 返回的错误信息展示出来，而不是只说「400 Bad Request」
+            try:
+                message = response.json()["message"]
+            except ValueError:
+                message = response.text
+            raise RuntimeError(f"Odoo error {response.status_code}: {message}")
+        return response.json()
+
+    def search_read(self, title=None):
+        domain = [("name", "ilike", title)] if title else []
+        return self._call("search_read", domain=domain, fields=["id", "name"])
+
+    def create(self, title):
+        ids = self._call("create", vals_list=[{"name": title}])
+        return ids[0]
+
+    def write(self, book_id, title):
+        return self._call("write", ids=[book_id], vals={"name": title})
+
+    def unlink(self, book_id):
+        return self._call("unlink", ids=[book_id])
+
+
+if __name__ == "__main__":
+    # 直接运行这个文件时做个快速测试
+    from pprint import pprint
+    api = LibraryAPI(
+        os.environ.get("ODOO_URL", "http://localhost:8069"),
+        os.environ.get("ODOO_DB", "library"),
+        os.environ["ODOO_API_KEY"],
+    )
+    pprint(api.search_read())
+</pre>
+</div>
+
+<ul>
+  <li>用 <code>requests.Session</code> 复用连接和公共请求头，比每次都新建连接快。</li>
+  <li><code>_call()</code> 是一个薄薄的包装：拼出 URL、发请求、处理错误。上层方法因此都只有一两行。</li>
+  <li>出错时把 Odoo 返回的 <code>message</code> 提取出来抛出，命令行上就能看到真正的原因（比如「没有权限」或校验失败的提示）。</li>
+</ul>
+
+<div class="code" data-lang="bash">
+<pre>
+$ python3 library_json2.py
+[{'id': 1, 'name': 'Odoo Development Essentials 11'},
+ {'id': 2, 'name': 'Odoo 11 Development Cookbook'},
+ {'id': 3, 'name': 'Brave New World'}]
+</pre>
+</div>
+
+<h3>界面层：命令行</h3>
+
+<p>用 Python 自带的 <code>argparse</code> 解析命令行参数，不引入其他依赖：</p>
+
+<div class="code" data-lang="py" data-file="client_app/library.py">
+<pre>
+#!/usr/bin/env python3
+import os
+from argparse import ArgumentParser
+
+from library_json2 import LibraryAPI
+# from library_xmlrpc import LibraryAPI   # 旧协议的实现，接口相同
+
+
+parser = ArgumentParser(description="Library book catalog client")
+parser.add_argument("command", choices=["list", "add", "set", "del"])
+parser.add_argument("params", nargs="*")  # 可选的附加参数
+args = parser.parse_args()
+
+api = LibraryAPI(
+    os.environ.get("ODOO_URL", "http://localhost:8069"),
+    os.environ.get("ODOO_DB", "library"),
+    os.environ["ODOO_API_KEY"],
+)
+
+if args.command == "list":
+    title = args.params[0] if args.params else None
+    for book in api.search_read(title):
+        print("%(id)d %(name)s" % book)
+
+elif args.command == "add":
+    title = args.params[0]
+    book_id = api.create(title)
+    print(f"Book added with ID {book_id} for title {title}.")
+
+elif args.command == "set":
+    if len(args.params) != 2:
+        print("set command requires an ID and a Title.")
+    else:
+        book_id, title = int(args.params[0]), args.params[1]
+        api.write(book_id, title)
+        print(f"Title of Book ID {book_id} set to {title}.")
+
+elif args.command == "del":
+    book_id = int(args.params[0])
+    api.unlink(book_id)
+    print(f"Book with ID {book_id} was deleted.")
+</pre>
+</div>
+
+<ul>
+  <li><code>args.command</code> 是命令，<code>args.params</code> 是后面的附加参数列表。命令不对时，<code>argparse</code> 会自动提示用法。</li>
+  <li>连接信息从环境变量读取，不要硬编码在代码里（尤其是密钥）。</li>
+</ul>
+
+<div class="box tip">
+  <div class="t">&#128161; 让它像普通命令一样运行</div>
+  <p>在 Linux 上执行 <code>chmod +x library.py</code>，因为第一行写了 <code>#!/usr/bin/env python3</code>，之后就可以直接 <code>./library.py list</code>。</p>
+</div>
+
+<p>
+  这个程序很朴素，改进的方向很多（分页、更好的错误提示、显示作者……），但它已经完整展示了一个外部程序用 Odoo 作后端的全部要素。
+  另外别忘了：它受 API Key 所属用户的权限约束。如果用一个只有「图书馆用户」权限的账号的密钥，<code>del</code> 命令会失败 —— 第 3 章规定只有经理能删除书。
+</p>
+
+<h2 id="legacy">旧协议：XML-RPC 与 JSON-RPC</h2>
+
+<p>
+  你会在大量现有的集成代码、文章和老版本文档里遇到 XML-RPC。它在 Odoo 20 上仍然能用，所以有必要看懂它，并知道怎么迁移。
+</p>
+
+<h3>XML-RPC 的用法</h3>
+
+<div class="code" data-lang="py">
+<pre>
+&gt;&gt;&gt; from xmlrpc import client
+&gt;&gt;&gt; srv = "http://localhost:8069"
+&gt;&gt;&gt; common = client.ServerProxy(f"{srv}/xmlrpc/2/common")
+&gt;&gt;&gt; common.version()
+{'server_version': '20.0', 'server_version_info': [20, 0, 0, 'final', 0, ''], ...}
+
+&gt;&gt;&gt; db, user, password = "library", "admin", "admin"    # password 也可以是 API Key
+&gt;&gt;&gt; uid = common.authenticate(db, user, password, {})
+&gt;&gt;&gt; uid
+2
+
+&gt;&gt;&gt; api = client.ServerProxy(f"{srv}/xmlrpc/2/object")
+&gt;&gt;&gt; api.execute_kw(db, uid, password, "res.users", "search_count", [[]])
+5
+&gt;&gt;&gt; api.execute_kw(db, uid, password, "res.users", "search_read",
+...                [[("login", "=", "admin")], ["login", "name"]])
+[{'id': 2, 'login': 'admin', 'name': 'Mitchell Admin'}]
+&gt;&gt;&gt; # 也可以用关键字参数（第 7 个参数）
+&gt;&gt;&gt; api.execute_kw(db, uid, password, "res.users", "search_read", [],
+...                {"domain": [("login", "=", "admin")], "fields": ["login", "name"]})
+</pre>
+</div>
+
+<ul>
+  <li><code>/xmlrpc/2/common</code> 提供不需要登录的公共方法：<code>version()</code> 查版本，<code>authenticate(db, login, password, {})</code> 校验账号并返回用户 ID（失败返回 <code>False</code>）。</li>
+  <li><code>/xmlrpc/2/object</code> 的 <code>execute_kw</code> 调用模型方法，参数依次是：数据库名、用户 ID、密码（或 API Key）、模型、方法、位置参数列表、可选的关键字参数字典。</li>
+  <li>它是<strong>无状态</strong>的：每次调用都要带上数据库、用户和密码。</li>
+  <li>XML-RPC 协议本身不支持 <code>None</code> 值。这就是 Odoo 惯例让方法「至少返回 True」的历史原因。</li>
+</ul>
+
+<p>对应的 <code>LibraryAPI</code> 实现（和 JSON-2 版本接口完全相同）：</p>
+
+<div class="code" data-lang="py" data-file="client_app/library_xmlrpc.py（旧协议）">
+<pre>
+import xmlrpc.client
+
+
+class LibraryAPI:
+    def __init__(self, url, db, api_key, model="library.book", login="admin"):
+        common = xmlrpc.client.ServerProxy(f"{url}/xmlrpc/2/common")
+        self.api = xmlrpc.client.ServerProxy(f"{url}/xmlrpc/2/object")
+        self.uid = common.authenticate(db, login, api_key, {})
+        self.pwd = api_key
+        self.db = db
+        self.model = model
+
+    def _execute(self, method, arg_list, kwarg_dict=None):
+        return self.api.execute_kw(
+            self.db, self.uid, self.pwd, self.model,
+            method, arg_list, kwarg_dict or {})
+
+    def search_read(self, title=None):
+        domain = [("name", "ilike", title)] if title else []
+        return self._execute("search_read", [domain, ["id", "name"]])
+
+    def create(self, title):
+        return self._execute("create", [{"name": title}])
+
+    def write(self, book_id, title):
+        return self._execute("write", [[book_id], {"name": title}])
+
+    def unlink(self, book_id):
+        return self._execute("unlink", [[book_id]])
+</pre>
+</div>
+
+<h3>从 XML-RPC 迁移到 JSON-2</h3>
+
+<div class="tw"><table>
+  <tr><th>XML-RPC / JSON-RPC</th><th>JSON-2</th></tr>
+  <tr><td><code>common.version()</code></td><td><code>GET /web/version</code></td></tr>
+  <tr><td><code>common.authenticate()</code> 拿 uid，之后每次带 db、uid、密码</td><td>不需要登录。每次请求带 <code>Authorization: bearer &lt;API Key&gt;</code>；多库时加 <code>X-Odoo-Database</code></td></tr>
+  <tr><td><code>execute_kw(db, uid, pwd, 模型, 方法, args, kwargs)</code></td><td><code>POST /json/2/模型/方法</code>，请求体是一个 JSON 对象</td></tr>
+  <tr><td>记录 ID 放在 <code>args</code> 的第一个位置</td><td>记录 ID 放在 <code>"ids"</code> 键里</td></tr>
+  <tr><td>位置参数 + 关键字参数</td><td><strong>只有命名参数</strong></td></tr>
+  <tr><td>上下文放在 kwargs 的 <code>context</code> 里</td><td>上下文放在请求体的 <code>"context"</code> 键里</td></tr>
+  <tr><td>需要用户 ID 时直接用 authenticate 的返回值</td><td>调用 <code>res.users/context_get</code>，返回值里有 <code>uid</code></td></tr>
+  <tr><td><code>db</code> 服务（建库、备份……）</td><td>Odoo 20 已移除。改用 <code>/web/database/*</code> HTTP 端点，或服务器上的 <code>odoo db</code> 命令（第 2 章）</td></tr>
+</table></div>
+
+<div class="box note">
+  <div class="t">&#9432; OdooRPC 库</div>
+  <p>
+    原书第二个客户端用的是 OCA 维护的 <a href="https://github.com/OCA/odoorpc">OdooRPC</a> 库，它提供了模仿服务端写法的 <code>env["library.book"].search_read(...)</code> 风格的客户端 API。
+    但它底层走的是 <code>/jsonrpc</code>，同样属于被废弃的端点。在它支持 JSON-2 之前，新项目建议像本章这样直接用 <code>requests</code> 调用 JSON-2 —— 代码量也没有多多少。
+  </p>
+</div>
+
+<div class="box tip">
+  <div class="t">&#128161; 暂时没法迁移？</div>
+  <p>旧端点每次被调用都会在服务器日志里打印一条废弃警告。迁移完成之前，可以按警告里的提示用 <code>--log-handler=odoo.addons.rpc.controllers:ERROR</code> 屏蔽它们，但别忘了：Odoo 22 会彻底移除这些端点。</p>
+</div>
+
+<h2 id="summary">小结</h2>
+
+<ul>
+  <li>Odoo 的外部 API 能调用任意模型的公开方法；外部程序以 API Key 所属用户的身份和权限运行。</li>
+  <li>Odoo 19+ 的 <strong>JSON-2 API</strong>：<code>POST /json/2/模型/方法</code>，<code>Authorization: bearer</code> 认证，请求体里用命名参数，<code>ids</code> 和 <code>context</code> 是特殊键。</li>
+  <li>读数据首选 <code>search_read</code>；记录集在外部表现为 ID 列表，多对一字段为 <code>[ID, 名称]</code>。</li>
+  <li>每次调用是独立的事务；需要一致性的多步操作要封装成一个服务端方法。</li>
+  <li><code>/doc</code> 页面是当前数据库的动态 API 文档和测试台。</li>
+  <li>XML-RPC / JSON-RPC 已废弃、计划在 Odoo 22 移除；看得懂它，但新代码用 JSON-2。</li>
+  <li>把通信层和界面层分开，换协议时只改一行 import。</li>
+</ul>
+
+<div class="exercise">
+  <h3>动手练习</h3>
+  <ol>
+    <li>生成一个 API Key，用 <code>curl</code> 调用 <code>/json/2/library.book/search_read</code> 列出所有书（提示：<code>--oauth2-bearer $ODOO_API_KEY</code>，<code>-H "Content-Type: application/json"</code>，<code>-d '{"domain": [], "fields": ["name"]}'</code>）。</li>
+    <li>打开 <code>/doc</code> 页面，找到 <code>library.book</code>，查看它的 <code>button_check_isbn</code> 方法，并在页面上调用它。</li>
+    <li>给客户端加一个 <code>check</code> 命令：调用书的 <code>button_check_isbn</code>，把校验失败时 Odoo 返回的错误信息显示出来。</li>
+    <li>给 <code>list</code> 命令加上出版社一列。多对一字段在返回值里是什么格式？</li>
+    <li>创建一个只属于「图书馆用户」组的机器人用户，用它的 API Key 运行 <code>del</code> 命令，观察返回的错误。</li>
+    <li>在 <code>library_checkout</code> 里写一个 <code>@api.model</code> 方法 <code>borrow(member_id, book_ids)</code>，在一个事务里创建借书单并把它移到「已借出」阶段；再从客户端用 JSON-2 调用它。</li>
+  </ol>
+</div>
+<div id="pager"></div>
+</main>
+</div>
+<script src="assets/site.js"></script>
+</body>
+</html>

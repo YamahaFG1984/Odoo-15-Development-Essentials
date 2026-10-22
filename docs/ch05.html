@@ -1,0 +1,676 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 5 章 · 导入、导出与模块数据 — Odoo 20 开发入门</title>
+<meta name="description" content="理解外部标识符（XML ID），学会用界面导入导出 CSV，并在模块里用 CSV 与 XML 数据文件加载默认数据和演示数据。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-chapter="5">
+<div id="app">
+<aside id="sidebar"></aside>
+<main>
+<span class="chapter-eyebrow">第 5 章</span>
+<h1>导入、导出与模块数据</h1>
+<p class="lede">
+  菜单、视图、用户组、访问规则……模块里定义的大部分东西，最终都是<strong>数据库里的记录</strong>。
+  模块里的 XML 和 CSV 文件在运行时根本不会被读取，它们只是把这些记录<strong>装进数据库</strong>的一种手段。
+  所以，学会用文件表示数据，是写模块的基本功；它同样也是项目实施中批量导入、导出业务数据的基础。
+</p>
+
+<div class="goals">
+  <h4>本章目标</h4>
+  <ul>
+    <li>理解外部标识符（XML ID）的作用，学会查找任意记录的 XML ID</li>
+    <li>用界面导出、编辑、再导入 CSV，实现批量修改</li>
+    <li>在 CSV 里表示关系字段（多对一、多对多、一对多）</li>
+    <li>给模块添加初始数据和演示数据</li>
+    <li>掌握 XML 数据文件：<code>noupdate</code>、<code>eval</code>、<code>ref</code>、对多字段命令、<code>&lt;delete&gt;</code> 和 <code>&lt;function&gt;</code></li>
+  </ul>
+</div>
+
+<div id="chapter-toc"></div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 230" role="img" aria-label="模块里的数据文件只在安装或升级时被加载进数据库，运行时只读数据库">
+  <rect class="bx-a" x="20" y="30" width="220" height="160" rx="12"/>
+  <text class="ttl on-a" x="130" y="56" text-anchor="middle">模块里的文件</text>
+  <text class="sm mono" x="40" y="86">security/*.xml</text>
+  <text class="sm mono" x="40" y="108">security/ir.access.csv</text>
+  <text class="sm mono" x="40" y="130">views/*.xml</text>
+  <text class="sm mono" x="40" y="152">data/*.xml, *.csv</text>
+  <text class="sm mono" x="40" y="174">demo/…</text>
+
+  <rect class="bx-p" x="300" y="70" width="160" height="80" rx="10"/>
+  <text class="ttl on-p" x="380" y="100" text-anchor="middle">安装 / 升级</text>
+  <text class="sm" x="380" y="122" text-anchor="middle">-i / -u 时加载一次</text>
+
+  <rect class="bx-b" x="520" y="30" width="220" height="160" rx="12"/>
+  <text class="ttl on-b" x="630" y="56" text-anchor="middle">数据库</text>
+  <text class="sm mono" x="540" y="86">res_groups</text>
+  <text class="sm mono" x="540" y="108">ir_access</text>
+  <text class="sm mono" x="540" y="130">ir_ui_view · ir_ui_menu</text>
+  <text class="sm mono" x="540" y="152">library_book …</text>
+  <text class="sm mono on-a" x="540" y="174">ir_model_data（XML ID 表）</text>
+
+  <path class="ln-a" d="M242 110 H296" marker-end="url(#ar-a)"/>
+  <path class="ln-p" d="M462 110 H516" marker-end="url(#ar-p)"/>
+  <text class="sm" x="630" y="214" text-anchor="middle">运行时，Odoo 只读这里</text>
+</svg>
+<figcaption>图 5-1　数据文件是「装载工具」，不是运行时配置</figcaption>
+</figure>
+
+<h2 id="xmlid">外部标识符（XML ID）</h2>
+
+<h3>它解决什么问题</h3>
+
+<p>
+  每条记录在数据库里都有一个自增的数字 ID，比如 87。问题是：<strong>你没法提前知道</strong>模块安装时某条记录会被分配到哪个 ID，换一个数据库它又会不同。
+  外部标识符就是一个人类可读的、稳定的<strong>别名</strong>，让我们在不知道数字 ID 的情况下引用一条记录。它解决了两个问题：
+</p>
+
+<ul>
+  <li><strong>互相引用</strong>：菜单要引用动作，组要引用分类，书要引用作者……用 XML ID 引用，Odoo 负责翻译成真实的数字 ID。</li>
+  <li><strong>升级不重复</strong>：升级模块时数据文件会被再加载一遍。有了 XML ID，Odoo 就能认出「这条记录我以前建过」，于是更新它，而不是再建一条重复的。</li>
+</ul>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 270" role="img" aria-label="ir.model.data 表将模块名加标识符映射到模型和数字 ID">
+  <rect class="bx-a" x="20" y="40" width="230" height="64" rx="10"/>
+  <text class="sm" x="135" y="62" text-anchor="middle">XML 里写的</text>
+  <text class="mono on-a" x="135" y="88" text-anchor="middle">action_library_book</text>
+
+  <rect class="bx-p" x="290" y="20" width="450" height="130" rx="10"/>
+  <text class="ttl on-p" x="515" y="44" text-anchor="middle">ir.model.data（外部标识符表）</text>
+  <text class="sm mono" x="306" y="72" style="font-size:11px">module       name                 model                  res_id</text>
+  <rect class="bx-a" x="300" y="82" width="430" height="24" rx="4"/>
+  <text class="sm mono" x="306" y="99" style="font-size:11px">library_app  action_library_book  ir.actions.act_window  87</text>
+  <text class="sm mono" x="306" y="126" style="font-size:11px">base         user_admin           res.users              2</text>
+
+  <path class="ln-a" d="M252 72 L296 92" marker-end="url(#ar-a)"/>
+
+  <rect class="bx-b" x="290" y="180" width="450" height="64" rx="10"/>
+  <text class="ttl on-b" x="515" y="204" text-anchor="middle">表 ir_act_window</text>
+  <text class="sm mono" x="515" y="228" text-anchor="middle">id = 87 · name = "Library Books" · res_model = "library.book"</text>
+  <path class="ln-b" d="M700 108 V176" marker-end="url(#ar-b)"/>
+
+  <text class="sm" x="20" y="150">完整 ID = 模块名 + "." + 名字</text>
+  <text class="mono" x="20" y="174">library_app.action_library_book</text>
+  <text class="sm" x="20" y="206">名字只需在本模块内唯一，</text>
+  <text class="sm" x="20" y="224">两个模块用同一个名字也不冲突</text>
+</svg>
+<figcaption>图 5-2　XML ID 背后就是一张对照表</figcaption>
+</figure>
+
+<p>
+  在数据文件里，引用<strong>本模块</strong>的记录可以只写名字（<code>action_library_book</code>），
+  引用<strong>其他模块</strong>的记录必须写完整 ID（<code>base.user_admin</code>），并且要确保那个模块在 <code>depends</code> 里，这样它的数据才会先加载。
+</p>
+
+<h3>查看和查找 XML ID</h3>
+
+<p>需要开启开发者模式。有三种常用方法：</p>
+
+<ol class="steps">
+  <li><strong>技术菜单</strong>：设置 → 技术 → 用户界面 → 序列与标识符 → <strong>外部标识符</strong>。按模块筛选 <code>library_app</code>，能看到本模块生成的全部 XML ID。</li>
+  <li><strong>任意记录的表单</strong>：打开记录，调试菜单 → <strong>Metadata</strong>。弹窗里显示这条记录的数字 ID、XML ID 和「No Update」标志（还能点击修改它）。比如 Demo 用户的 XML ID 是 <code>base.user_demo</code>。</li>
+  <li><strong>视图和动作</strong>：调试菜单 → <strong>View: Form</strong> 或 <strong>Action</strong>，打开的表单里有 External ID 字段。比如用户表单视图是 <code>base.view_users_form</code>。</li>
+</ol>
+
+<h2 id="csv-ui">在界面上导出和导入 CSV</h2>
+
+<p>
+  要了解数据文件长什么样，最快的办法是让 Odoo 自己导出一份。导出的 CSV 可以拿来学习格式、批量编辑后再导回去，甚至直接改成模块的演示数据。
+</p>
+
+<h3>导出</h3>
+
+<ol class="steps">
+  <li>先在图书馆应用里建两本书，比如《Odoo Development Essentials 11》和《Odoo 11 Development Cookbook》，并填上出版社和作者。</li>
+  <li>打开<strong>联系人</strong>应用，切换到列表视图，勾选要导出的行（勾表头的复选框可以全选）。</li>
+  <li>点顶部的 <strong>⚙ 操作</strong> → <strong>导出</strong>。</li>
+  <li>在导出对话框里勾上 <strong>I want to update data (import-compatible export)</strong>（导入兼容的导出），格式选 CSV，字段只选「名称」，点导出。</li>
+</ol>
+
+<p>得到的文件大致如下：</p>
+
+<div class="code" data-lang="csv" data-file="res.partner.csv（导出结果）">
+<pre>
+"id","name"
+"__export__.res_partner_43_f82d2ecc","Alexandre Fayolle"
+"__export__.res_partner_41_30a5bc3c","Daniel Reis"
+"__export__.res_partner_44_6be5a130","Holger Brunn"
+"__export__.res_partner_42_38b48275","Packt Publishing"
+</pre>
+</div>
+
+<ul>
+  <li>第一行是字段名，导入时用来自动对应字段。</li>
+  <li>因为选了「导入兼容」，Odoo 自动加了一列 <code>id</code>，里面是每条记录的 XML ID。原本没有 XML ID 的记录，会自动生成一个以 <code>__export__</code> 开头的。</li>
+</ul>
+
+<div class="box note">
+  <div class="t">&#9432; 导出权限</div>
+  <p>在 Odoo 20 里，导出功能受用户组「Export: Allowed」（<code>base.group_allow_export</code>）控制。管理员默认拥有它；普通用户看不到导出菜单时，检查他是否在这个组里。</p>
+</div>
+
+<h3>导入：批量修改的利器</h3>
+
+<p>
+  用电子表格或文本编辑器打开刚才的 CSV，改几个名字，再加一行新数据，<code>id</code> 列留空：
+</p>
+
+<div class="code" data-lang="csv">
+<pre>
+,Phillip K. Dick
+</pre>
+</div>
+
+<p>回到联系人列表，点 <strong>⚙ 操作</strong> → <strong>导入记录</strong>，上传文件。导入助手会显示列的对应关系，先点<strong>测试</strong>检查，没问题再点<strong>导入</strong>。</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 250" role="img" aria-label="导出、编辑、再导入的往返过程：有 id 的行更新，无 id 的行新建">
+  <rect class="bx-b" x="20" y="90" width="130" height="70" rx="10"/>
+  <text class="ttl on-b" x="85" y="120" text-anchor="middle">Odoo</text>
+  <text class="sm" x="85" y="142" text-anchor="middle">4 位联系人</text>
+
+  <rect class="bx" x="230" y="20" width="200" height="70" rx="10"/>
+  <text class="lbl" x="330" y="48" text-anchor="middle">① 导出 CSV</text>
+  <text class="sm" x="330" y="70" text-anchor="middle">每行带 id（XML ID）</text>
+
+  <rect class="bx-a" x="530" y="90" width="210" height="70" rx="10"/>
+  <text class="lbl on-a" x="635" y="118" text-anchor="middle">② 在表格软件里编辑</text>
+  <text class="sm" x="635" y="140" text-anchor="middle">改名字 · 加新行</text>
+
+  <rect class="bx" x="230" y="160" width="200" height="70" rx="10"/>
+  <text class="lbl" x="330" y="188" text-anchor="middle">③ 导入</text>
+  <text class="sm" x="330" y="210" text-anchor="middle">按 id 匹配</text>
+
+  <path class="ln" d="M150 110 L226 62" marker-end="url(#ar)"/>
+  <path class="ln" d="M432 62 L526 110" marker-end="url(#ar)"/>
+  <path class="ln" d="M526 140 L434 190" marker-end="url(#ar)"/>
+  <path class="ln" d="M226 190 L152 142" marker-end="url(#ar)"/>
+
+  <text class="sm on-g" x="460" y="216">id 存在 → 更新那条记录</text>
+  <text class="sm on-a" x="460" y="236">id 为空或不存在 → 新建记录</text>
+</svg>
+<figcaption>图 5-3　导出 → 编辑 → 导入，是 Odoo 里批量修改数据的标准做法</figcaption>
+</figure>
+
+<div class="box tip">
+  <div class="t">&#128161; 分隔符和编码</div>
+  <p>如果导入助手把整行识别成了一列，或者中文变成乱码，在助手的选项里调整分隔符（逗号 / 分号）和编码（UTF-8）。不同的表格软件保存 CSV 的习惯不一样。</p>
+</div>
+
+<h2 id="csv-relations">CSV 里的关系字段</h2>
+
+<p>前面的例子都是简单字段。书有出版社（多对一）和作者（多对多），这些关系在 CSV 里这样表示：</p>
+
+<div class="tw"><table>
+  <tr><th>列名写法</th><th>值</th><th>适用</th></tr>
+  <tr><td><code>publisher_id/id</code></td><td>关联记录的 XML ID</td><td>多对一。<strong>推荐</strong></td></tr>
+  <tr><td><code>publisher_id/.id</code></td><td>关联记录的数字 ID</td><td>只在同一个数据库里有效，很少用</td></tr>
+  <tr><td><code>publisher_id</code></td><td>关联记录的显示名称</td><td>按名字查找，重名时会出问题</td></tr>
+  <tr><td><code>author_ids/id</code></td><td>逗号分隔的多个 XML ID，整体用双引号包起来</td><td>多对多</td></tr>
+</table></div>
+
+<div class="code" data-lang="csv">
+<pre>
+id,name,author_ids/id
+book_odc11,"Odoo 11 Development Cookbook","__export__.res_partner_43_f82d2ecc,__export__.res_partner_44_6be5a130"
+</pre>
+</div>
+
+<div class="box key">
+  <div class="t">&#9733; 永远优先用 XML ID</div>
+  <p>数字 ID 只在当前数据库里有意义，导入到另一个库（比如从测试库到生产库）就会指向错误的记录，甚至是完全不相干的数据。除非有特别理由，否则用 <code>/id</code>。</p>
+</div>
+
+<h3>一对多：表头与明细行</h3>
+
+<p>
+  一对多关系常用来表示「表头 - 明细」或「父 - 子」结构，CSV 对它有专门的支持：同一个父记录可以占多行，后续行把父记录的列留空。
+  例如一个公司联系人有多个下属联系人（<code>child_ids</code>）：
+</p>
+
+<div class="code" data-lang="csv">
+<pre>
+"id","name","child_ids/id","child_ids/name"
+"base.res_partner_12","Azure Interior","base.res_partner_address_15","Brandon Freeman"
+"","","base.res_partner_address_28","Colleen Diaz"
+"","","base.res_partner_address_16","Nicole Ford"
+</pre>
+</div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 210" role="img" aria-label="一对多数据在 CSV 中的布局：父记录列只在第一行出现">
+  <rect class="bx-a" x="20" y="20" width="300" height="34" rx="0"/>
+  <text class="ttl on-a" x="170" y="42" text-anchor="middle">父记录列：id · name</text>
+  <rect class="bx-b" x="320" y="20" width="420" height="34" rx="0"/>
+  <text class="ttl on-b" x="530" y="42" text-anchor="middle">子记录列：child_ids/id · child_ids/name</text>
+
+  <rect class="bx-a" x="20" y="54" width="300" height="40"/>
+  <text class="sm mono" x="34" y="79">base.res_partner_12 · Azure Interior</text>
+  <rect class="bx-b" x="320" y="54" width="420" height="40"/>
+  <text class="sm mono" x="334" y="79">…address_15 · Brandon Freeman</text>
+
+  <rect class="bx-d" x="20" y="94" width="300" height="40"/>
+  <text class="sm" x="170" y="119" text-anchor="middle">（空 = 仍属于上面那个父记录）</text>
+  <rect class="bx-b" x="320" y="94" width="420" height="40"/>
+  <text class="sm mono" x="334" y="119">…address_28 · Colleen Diaz</text>
+
+  <rect class="bx-d" x="20" y="134" width="300" height="40"/>
+  <text class="sm" x="170" y="159" text-anchor="middle">（空）</text>
+  <rect class="bx-b" x="320" y="134" width="420" height="40"/>
+  <text class="sm mono" x="334" y="159">…address_16 · Nicole Ford</text>
+
+  <text class="sm" x="20" y="198">一个公司 + 三个联系人 = 三行；第一行同时包含公司和第一个联系人</text>
+</svg>
+<figcaption>图 5-4　一对多的 CSV 布局</figcaption>
+</figure>
+
+<p>不确定格式时，就先在界面上导出一份带这些字段的数据，照着它的结构来。</p>
+
+<h2 id="module-data">模块里的数据文件</h2>
+
+<p>模块用数据文件加载默认数据、演示数据、界面定义和各种配置。CSV 和 XML 都可以用：</p>
+
+<div class="vs">
+  <div class="new">
+    <div class="h">CSV</div>
+    <div style="padding:10px 14px;font-size:14px">
+      和界面导入的格式完全一样。<strong>文件名必须等于目标模型名</strong>，比如加载书的数据要叫 <code>library.book.csv</code>，访问规则要叫 <code>ir.access.csv</code>。
+      简洁，适合大量同构数据。
+    </div>
+  </div>
+  <div class="new">
+    <div class="h">XML</div>
+    <div style="padding:10px 14px;font-size:14px">
+      文件名随意，因为每条记录都写明了模型。功能更强：表达式求值、<code>noupdate</code>、删除记录、调用方法……
+      视图、菜单这类界面定义都用 XML。
+    </div>
+  </div>
+</div>
+
+<h3>演示数据</h3>
+
+<p>
+  给模块提供演示数据是好习惯：它展示模块怎么用，也方便测试。演示数据在清单的 <code>demo</code> 键里声明，格式和 <code>data</code> 一样。
+  演示数据<strong>只在启用了演示数据的数据库</strong>里加载（建库时用了 <code>--with-demo</code>）。
+</p>
+
+<p>
+  最省事的做法是从开发库里导出数据，存到模块的 <code>data/</code> 目录。既然这些数据归我们的模块所有，要把导出生成的 <code>__export__</code> 前缀改成有意义的名字：
+</p>
+
+<div class="code" data-lang="csv" data-file="library_app/data/res.partner.csv">
+<pre>
+id,name
+res_partner_alexandre,"Alexandre Fayolle"
+res_partner_daniel,"Daniel Reis"
+res_partner_holger,"Holger Brunn"
+res_partner_packt,"Packt Publishing"
+</pre>
+</div>
+
+<div class="code" data-lang="csv" data-file="library_app/data/library.book.csv">
+<pre>
+"id","name","date_published","publisher_id/id","author_ids/id"
+library_book_ode11,"Odoo Development Essentials 11","2018-03-01",res_partner_packt,res_partner_daniel
+library_book_odc11,"Odoo 11 Development Cookbook","2018-01-01",res_partner_packt,"res_partner_alexandre,res_partner_holger"
+</pre>
+</div>
+
+<div class="code" data-lang="py" data-file="library_app/__manifest__.py（片段）">
+<pre>
+    "demo": [
+        "data/res.partner.csv",
+        "data/library.book.csv",
+    ],
+</pre>
+</div>
+
+<p>文件按声明顺序加载：书引用了联系人，所以联系人文件必须在前面。</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 250" role="img" aria-label="安装与升级时 data、demo 和 noupdate 数据分别是否加载">
+  <rect class="bx" x="200" y="20" width="270" height="40" rx="8"/>
+  <text class="ttl" x="335" y="45" text-anchor="middle">安装（-i）</text>
+  <rect class="bx" x="480" y="20" width="260" height="40" rx="8"/>
+  <text class="ttl" x="610" y="45" text-anchor="middle">升级（-u）</text>
+
+  <rect class="bx-b" x="20" y="72" width="170" height="44" rx="8"/>
+  <text class="lbl on-b" x="105" y="99" text-anchor="middle">data（普通）</text>
+  <rect class="bx-g" x="200" y="72" width="270" height="44" rx="8"/>
+  <text class="lbl on-g" x="335" y="99" text-anchor="middle">加载</text>
+  <rect class="bx-g" x="480" y="72" width="260" height="44" rx="8"/>
+  <text class="lbl on-g" x="610" y="99" text-anchor="middle">重新加载，覆盖手工修改</text>
+
+  <rect class="bx-p" x="20" y="126" width="170" height="44" rx="8"/>
+  <text class="lbl on-p" x="105" y="153" text-anchor="middle">data（noupdate）</text>
+  <rect class="bx-g" x="200" y="126" width="270" height="44" rx="8"/>
+  <text class="lbl on-g" x="335" y="153" text-anchor="middle">加载</text>
+  <rect class="bx-r" x="480" y="126" width="260" height="44" rx="8"/>
+  <text class="lbl on-r" x="610" y="153" text-anchor="middle">跳过，保留手工修改</text>
+
+  <rect class="bx-a" x="20" y="180" width="170" height="44" rx="8"/>
+  <text class="lbl on-a" x="105" y="207" text-anchor="middle">demo</text>
+  <rect class="bx-g" x="200" y="180" width="270" height="44" rx="8"/>
+  <text class="lbl on-g" x="335" y="207" text-anchor="middle">仅当数据库启用了演示数据</text>
+  <rect class="bx-r" x="480" y="180" width="260" height="44" rx="8"/>
+  <text class="lbl on-r" x="610" y="207" text-anchor="middle">跳过</text>
+</svg>
+<figcaption>图 5-5　三类数据在安装和升级时的不同命运</figcaption>
+</figure>
+
+<div class="box note">
+  <div class="t">&#9432; 数据文件里删掉的记录会怎样</div>
+  <p>
+    如果某条记录原来在数据文件里，后来你把它从文件中删掉了，那么下次升级模块时，Odoo 会发现这个 XML ID 不再被任何文件提供，于是<strong>从数据库里删除这条记录</strong>（<code>noupdate</code> 的记录除外）。
+    这让「从模块里去掉一个菜单」这类操作能自动生效。
+  </p>
+</div>
+
+<h2 id="xml">XML 数据文件</h2>
+
+<p>前几章我们已经大量使用 XML 数据文件。现在系统地看一下它的能力。给 <code>library_app</code> 再加一个演示数据文件：</p>
+
+<div class="code" data-lang="xml" data-file="library_app/data/book_demo.xml">
+<pre>
+&lt;?xml version="1.0"?&gt;
+&lt;odoo noupdate="1"&gt;
+    &lt;record model="res.partner" id="res_partner_huxley"&gt;
+        &lt;field name="name"&gt;Aldous Huxley&lt;/field&gt;
+    &lt;/record&gt;
+
+    &lt;record model="library.book" id="library_book_bnw"&gt;
+        &lt;field name="name"&gt;Brave New World&lt;/field&gt;
+        &lt;field name="author_ids" eval="[Command.link(ref('res_partner_huxley'))]"/&gt;
+        &lt;field name="date_published"&gt;1932-01-01&lt;/field&gt;
+    &lt;/record&gt;
+&lt;/odoo&gt;
+</pre>
+</div>
+
+<div class="code" data-lang="py" data-file="library_app/__manifest__.py（片段）">
+<pre>
+    "demo": [
+        "data/res.partner.csv",
+        "data/library.book.csv",
+        "data/book_demo.xml",
+    ],
+</pre>
+</div>
+
+<p>XML 数据文件的结构：</p>
+<ul>
+  <li>根元素是 <code>&lt;odoo&gt;</code>。里面可以有 <code>&lt;data&gt;</code> 子元素，但不是必须的 —— 现在 <code>&lt;odoo&gt;</code> 和 <code>&lt;data&gt;</code> 作用相同。</li>
+  <li>每个 <code>&lt;record&gt;</code> 相当于 CSV 里的一行，必须有 <code>model</code>（目标模型）和 <code>id</code>（XML ID）两个属性。</li>
+  <li>每个 <code>&lt;field&gt;</code> 写一个字段。注意 XML 里<strong>没有</strong> CSV 那种 <code>publisher_id/id</code> 斜杠写法，引用其他记录要用 <code>ref</code> 属性。</li>
+</ul>
+
+<h3><code>noupdate</code>：只在安装时加载</h3>
+
+<p>
+  默认情况下，每次升级模块都会重新加载数据文件，覆盖数据库里对应的记录。这意味着用户在界面上对这些记录做的修改，升级一次就没了。
+</p>
+
+<div class="box tip">
+  <div class="t">&#128161; 回顾：别直接改视图</div>
+  <p>这正是第 1 章强调「不要直接改视图，用继承视图」的原因 —— 直接改的视图会在模块升级时被覆盖。</p>
+</div>
+
+<p>
+  有些数据只是<strong>初始配置</strong>，预期用户会按自己的需要修改（比如访问规则、邮件模板、序列号格式）。给它们加上 <code>noupdate="1"</code>，
+  就只在安装时创建一次，以后升级不再覆盖，用户的修改得以保留。
+</p>
+
+<p>同一个文件里可以有多个 <code>&lt;data&gt;</code> 段，分别设置：</p>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;odoo&gt;
+    &lt;data&gt;
+        &lt;!-- 每次升级都重新加载 --&gt;
+    &lt;/data&gt;
+    &lt;data noupdate="1"&gt;
+        &lt;!-- 只在安装时加载一次 --&gt;
+    &lt;/data&gt;
+&lt;/odoo&gt;
+</pre>
+</div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 270" role="img" aria-label="升级模块时加载一条 XML 记录的判断流程">
+  <rect class="bx" x="20" y="110" width="160" height="50" rx="10"/>
+  <text class="lbl" x="100" y="140" text-anchor="middle">&lt;record id="x"&gt;</text>
+
+  <rect class="bx-p" x="230" y="100" width="190" height="70" rx="35"/>
+  <text class="lbl on-p" x="325" y="130" text-anchor="middle">x 在 ir.model.data</text>
+  <text class="lbl on-p" x="325" y="150" text-anchor="middle">里已存在？</text>
+
+  <rect class="bx-g" x="490" y="20" width="250" height="50" rx="10"/>
+  <text class="lbl on-g" x="615" y="50" text-anchor="middle">不存在 → 创建记录，登记 XML ID</text>
+
+  <rect class="bx-a" x="470" y="110" width="160" height="50" rx="25"/>
+  <text class="lbl on-a" x="550" y="140" text-anchor="middle">标记了 noupdate？</text>
+
+  <rect class="bx-b" x="490" y="200" width="250" height="50" rx="10"/>
+  <text class="lbl on-b" x="615" y="230" text-anchor="middle">否 → 用文件里的值更新它</text>
+  <rect class="bx-r" x="650" y="110" width="90" height="50" rx="10"/>
+  <text class="lbl on-r" x="695" y="140" text-anchor="middle">是 → 跳过</text>
+
+  <path class="ln" d="M182 135 H226" marker-end="url(#ar)"/>
+  <path class="ln-g" d="M400 110 L486 52" marker-end="url(#ar-g)"/>
+  <path class="ln-a" d="M422 135 H466" marker-end="url(#ar-a)"/>
+  <path class="ln-b" d="M550 162 L580 196" marker-end="url(#ar-b)"/>
+  <path class="ln-r" d="M632 135 H646" marker-end="url(#ar-r)"/>
+</svg>
+<figcaption>图 5-6　升级时每条记录的处理逻辑（安装时也一样，只是记录都还不存在）</figcaption>
+</figure>
+
+<div class="box tip">
+  <div class="t">&#128161; 开发时被 noupdate 坑了？</div>
+  <p>
+    开发中修改了 <code>noupdate</code> 数据，升级却不生效 —— 这是预期行为。两个办法：开发期间先用 <code>noupdate="0"</code>，完工后再改成 1；
+    或者在命令行用 <code>-i</code> 对已安装的模块<strong>重新安装</strong>，它会无视 <code>noupdate</code> 标志。
+    noupdate 标志记录在每个 XML ID 上，也可以在「外部标识符」表单或调试菜单的 Metadata 弹窗里手动修改。
+  </p>
+</div>
+
+<h3>给字段赋值的几种方式</h3>
+
+<p><strong>1. 直接写值。</strong><code>&lt;field&gt;</code> 标签之间的文本就是值：</p>
+<ul>
+  <li>日期写 <code>YYYY-mm-dd</code>，日期时间写 <code>YYYY-mm-dd HH:MM:SS</code>，会被正确转换。</li>
+  <li>布尔字段：<code>0</code> 和 <code>False</code> 转换为假，其他非空值转换为真。</li>
+</ul>
+
+<p><strong>2. 用 <code>eval</code> 计算。</strong>属性值被当作 Python 表达式求值，可以用的东西包括：</p>
+<ul>
+  <li>Python 内置函数</li>
+  <li>处理日期的 <code>time</code>、<code>datetime</code>、<code>timedelta</code>、<code>relativedelta</code> —— 让演示数据的日期总在安装日附近</li>
+  <li><code>ref('xml_id')</code>：把 XML ID 翻译成数字 ID</li>
+  <li><code>Command</code>：对多字段的写入命令（下面详述）</li>
+</ul>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;!-- 出版日期设为昨天 --&gt;
+&lt;field name="date_published" eval="(datetime.now() + timedelta(-1))"/&gt;
+
+&lt;!-- 多对一：用 eval + ref() --&gt;
+&lt;field name="publisher_id" eval="ref('res_partner_packt')"/&gt;
+</pre>
+</div>
+
+<p><strong>3. 多对一用 <code>ref</code> 属性。</strong>上面第二种的简写：</p>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;field name="publisher_id" ref="res_partner_packt"/&gt;
+</pre>
+</div>
+
+<p><strong>4. 从文件加载二进制内容。</strong>比如给演示书加一个封面图：</p>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;field name="image" type="bytes" file="library_app/static/img/bnw.png"/&gt;
+</pre>
+</div>
+
+<div class="box ver">
+  <div class="t">&#8682; type="base64" → type="bytes"</div>
+  <p>
+    以前从文件加载二进制内容写作 <code>type="base64" file="..."</code>。Odoo 19.3 起二进制字段内部不再到处做 base64 编码，
+    从文件加载时推荐写 <code>type="bytes"</code>。旧写法仍被接受。
+  </p>
+</div>
+
+<h3>对多字段的写入命令</h3>
+
+<p>
+  一对多和多对多字段的值不是一个 ID，而是一组 ID。而且写入时可能有不同的意图：替换整个列表？追加几条？去掉几条？
+  所以 Odoo 用一个<strong>命令列表</strong>来描述对它的操作。以 <code>author_ids</code> 为例：
+</p>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;!-- 替换：作者设为这两位，原来的作者全部移除 --&gt;
+&lt;field name="author_ids"
+       eval="[Command.set([ref('res_partner_alexandre'), ref('res_partner_holger')])]"/&gt;
+
+&lt;!-- 追加：在现有作者里加上 Daniel --&gt;
+&lt;field name="author_ids" eval="[Command.link(ref('res_partner_daniel'))]"/&gt;
+</pre>
+</div>
+
+<p>完整的命令表（左列是推荐的 <code>Command</code> 写法，中间是书里使用的等价旧式元组）：</p>
+
+<div class="tw"><table>
+  <tr><th>Command 写法</th><th>旧式元组</th><th>作用</th></tr>
+  <tr><td><code>Command.create({...})</code></td><td><code>(0, 0, {...})</code></td><td>用给定的值新建一条记录，并关联上</td></tr>
+  <tr><td><code>Command.update(id, {...})</code></td><td><code>(1, id, {...})</code></td><td>修改一条已关联记录的值</td></tr>
+  <tr><td><code>Command.delete(id)</code></td><td><code>(2, id)</code></td><td>解除关联，并<strong>删除</strong>那条记录</td></tr>
+  <tr><td><code>Command.unlink(id)</code></td><td><code>(3, id)</code></td><td>只解除关联，不删除记录。多对多里「去掉一项」用它</td></tr>
+  <tr><td><code>Command.link(id)</code></td><td><code>(4, id)</code></td><td>关联一条已存在的记录</td></tr>
+  <tr><td><code>Command.clear()</code></td><td><code>(5,)</code></td><td>解除全部关联，不删除记录</td></tr>
+  <tr><td><code>Command.set([ids])</code></td><td><code>(6, 0, [ids])</code></td><td>用给定列表替换全部关联</td></tr>
+</table></div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 250" role="img" aria-label="对多字段常用命令执行前后的对比">
+  <text class="ttl" x="20" y="24">原来：author_ids = {A, B}</text>
+
+  <text class="mono on-a" x="20" y="64">link(C)</text>
+  <rect class="bx" x="170" y="46" width="40" height="28" rx="6"/><text class="lbl" x="190" y="65" text-anchor="middle">A</text>
+  <rect class="bx" x="216" y="46" width="40" height="28" rx="6"/><text class="lbl" x="236" y="65" text-anchor="middle">B</text>
+  <rect class="bx-g" x="262" y="46" width="40" height="28" rx="6"/><text class="lbl on-g" x="282" y="65" text-anchor="middle">C</text>
+  <text class="sm" x="330" y="64">追加 C</text>
+
+  <text class="mono on-a" x="20" y="108">unlink(A)</text>
+  <rect class="bx-d" x="170" y="90" width="40" height="28" rx="6"/><text class="sm" x="190" y="109" text-anchor="middle">A</text>
+  <rect class="bx" x="216" y="90" width="40" height="28" rx="6"/><text class="lbl" x="236" y="109" text-anchor="middle">B</text>
+  <text class="sm" x="330" y="108">A 被移出列表，但 A 这条联系人记录还在</text>
+
+  <text class="mono on-a" x="20" y="152">delete(A)</text>
+  <rect class="bx-r" x="170" y="134" width="40" height="28" rx="6"/><text class="lbl on-r" x="190" y="153" text-anchor="middle">✕</text>
+  <rect class="bx" x="216" y="134" width="40" height="28" rx="6"/><text class="lbl" x="236" y="153" text-anchor="middle">B</text>
+  <text class="sm" x="330" y="152">A 被移出，并且 A 记录本身被删除（常用于一对多的明细行）</text>
+
+  <text class="mono on-a" x="20" y="196">set([C, D])</text>
+  <rect class="bx-g" x="170" y="178" width="40" height="28" rx="6"/><text class="lbl on-g" x="190" y="197" text-anchor="middle">C</text>
+  <rect class="bx-g" x="216" y="178" width="40" height="28" rx="6"/><text class="lbl on-g" x="236" y="197" text-anchor="middle">D</text>
+  <text class="sm" x="330" y="196">整个替换成 C、D</text>
+
+  <text class="mono on-a" x="20" y="238">clear()</text>
+  <text class="sm" x="170" y="238">（空）</text>
+  <text class="sm" x="330" y="238">清空列表，A、B 记录仍然存在</text>
+</svg>
+<figcaption>图 5-7　最常用的对多字段命令。可以在一个列表里组合多个命令，按顺序执行</figcaption>
+</figure>
+
+<div class="box ver">
+  <div class="t">&#8682; 用 Command，别背数字</div>
+  <p>
+    书里全部使用数字元组，比如 <code>[(4, ref('x'))]</code>、<code>[(6, 0, [...])]</code>。从 Odoo 14 起有了 <code>Command</code> 命名空间，
+    语义一目了然；数字写法仍然有效，你在老代码里会经常见到，所以两种都要认得。Python 代码里用 <code>from odoo.fields import Command</code> 导入；
+    XML 的 <code>eval</code> 里可以直接用。
+  </p>
+</div>
+
+<h3>快捷标签</h3>
+
+<p>除了通用的 <code>&lt;record&gt;</code>，还有几个针对常用模型的快捷标签，写法更紧凑：</p>
+
+<div class="tw"><table>
+  <tr><th>标签</th><th>对应模型</th><th>用途</th></tr>
+  <tr><td><code>&lt;menuitem&gt;</code></td><td><code>ir.ui.menu</code></td><td>菜单项</td></tr>
+  <tr><td><code>&lt;template&gt;</code></td><td><code>ir.ui.view</code></td><td>QWeb 模板</td></tr>
+  <tr><td><code>&lt;asset&gt;</code></td><td><code>ir.asset</code></td><td>前端资源包里的一个文件（不常用，一般在清单的 <code>assets</code> 里声明）</td></tr>
+</table></div>
+
+<p>
+  书中提到的 <code>&lt;act_window&gt;</code> 和 <code>&lt;report&gt;</code> 快捷标签在 Odoo 14 已经移除，现在用 <code>&lt;record&gt;</code> 写。
+  再次提醒：快捷标签用于修改已有记录时会<strong>覆盖全部字段</strong>，只想改一个字段就用 <code>&lt;record&gt;</code>。
+</p>
+
+<h3>删除记录和调用方法</h3>
+
+<p>XML 数据文件不仅能写数据，还能删除数据、调用方法，适合较复杂的初始化场景。</p>
+
+<p><strong>删除记录</strong>用 <code>&lt;delete&gt;</code>，可以按 XML ID 或按域搜索：</p>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;!-- 按 XML ID 删除 --&gt;
+&lt;delete model="res.partner" id="library_app.res_partner_daniel"/&gt;
+
+&lt;!-- 按域搜索后删除（效果同上） --&gt;
+&lt;delete model="res.partner"
+        search="[('id', '=', ref('library_app.res_partner_daniel'))]"/&gt;
+</pre>
+</div>
+
+<p><strong>调用模型方法</strong>用 <code>&lt;function&gt;</code>，常用于准备演示数据或测试数据：</p>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;data noupdate="1"&gt;
+    &lt;!-- 调用 library.book 模型的 _demo_prepare 方法，参数列表由 eval 给出 --&gt;
+    &lt;function model="library.book" name="_demo_prepare" eval="[]"/&gt;
+&lt;/data&gt;
+</pre>
+</div>
+
+<p>这会在加载到这一行时执行 <code>env["library.book"]._demo_prepare()</code>。<code>eval</code> 是传给方法的参数列表，这里是空的。</p>
+
+<h2 id="summary">小结</h2>
+
+<ul>
+  <li>模块里的数据文件只在安装 / 升级时加载进数据库；运行时 Odoo 只看数据库。</li>
+  <li>外部标识符（XML ID）是记录的稳定别名，存在 <code>ir.model.data</code> 里，格式为「模块名.名字」。它让数据能互相引用，并且升级时更新而不是重复创建。</li>
+  <li>导入兼容的 CSV 导出 + 编辑 + 再导入，是批量修改数据的标准方法；id 存在则更新，否则新建。</li>
+  <li>CSV 关系列用 <code>/id</code> 后缀引用 XML ID；多对多用逗号分隔的列表；一对多用多行，父记录列只填第一行。</li>
+  <li>模块 CSV 的文件名必须等于模型名；演示数据放在清单的 <code>demo</code> 里，只在启用演示数据的库里加载。</li>
+  <li>XML 数据文件：<code>noupdate="1"</code> 保护用户的修改；<code>eval</code> 求值、<code>ref</code> 引用；对多字段用 <code>Command</code> 命令；还能 <code>&lt;delete&gt;</code> 和 <code>&lt;function&gt;</code>。</li>
+</ul>
+
+<div class="exercise">
+  <h3>动手练习</h3>
+  <ol>
+    <li>在界面上导出几本书（导入兼容，选择书名、出版社、作者三个字段），观察关系字段在 CSV 里的样子。</li>
+    <li>用导出 → 编辑 → 导入的方式，批量把几本书的出版日期改掉。</li>
+    <li>为 <code>library_app</code> 加上本章的三个演示数据文件，新建一个带演示数据的库安装它，确认数据都在。</li>
+    <li>在 <code>book_demo.xml</code> 里再加一本书，出版日期用 <code>eval</code> 设为「一年前的今天」，作者用 <code>Command.set</code> 指定两位。</li>
+    <li>修改 <code>book_demo.xml</code> 里《Brave New World》的书名后升级模块，书名变了吗？为什么？再试试用 <code>-i</code> 重新安装。</li>
+  </ol>
+</div>
+<div id="pager"></div>
+</main>
+</div>
+<script src="assets/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,1015 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 6 章 · 模型：组织应用数据 — Odoo 20 开发入门</title>
+<meta name="description" content="深入模型层：模型属性与类型、全部字段类型与通用属性、多对一 / 一对多 / 多对多 / 层级 / 引用关系、计算字段与关联字段、SQL 约束与 Python 约束。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-chapter="6">
+<div id="app">
+<aside id="sidebar"></aside>
+<main>
+<span class="chapter-eyebrow">第 6 章</span>
+<h1>模型：组织应用数据</h1>
+<p class="lede">
+  模型是 Odoo 框架的心脏：它描述应用的数据结构，是应用服务器和数据库之间的桥梁。业务逻辑围绕模型实现，用户界面建立在模型之上。
+  这一章把模型层讲透：有哪些模型类型、有哪些字段类型、字段之间怎么建立关系、怎么让字段自动计算、怎么保证数据正确。
+</p>
+
+<div class="goals">
+  <h4>本章目标</h4>
+  <ul>
+    <li>掌握常用模型属性，分清普通模型、临时模型和抽象模型</li>
+    <li>认识全部基本字段类型和通用字段属性，学会设置默认值</li>
+    <li>建立多对一、一对多、多对多、层级和引用关系</li>
+    <li>写计算字段（含可搜索、可写入的）和关联字段</li>
+    <li>用 SQL 约束和 Python 约束保证数据质量</li>
+  </ul>
+</div>
+
+<div id="chapter-toc"></div>
+
+<h2 id="project">学习项目：丰富图书馆应用</h2>
+
+<p>我们回到 <code>library_app</code>，让每本书能存更丰富的信息，并增加一个<strong>图书分类</strong>的层级结构：</p>
+<ul>
+  <li><strong>名称</strong>：分类标题</li>
+  <li><strong>上级分类</strong>：它属于哪个分类</li>
+  <li><strong>子分类</strong>：以它为上级的分类</li>
+  <li><strong>精选</strong>：一本代表这个分类的书，<em>或者</em>一位代表作者</li>
+</ul>
+<p>同时给书加两条校验规则：书名 + 出版日期不能重复；ISBN 必须合法。</p>
+
+<h2 id="models">创建模型</h2>
+
+<h3>模型属性</h3>
+
+<p>模型类可以用一些以下划线开头的类属性控制它的行为。最常用的三个：</p>
+
+<dl class="terms">
+  <dt><code>_name</code></dt><dd>模型的内部标识。创建新模型时必须写。</dd>
+  <dt><code>_description</code></dt><dd>给人看的模型名称，比如 Book。可选但推荐，不写会在日志里告警。</dd>
+  <dt><code>_order</code></dt><dd>默认排序，相当于 SQL 的 ORDER BY 子句。它很聪明：支持可翻译字段，也支持多对一字段（按关联记录的排序）。</dd>
+</dl>
+
+<div class="code" data-lang="py">
+<pre>
+class LibraryBook(models.Model):
+    _name = "library.book"
+    _description = "Book"
+    _order = "name, date_published desc"   # 先按书名，再按出版日期从新到旧
+</pre>
+</div>
+
+<p>还有一些在特殊情况下有用的属性（下面写的都是它们的默认值）：</p>
+
+<div class="code" data-lang="py">
+<pre>
+    _rec_name = "name"          # 用哪个字段作为记录的显示名称
+    _table = "library_book"     # 数据库表名，默认为模型名把点换成下划线
+    _log_access = True          # False 时不创建 create_uid / write_date 等审计字段
+    _auto = True                # False 时 ORM 不自动建表，需自己在 init() 里创建
+</pre>
+</div>
+
+<p>
+  <code>_auto = False</code> 的典型用途是<strong>报表模型</strong>：模型背后不是一张表，而是一个数据库视图（VIEW），汇总了报表需要的数据。
+  比如销售模块的 <code>sale.report</code>，就在 <code>init()</code> 方法里用 <code>CREATE OR REPLACE VIEW</code> 创建自己的视图。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 210" role="img" aria-label="模型名、类名、表名与 XML ID 之间的关系">
+  <rect class="bx-a" x="270" y="70" width="220" height="70" rx="12"/>
+  <text class="ttl on-a" x="380" y="98" text-anchor="middle">_name</text>
+  <text class="mono" x="380" y="122" text-anchor="middle">library.book</text>
+
+  <rect class="bx" x="20" y="20" width="200" height="60" rx="10"/>
+  <text class="sm" x="120" y="44" text-anchor="middle">Python 类名（无关紧要）</text>
+  <text class="mono" x="120" y="66" text-anchor="middle">LibraryBook</text>
+
+  <rect class="bx-b" x="540" y="20" width="200" height="60" rx="10"/>
+  <text class="sm" x="640" y="44" text-anchor="middle">数据库表 _table</text>
+  <text class="mono on-b" x="640" y="66" text-anchor="middle">library_book</text>
+
+  <rect class="bx-p" x="20" y="130" width="200" height="60" rx="10"/>
+  <text class="sm" x="120" y="154" text-anchor="middle">环境里的访问方式</text>
+  <text class="mono on-p" x="120" y="176" text-anchor="middle">env["library.book"]</text>
+
+  <rect class="bx-g" x="540" y="130" width="200" height="60" rx="10"/>
+  <text class="sm" x="640" y="154" text-anchor="middle">自动生成的 XML ID</text>
+  <text class="mono on-g" x="640" y="176" text-anchor="middle">model_library_book</text>
+
+  <path class="ln-d" d="M222 50 L266 88"/>
+  <path class="ln-b" d="M492 90 L536 60" marker-end="url(#ar-b)"/>
+  <path class="ln-p" d="M266 122 L224 150" marker-end="url(#ar-p)"/>
+  <path class="ln-g" d="M492 122 L536 152" marker-end="url(#ar-g)"/>
+</svg>
+<figcaption>图 6-1　一切都从 <code>_name</code> 推导出来，类名只是 Python 里的局部名字</figcaption>
+</figure>
+
+<h3>模型和 Python 类</h3>
+
+<p>
+  所有模型都保存在一个中央<strong>注册表</strong>里，通过环境对象访问，通常写作 <code>self.env</code>。注册表像字典一样，用模型名取模型：
+  <code>self.env["library.book"]</code>。所以模型名非常重要，并且必须<strong>全局唯一</strong>。
+</p>
+
+<div class="box tip">
+  <div class="t">&#128161; 模型命名规范</div>
+  <ul>
+    <li>用<strong>单数</strong>：<code>library.book</code>，不是 <code>library.books</code>。</li>
+    <li>小写单词用点连接，第一个词是所属应用：<code>library.book</code>、<code>library.book.category</code>；官方的例子有 <code>project.project</code>、<code>project.task</code>、<code>project.task.type</code>。</li>
+    <li>Python 类名按 PEP 8 用驼峰式，它只在所在文件里有意义。</li>
+  </ul>
+</div>
+
+<h3>三种模型类型</h3>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 250" role="img" aria-label="普通模型、临时模型、抽象模型的区别">
+  <rect class="bx-b" x="20" y="20" width="230" height="210" rx="12"/>
+  <text class="ttl on-b" x="135" y="46" text-anchor="middle">models.Model</text>
+  <text class="sm" x="135" y="68" text-anchor="middle">普通模型</text>
+  <rect class="bx" x="75" y="84" width="120" height="50" rx="6"/>
+  <text class="sm" x="135" y="106" text-anchor="middle">数据库表</text>
+  <text class="sm" x="135" y="124" text-anchor="middle">永久保存</text>
+  <text class="sm" x="135" y="168" text-anchor="middle">绝大多数模型</text>
+  <text class="sm" x="135" y="188" text-anchor="middle">书、订单、联系人……</text>
+
+  <rect class="bx-a" x="265" y="20" width="230" height="210" rx="12"/>
+  <text class="ttl on-a" x="380" y="46" text-anchor="middle">models.TransientModel</text>
+  <text class="sm" x="380" y="68" text-anchor="middle">临时模型</text>
+  <rect class="bx-d" x="320" y="84" width="120" height="50" rx="6"/>
+  <text class="sm" x="380" y="106" text-anchor="middle">数据库表</text>
+  <text class="sm" x="380" y="124" text-anchor="middle">定期自动清理</text>
+  <text class="sm" x="380" y="168" text-anchor="middle">向导（wizard）对话框</text>
+  <text class="sm" x="380" y="188" text-anchor="middle">第 8 章</text>
+
+  <rect class="bx-p" x="510" y="20" width="230" height="210" rx="12"/>
+  <text class="ttl on-p" x="625" y="46" text-anchor="middle">models.AbstractModel</text>
+  <text class="sm" x="625" y="68" text-anchor="middle">抽象模型</text>
+  <rect class="bx-d" x="565" y="84" width="120" height="50" rx="6"/>
+  <text class="sm" x="625" y="114" text-anchor="middle">没有表</text>
+  <text class="sm" x="625" y="168" text-anchor="middle">混入类（mixin）</text>
+  <text class="sm" x="625" y="188" text-anchor="middle">mail.thread 等，第 4 章</text>
+</svg>
+<figcaption>图 6-2　三种模型类型</figcaption>
+</figure>
+
+<ul>
+  <li><strong>临时模型</strong>（<code>models.TransientModel</code>）用于向导式的交互。数据也存在数据库里，但只是临时的，有一个定时任务会清掉旧数据（默认保留 1 小时）。比如「设置 → 翻译 → 导入翻译」打开的对话框就是一个临时模型。</li>
+  <li><strong>抽象模型</strong>（<code>models.AbstractModel</code>）没有数据存储，用作可复用的功能集合，通过继承混入其他模型。</li>
+</ul>
+
+<h3>在界面上查看模型</h3>
+
+<p>
+  开发者模式下，<strong>设置 → 技术 → 数据库结构 → 模型</strong>列出所有模型。打开 <code>library.book</code>，可以看到它是所有模块修改叠加后的最终结果：
+  右上角「In Apps」列出了影响它的模块（比如 <code>library_app</code> 和 <code>library_member</code>）；
+  下方的标签页有字段（Fields）、访问规则（Access Rights）、说明（Notes，即模型类的 docstring）和视图（Views）。
+</p>
+
+<p>
+  模型的 XML ID 由 ORM 自动生成：<code>model_</code> 加上模型名（点换成下划线），所以 <code>library.book</code> 的完整 XML ID 是 <code>library_app.model_library_book</code>。
+</p>
+
+<h2 id="fields">字段</h2>
+
+<h3>基本字段类型</h3>
+
+<p>我们把书模型的字段换成下面这样，借此展示各种字段类型：</p>
+
+<div class="code" data-lang="py" data-file="library_app/models/library_book.py（字段部分）">
+<pre>
+class LibraryBook(models.Model):
+    _name = "library.book"
+    _description = "Book"
+    _order = "name, date_published desc"
+
+    # 文本类
+    name = fields.Char("Title", required=True)
+    isbn = fields.Char("ISBN")
+    book_type = fields.Selection(
+        [("paper", "Paperback"),
+         ("hard", "Hardcover"),
+         ("electronic", "Electronic"),
+         ("other", "Other")],
+        "Type",
+    )
+    notes = fields.Text("Internal Notes")
+    descr = fields.Html("Description")
+
+    # 数值类
+    copies = fields.Integer(default=1)
+    avg_rating = fields.Float("Average Rating", digits=(3, 2))
+    price = fields.Monetary("Price", currency_field="currency_id")
+    currency_id = fields.Many2one("res.currency")  # 金额字段需要一个币种字段
+
+    # 日期时间类
+    date_published = fields.Date()
+    last_borrow_date = fields.Datetime(
+        "Last Borrowed On",
+        default=lambda self: fields.Datetime.now(),
+    )
+
+    # 其他
+    active = fields.Boolean("Active?", default=True)
+    image = fields.Image("Cover", max_width=1024, max_height=1024)
+
+    # 关系类
+    publisher_id = fields.Many2one("res.partner", string="Publisher")
+    author_ids = fields.Many2many("res.partner", string="Authors")
+</pre>
+</div>
+
+<p>
+  大多数字段的第一个位置参数是<strong>标签</strong>（对应关键字参数 <code>string</code>）。例外是 Selection 和所有关系字段，它们的第一个位置参数是选项列表或关联模型。
+  不写标签时，Odoo 会根据字段名自动生成：下划线换空格、每个单词首字母大写，<code>date_published</code> 变成「Date Published」。
+</p>
+
+<div class="cards">
+  <div class="card"><span class="ic">&#9998;</span><h4>Char</h4><p>单行文本。可选 <code>size</code> 限制长度（没有充分理由别用）。</p></div>
+  <div class="card"><span class="ic">&#128196;</span><h4>Text</h4><p>多行纯文本。</p></div>
+  <div class="card"><span class="ic">&#127912;</span><h4>Html</h4><p>富文本。默认会做安全过滤，<code>sanitize=False</code> 可关闭。</p></div>
+  <div class="card"><span class="ic">&#9776;</span><h4>Selection</h4><p>下拉选项。<code>[("存的值", "显示的文字"), ...]</code>；扩展模块用 <code>selection_add</code> 追加选项。</p></div>
+  <div class="card"><span class="ic">&#35;</span><h4>Integer / Float</h4><p>整数 / 浮点数。Float 的 <code>digits=(总位数, 小数位)</code> 控制精度。</p></div>
+  <div class="card"><span class="ic">&#128176;</span><h4>Monetary</h4><p>金额，按币种格式化。需要一个币种字段，默认叫 <code>currency_id</code>。</p></div>
+  <div class="card"><span class="ic">&#128197;</span><h4>Date / Datetime</h4><p>日期 / 日期时间。在 Python 里就是 <code>date</code> / <code>datetime</code> 对象。Datetime 在数据库里存 UTC。</p></div>
+  <div class="card"><span class="ic">&#9745;</span><h4>Boolean</h4><p>真 / 假。</p></div>
+  <div class="card"><span class="ic">&#128190;</span><h4>Binary</h4><p>任意二进制数据（文件），默认存在 filestore。</p></div>
+  <div class="card"><span class="ic">&#128444;</span><h4>Image</h4><p>图片，是 Binary 的子类，可以自动缩放（<code>max_width</code> / <code>max_height</code>）。</p></div>
+  <div class="card"><span class="ic">&#123;&#125;</span><h4>Json</h4><p>存 JSON 数据（PostgreSQL jsonb），适合结构灵活的数据。</p></div>
+  <div class="card"><span class="ic">&#9881;</span><h4>Properties</h4><p>让用户在界面上自定义「属性」字段，配合 PropertiesDefinition 使用。</p></div>
+</div>
+
+<div class="box ver">
+  <div class="t">&#8682; 和书上代码的区别</div>
+  <ul>
+    <li>封面字段改用了 <code>fields.Image</code>（Odoo 13 引入），它会自动把大图缩小，比 <code>Binary</code> 更适合图片。</li>
+    <li>书里 <code>Float("Average Rating", (3, 2))</code> 用位置参数传精度；这里用关键字 <code>digits=</code> 更清楚。</li>
+    <li>书中的 <code>active</code> 字段漏写了 <code>default=True</code>，那样新建的书都是「已归档」状态，这里补上了。</li>
+  </ul>
+</div>
+
+<p>文本类字段还有几个专用属性：</p>
+<ul>
+  <li><code>translate=True</code>：内容可翻译，每种语言存一个值（Odoo 16 起以 JSONB 形式存在同一列里）。</li>
+  <li><code>trim</code>：默认为 <code>True</code>，Web 客户端会自动去掉首尾空白；设为 <code>False</code> 保留。</li>
+</ul>
+
+<h3>通用字段属性</h3>
+
+<p>下面这些关键字参数适用于所有字段类型：</p>
+
+<div class="tw"><table>
+  <tr><th>属性</th><th>作用</th></tr>
+  <tr><td><code>string</code></td><td>界面上的默认标签</td></tr>
+  <tr><td><code>default</code></td><td>默认值：固定值，或一个可调用对象（函数 / lambda）</td></tr>
+  <tr><td><code>help</code></td><td>鼠标悬停时显示的提示</td></tr>
+  <tr><td><code>readonly=True</code></td><td>界面上默认不可编辑。<strong>只是界面设置</strong>，代码仍然可以写入，视图也可以覆盖它</td></tr>
+  <tr><td><code>required=True</code></td><td>必填。界面上必填，并且在数据库层加 NOT NULL 约束</td></tr>
+  <tr><td><code>index</code></td><td>建数据库索引，加快搜索、减慢写入。可取 <code>True</code>（btree）、<code>"btree_not_null"</code>、<code>"trigram"</code>（全文模糊搜索）</td></tr>
+  <tr><td><code>copy</code></td><td>复制记录（<code>copy()</code>）时是否复制该字段。普通字段默认复制，对多字段默认不复制</td></tr>
+  <tr><td><code>groups</code></td><td>只有这些组的成员能看到和访问该字段，值为逗号分隔的组 XML ID，如 <code>"base.group_user,base.group_system"</code></td></tr>
+  <tr><td><code>store</code></td><td>是否存进数据库，普通字段默认存；计算字段默认不存（见后文）</td></tr>
+  <tr><td><code>company_dependent=True</code></td><td>值随公司不同而不同（多公司场景）</td></tr>
+  <tr><td><code>aggregator</code></td><td>在列表分组、透视表里的汇总方式：<code>"sum"</code>、<code>"avg"</code>、<code>"max"</code>……</td></tr>
+</table></div>
+
+<div class="box ver">
+  <div class="t">&#8682; 被移除和改名的字段属性</div>
+  <ul>
+    <li><code>states={...}</code>：根据 <code>state</code> 字段动态设置只读 / 必填 / 隐藏。<strong>Odoo 17 移除</strong>，改为在视图里直接写条件表达式，如 <code>readonly="state == 'done'"</code>（第 10 章）。</li>
+    <li><code>deprecated=True</code>：已移除。</li>
+    <li><code>group_operator</code>：Odoo 17.2 改名为 <code>aggregator</code>。</li>
+  </ul>
+  <p>书中「列出全部属性」的示例因此要删掉 <code>states</code> 和 <code>deprecated</code> 两项，否则会报错。</p>
+</div>
+
+<h3>默认值</h3>
+
+<p>默认值可以是固定值，也可以是一个函数，在新建记录时被调用：</p>
+
+<div class="code" data-lang="py">
+<pre>
+# 1. lambda：适合简单计算
+last_borrow_date = fields.Datetime(
+    "Last Borrowed On",
+    default=lambda self: fields.Datetime.now(),
+)
+
+# 2. 函数引用：函数必须定义在字段之前
+def _default_last_borrow_date(self):
+    return fields.Datetime.now()
+
+last_borrow_date = fields.Datetime(
+    "Last Borrowed On",
+    default=_default_last_borrow_date,
+)
+
+# 3. 函数名字符串：运行时才查找，所以函数可以定义在后面
+last_borrow_date = fields.Datetime(
+    "Last Borrowed On",
+    default="_default_last_borrow_date",
+)
+</pre>
+</div>
+
+<p>
+  惯例是把默认值函数写在字段定义之前，并使用第 2 种（函数引用）写法 —— 代码编辑器能检查出拼写错误。
+</p>
+
+<div class="box warn">
+  <div class="t">&#9888; 别写 default=fields.Datetime.now()</div>
+  <p>
+    注意 lambda 写法里 <code>now()</code> 是在 lambda <strong>内部</strong>调用的。如果写成 <code>default=fields.Datetime.now()</code>，
+    它会在 Python 加载这个文件时就被执行一次，所有新记录都会得到同一个（服务器启动时的）时间。
+    想直接传函数的话，写 <code>default=fields.Datetime.now</code>（不带括号）。
+  </p>
+</div>
+
+<h3>自动字段和保留字段名</h3>
+
+<p>每个模型都自动有一个 <code>id</code> 字段作为主键。除非设置了 <code>_log_access = False</code>，还会自动加上四个审计字段：</p>
+<ul>
+  <li><code>create_uid</code> / <code>create_date</code>：创建人 / 创建时间</li>
+  <li><code>write_uid</code> / <code>write_date</code>：最后修改人 / 最后修改时间</li>
+</ul>
+<p>在表单上通过调试菜单 → <strong>Metadata</strong> 可以看到它们的值。</p>
+
+<p>还有一些字段名会被 Odoo 的内置功能「默认使用」，最好只用于约定的用途：</p>
+
+<div class="tw"><table>
+  <tr><th>字段名</th><th>类型</th><th>约定用途</th></tr>
+  <tr><td><code>name</code> / <code>x_name</code></td><td>Char</td><td>记录的显示名称。可用 <code>_rec_name</code> 改用别的字段</td></tr>
+  <tr><td><code>active</code> / <code>x_active</code></td><td>Boolean</td><td>为 False 的记录被「归档」，默认从查询中排除。上下文加 <code>{'active_test': False}</code> 可以查到它们</td></tr>
+  <tr><td><code>state</code></td><td>Selection</td><td>记录的生命周期状态，比如草稿、已确认、已完成</td></tr>
+  <tr><td><code>parent_id</code></td><td>Many2one</td><td>树状层级结构，启用域运算符 <code>child_of</code> 和 <code>parent_of</code>。可用 <code>_parent_name</code> 改用别的字段</td></tr>
+  <tr><td><code>parent_path</code></td><td>Char</td><td>配合 <code>_parent_store = True</code>，加速层级查询</td></tr>
+  <tr><td><code>company_id</code></td><td>Many2one</td><td>记录所属公司。为空表示各公司共享。用于多公司一致性检查</td></tr>
+  <tr><td><code>sequence</code></td><td>Integer</td><td>手动排序。常配合 <code>_order = "sequence"</code>，并在列表视图里加 <code>&lt;field name="sequence" widget="handle"/&gt;</code> 实现拖动排序</td></tr>
+</table></div>
+
+<h3>显示名称：display_name</h3>
+
+<p>
+  每条记录都有一个计算字段 <code>display_name</code>，它决定了这条记录在下拉框、关系字段、面包屑里显示成什么。默认取 <code>_rec_name</code>（即 <code>name</code>）的值。
+  如果想自定义，比如让书显示为「书名 (出版年份)」，就重写 <code>_compute_display_name</code>：
+</p>
+
+<div class="code" data-lang="py">
+<pre>
+    @api.depends("name", "date_published")
+    def _compute_display_name(self):
+        for book in self:
+            year = book.date_published.year if book.date_published else ""
+            book.display_name = f"{book.name} ({year})" if year else book.name
+</pre>
+</div>
+
+<div class="box ver">
+  <div class="t">&#8682; name_get() 已被废弃</div>
+  <p>
+    Odoo 16 以前自定义显示名称要重写 <code>name_get()</code> 方法，你在老代码里会经常看到它。Odoo 17 起废弃，统一改为计算 <code>display_name</code> 字段。
+    相应地，「按显示名称搜索」也从重写 <code>_name_search()</code> 改为设置 <code>_rec_names_search = ["name", "isbn"]</code>（列出参与搜索的字段）。
+  </p>
+</div>
+
+<h2 id="relations">模型之间的关系</h2>
+
+<p>以图书馆为例，书模型有这些关系：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 360" role="img" aria-label="书、联系人、分类之间的各种关系">
+  <rect class="bx-a" x="270" y="120" width="220" height="120" rx="12"/>
+  <text class="ttl on-a" x="380" y="146" text-anchor="middle">library.book</text>
+  <text class="sm mono" x="290" y="172">publisher_id　Many2one</text>
+  <text class="sm mono" x="290" y="194">author_ids　　Many2many</text>
+  <text class="sm mono" x="290" y="216">category_id　 Many2one</text>
+
+  <rect class="bx-b" x="20" y="20" width="220" height="110" rx="12"/>
+  <text class="ttl on-b" x="130" y="46" text-anchor="middle">res.partner（出版社）</text>
+  <text class="sm mono" x="36" y="72">published_book_ids</text>
+  <text class="sm" x="36" y="92">One2many：反向列出</text>
+  <text class="sm" x="36" y="110">它出版的所有书</text>
+
+  <rect class="bx-b" x="20" y="230" width="220" height="110" rx="12"/>
+  <text class="ttl on-b" x="130" y="256" text-anchor="middle">res.partner（作者）</text>
+  <text class="sm mono" x="36" y="282">book_ids</text>
+  <text class="sm" x="36" y="302">Many2many：反向列出</text>
+  <text class="sm" x="36" y="320">他写的所有书</text>
+
+  <rect class="bx-p" x="540" y="120" width="200" height="120" rx="12"/>
+  <text class="ttl on-p" x="640" y="146" text-anchor="middle">library.book.category</text>
+  <text class="sm mono" x="556" y="172">parent_id　 → 自己</text>
+  <text class="sm mono" x="556" y="194">child_ids　 ← 自己</text>
+  <text class="sm mono" x="556" y="216">highlighted_id Reference</text>
+
+  <path class="ln-b" d="M268 150 L242 100" marker-end="url(#ar-b)"/>
+  <text class="sm on-b" x="200" y="150">多对一</text>
+  <path class="ln-b" d="M268 205 L242 260" marker-end="url(#ar-b)"/>
+  <text class="sm on-b" x="190" y="220">多对多</text>
+  <path class="ln-p" d="M492 210 H536" marker-end="url(#ar-p)"/>
+  <text class="sm on-p" x="494" y="200">多对一</text>
+  <path class="ln-p" d="M700 118 C 740 60, 620 60, 640 116" marker-end="url(#ar-p)"/>
+  <text class="sm on-p" x="640" y="70" text-anchor="middle">层级（自引用）</text>
+  <path class="ln-d" d="M600 242 C 560 320, 420 320, 400 244" marker-end="url(#ar)"/>
+  <text class="sm" x="560" y="314">Reference：可以指向书</text>
+  <path class="ln-d" d="M570 242 C 500 360, 300 340, 242 300" marker-end="url(#ar)"/>
+  <text class="sm" x="330" y="348">……也可以指向作者</text>
+</svg>
+<figcaption>图 6-3　本章涉及的全部关系类型</figcaption>
+</figure>
+
+<h3>多对一（Many2one）</h3>
+
+<p>
+  多对一是对另一个模型中<strong>一条</strong>记录的引用。书的出版社 <code>publisher_id</code> 就是：每本书有一个出版社，一个出版社可以出很多书。
+  在数据库里它是一个整数列，存着关联记录的 ID，并带有外键约束保证引用完整性。
+</p>
+
+<div class="code" data-lang="py">
+<pre>
+publisher_id = fields.Many2one("res.partner", string="Publisher")
+</pre>
+</div>
+
+<p>第一个位置参数是关联模型（<code>comodel_name</code>）。其余常用的关键字参数：</p>
+<ul>
+  <li><code>ondelete</code>：关联记录被删除时怎么办。<code>"set null"</code>（默认，置空）、<code>"restrict"</code>（阻止删除并报错）、<code>"cascade"</code>（连带删除本记录）。</li>
+  <li><code>domain</code>：一个域表达式，限制界面上可选的记录。</li>
+  <li><code>context</code>：通过这个字段跳转或新建关联记录时，带给 Web 客户端的上下文，比如默认值。</li>
+  <li><code>check_company=True</code>：多公司场景下，校验关联记录与本记录属于同一公司。</li>
+  <li><code>delegate=True</code>：委托继承（第 4 章），此时还必须 <code>required=True</code> 和 <code>ondelete="cascade"</code>。</li>
+  <li><code>bypass_search_access=True</code>：通过这个字段搜索时绕过关联模型的访问规则，查询更快但有安全风险，慎用。</li>
+</ul>
+
+<div class="box ver">
+  <div class="t">&#8682; auto_join 改名了</div>
+  <p>书中的 <code>auto_join=True</code> 在 Odoo 19 改名为 <code>bypass_search_access=True</code>，新名字把「它会绕过权限」这件事说得更直白。</p>
+</div>
+
+<h3>一对多（One2many）：反向关系</h3>
+
+<p>
+  一对多是多对一的<strong>反面</strong>：列出所有指向本记录的记录。书通过 <code>publisher_id</code> 指向出版社，那么出版社就可以有一个一对多字段，列出它出版的所有书。
+  因为要给 <code>res.partner</code> 加字段，所以用经典继承扩展它：
+</p>
+
+<div class="code" data-lang="py" data-file="library_app/models/res_partner.py">
+<pre>
+from odoo import fields, models
+
+
+class ResPartner(models.Model):
+    _inherit = "res.partner"
+
+    published_book_ids = fields.One2many(
+        "library.book",       # 关联模型
+        "publisher_id",       # 关联模型里指向我的那个 Many2one 字段
+        string="Published Books",
+    )
+</pre>
+</div>
+
+<p>别忘了在 <code>models/__init__.py</code> 里加上 <code>from . import res_partner</code>。</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 230" role="img" aria-label="一对多字段没有自己的列，它是通过对方表中的外键反查出来的">
+  <rect class="bx-b" x="20" y="30" width="250" height="140" rx="10"/>
+  <text class="ttl on-b" x="145" y="54" text-anchor="middle">res_partner</text>
+  <text class="sm mono" x="36" y="82">id = 42　"Packt Publishing"</text>
+  <text class="sm mono on-b" x="36" y="112">published_book_ids</text>
+  <text class="sm" x="36" y="132">（没有这一列，</text>
+  <text class="sm" x="36" y="150">　是查询得来的）</text>
+
+  <rect class="bx-a" x="420" y="30" width="320" height="140" rx="10"/>
+  <text class="ttl on-a" x="580" y="54" text-anchor="middle">library_book</text>
+  <text class="sm mono" x="436" y="82">id   name                 publisher_id</text>
+  <text class="sm mono" x="436" y="104">1    Odoo Dev Ess. 11      42</text>
+  <text class="sm mono" x="436" y="126">2    Odoo 11 Cookbook      42</text>
+  <text class="sm mono" x="436" y="148">3    Brave New World       7</text>
+
+  <path class="ln-b" d="M272 110 C 340 110, 340 112, 416 112" marker-end="url(#ar-b)"/>
+  <text class="sm" x="345" y="96" text-anchor="middle">WHERE</text>
+  <text class="sm" x="345" y="134" text-anchor="middle">publisher_id = 42</text>
+  <text class="sm" x="20" y="206">所以一对多字段必须先有对方模型上的多对一字段，第二个参数（inverse_name）就是那个字段的名字</text>
+</svg>
+<figcaption>图 6-4　一对多是「反查」出来的</figcaption>
+</figure>
+
+<h3>多对多（Many2many）</h3>
+
+<p>书和作者之间是多对多：一本书多位作者，一位作者多本书。两边都可以定义 Many2many 字段：</p>
+
+<div class="code" data-lang="py">
+<pre>
+# 书这边（library_app/models/library_book.py）
+author_ids = fields.Many2many("res.partner", string="Authors")
+
+# 作者这边（library_app/models/res_partner.py）
+book_ids = fields.Many2many("library.book", string="Authored Books")
+</pre>
+</div>
+
+<p>
+  多对多不会给任何一张表加列，而是由 ORM 自动建一张<strong>关系表</strong>，只有两列，分别是指向两边的外键。
+  默认表名是两个表名用下划线连接再加 <code>_rel</code>：<code>library_book_res_partner_rel</code>。两边的字段如果默认表名相同，就自动共用同一张关系表。
+</p>
+
+<p>有时需要手动指定关系表：</p>
+<ul>
+  <li>两个模型名都很长，自动生成的表名超过 PostgreSQL 的 63 字符限制；</li>
+  <li>同一对模型之间需要<strong>第二个</strong>多对多关系（比如书和联系人之间除了「作者」还有「译者」），必须换一张表，否则会和第一个关系混在一起。</li>
+</ul>
+
+<div class="code" data-lang="py">
+<pre>
+author_ids = fields.Many2many(
+    comodel_name="res.partner",
+    relation="library_book_res_partner_rel",  # 关系表名
+    column1="a_id",                           # 指向本模型（书）的列
+    column2="b_id",                           # 指向关联模型（联系人）的列
+    string="Authors",
+)
+</pre>
+</div>
+
+<div class="box tip">
+  <div class="t">&#128161; 抽象模型上别指定 column1 / column2</div>
+  <p>ORM 在抽象模型上有个设计限制：如果强制指定了关系列名，这个字段就无法被干净地继承。在抽象模型里定义 Many2many 时，让 ORM 自动生成列名。</p>
+</div>
+
+<h3>层级关系</h3>
+
+<p>
+  父子树状结构用一个指向<strong>同一模型</strong>的多对一字段表示：每条记录存着它的父记录。反向的一对多字段就是它的直接子记录。
+  只要模型有 <code>parent_id</code> 字段，域表达式里就可以用 <code>child_of</code>（某节点的所有后代）和 <code>parent_of</code>（某节点的所有祖先）运算符。
+</p>
+
+<div class="code" data-lang="py" data-file="library_app/models/library_book_category.py">
+<pre>
+from odoo import fields, models
+
+
+class LibraryBookCategory(models.Model):
+    _name = "library.book.category"
+    _description = "Book Category"
+    _parent_store = True
+
+    name = fields.Char(translate=True, required=True)
+
+    # 层级字段
+    parent_id = fields.Many2one(
+        "library.book.category",
+        "Parent Category",
+        ondelete="restrict",
+    )
+    parent_path = fields.Char(index=True)
+
+    # 可选，但很方便：
+    child_ids = fields.One2many(
+        "library.book.category",
+        "parent_id",
+        "Subcategories",
+    )
+</pre>
+</div>
+
+<p>
+  <code>_parent_store = True</code> 开启层级查询优化，此时必须同时有一个带索引的 <code>parent_path</code> 字段。
+  它存着从根节点到本节点的 ID 路径，这样查询「某分类下的所有后代」只需要一个前缀匹配，而不用一层层递归：
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 270" role="img" aria-label="parent_path 字段记录从根到节点的路径，child_of 查询变成前缀匹配">
+  <rect class="bx-p" x="300" y="20" width="160" height="50" rx="10"/>
+  <text class="lbl on-p" x="380" y="42" text-anchor="middle">1 文学</text>
+  <text class="sm mono" x="380" y="60" text-anchor="middle">parent_path "1/"</text>
+
+  <rect class="bx" x="120" y="110" width="170" height="50" rx="10"/>
+  <text class="lbl" x="205" y="132" text-anchor="middle">4 小说</text>
+  <text class="sm mono" x="205" y="150" text-anchor="middle">"1/4/"</text>
+
+  <rect class="bx" x="470" y="110" width="170" height="50" rx="10"/>
+  <text class="lbl" x="555" y="132" text-anchor="middle">5 诗歌</text>
+  <text class="sm mono" x="555" y="150" text-anchor="middle">"1/5/"</text>
+
+  <rect class="bx-a" x="40" y="200" width="160" height="50" rx="10"/>
+  <text class="lbl on-a" x="120" y="222" text-anchor="middle">7 科幻</text>
+  <text class="sm mono" x="120" y="240" text-anchor="middle">"1/4/7/"</text>
+
+  <rect class="bx-a" x="220" y="200" width="160" height="50" rx="10"/>
+  <text class="lbl on-a" x="300" y="222" text-anchor="middle">8 推理</text>
+  <text class="sm mono" x="300" y="240" text-anchor="middle">"1/4/8/"</text>
+
+  <path class="ln" d="M340 72 L230 108"/>
+  <path class="ln" d="M420 72 L530 108"/>
+  <path class="ln" d="M180 162 L130 198"/>
+  <path class="ln" d="M230 162 L290 198"/>
+
+  <rect class="bx-d" x="430" y="196" width="310" height="58" rx="8"/>
+  <text class="sm mono" x="446" y="218">[('id', 'child_of', 4)]</text>
+  <text class="sm" x="446" y="240">≈ parent_path LIKE '1/4/%' → 4、7、8</text>
+</svg>
+<figcaption>图 6-5　parent_path 让「查所有后代」变成一次简单的前缀匹配</figcaption>
+</figure>
+
+<p>
+  这个优化有存储和写入的代价（移动一个节点要更新它所有后代的路径），适合「读多写少、层级较深」的数据，比如分类树。层级很浅、节点很少时不必开启。
+</p>
+
+<h3>引用字段（Reference）：灵活的关系</h3>
+
+<p>
+  普通关系字段只能指向一个固定的模型。<strong>引用字段</strong>可以指向多个模型中的任意一个。给分类加一个「精选」字段，它可以是一本书，也可以是一位作者：
+</p>
+
+<div class="code" data-lang="py">
+<pre>
+    highlighted_id = fields.Reference(
+        [("library.book", "Book"), ("res.partner", "Author")],
+        "Category Highlight",
+    )
+</pre>
+</div>
+
+<p>
+  写法很像 Selection，只是选项列表里列的是<strong>模型</strong>。界面上用户先选模型，再选具体记录。
+  它在数据库里存成一个字符串 <code>"模型名,ID"</code>，比如 <code>"library.book,3"</code>。
+</p>
+
+<h2 id="computed">计算字段</h2>
+
+<p>
+  字段的值也可以由一个函数自动计算，而不是读数据库里存的值。计算字段的声明和普通字段一样，只是多了 <code>compute</code> 参数，指定计算方法。
+  例子：在书上显示出版社所在的国家。
+</p>
+
+<div class="code" data-lang="py" data-file="library_app/models/library_book.py（片段）">
+<pre>
+from odoo import api, fields, models
+
+
+class LibraryBook(models.Model):
+    # ...
+
+    publisher_country_id = fields.Many2one(
+        "res.country",
+        string="Publisher Country",
+        compute="_compute_publisher_country",
+    )
+
+    @api.depends("publisher_id.country_id")
+    def _compute_publisher_country(self):
+        for book in self:
+            book.publisher_country_id = book.publisher_id.country_id
+</pre>
+</div>
+
+<ul>
+  <li><code>compute</code> 给出计算方法的名字。惯例是 <code>_compute_</code> + 字段名。</li>
+  <li>计算方法接收一个记录集 <code>self</code>，要<strong>给其中每一条记录</strong>的计算字段赋值，所以总是用 <code>for</code> 循环。</li>
+  <li><strong>每条执行路径都必须赋值。</strong>如果方法里有 <code>if</code> 分支，确保每个分支都给字段赋了值，否则会报错。</li>
+  <li>一个计算方法可以同时计算多个字段：几个字段的 <code>compute</code> 指向同一个方法，方法里给它们全部赋值。</li>
+</ul>
+
+<h3>@api.depends：告诉 ORM 什么时候重算</h3>
+
+<p>
+  <code>@api.depends</code> 声明计算依赖哪些字段，可以用点号沿关系往下走。ORM 据此知道：当 <code>publisher_id</code> 变了，或者出版社的 <code>country_id</code> 变了，
+  就要重新计算 <code>publisher_country_id</code>。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 240" role="img" aria-label="依赖字段变化时 ORM 触发计算字段重算的机制">
+  <rect class="bx-b" x="20" y="30" width="200" height="60" rx="10"/>
+  <text class="lbl on-b" x="120" y="56" text-anchor="middle">book.publisher_id</text>
+  <text class="sm" x="120" y="76" text-anchor="middle">换了出版社</text>
+
+  <rect class="bx-b" x="20" y="140" width="200" height="60" rx="10"/>
+  <text class="lbl on-b" x="120" y="166" text-anchor="middle">partner.country_id</text>
+  <text class="sm" x="120" y="186" text-anchor="middle">出版社搬家了</text>
+
+  <rect class="bx-p" x="280" y="80" width="200" height="70" rx="10"/>
+  <text class="ttl on-p" x="380" y="106" text-anchor="middle">@api.depends</text>
+  <text class="sm mono" x="380" y="128" text-anchor="middle">"publisher_id.country_id"</text>
+
+  <rect class="bx-a" x="540" y="80" width="200" height="70" rx="10"/>
+  <text class="ttl on-a" x="640" y="106" text-anchor="middle">重新计算</text>
+  <text class="sm mono" x="640" y="128" text-anchor="middle">publisher_country_id</text>
+
+  <path class="ln-b" d="M222 60 L276 100" marker-end="url(#ar-b)"/>
+  <path class="ln-b" d="M222 170 L276 130" marker-end="url(#ar-b)"/>
+  <path class="ln-p" d="M482 115 H536" marker-end="url(#ar-p)"/>
+  <text class="sm on-r" x="20" y="228">漏写依赖 → 依赖变了它却不重算，界面显示的是过期的值。这类 bug 很难查！</text>
+</svg>
+<figcaption>图 6-6　依赖声明是 ORM 维护计算字段正确性的唯一依据</figcaption>
+</figure>
+
+<div class="box warn">
+  <div class="t">&#9888; 依赖要写全</div>
+  <p>
+    忘了写 <code>@api.depends</code>，或者漏写了计算中用到的某个字段，计算字段就不会在该更新的时候更新。
+    检查方法：计算方法里读了哪些字段（包括点号后面的），<code>@api.depends</code> 里就应该有哪些。
+  </p>
+</div>
+
+<h3>存储、搜索与写入</h3>
+
+<p>
+  默认情况下，计算字段<strong>不存进数据库</strong>，每次读取时现算。所以它不能被搜索、不能用于排序和分组，也不能被写入。有三种办法扩展它的能力：
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 270" role="img" aria-label="计算字段的三种增强：存储、搜索函数、反向函数">
+  <rect class="bx-a" x="270" y="100" width="220" height="70" rx="12"/>
+  <text class="ttl on-a" x="380" y="128" text-anchor="middle">计算字段</text>
+  <text class="sm" x="380" y="150" text-anchor="middle">默认：只能读，现算</text>
+
+  <rect class="bx-b" x="20" y="20" width="220" height="90" rx="10"/>
+  <text class="ttl on-b" x="130" y="46" text-anchor="middle">store=True</text>
+  <text class="sm" x="130" y="68" text-anchor="middle">结果存入数据库</text>
+  <text class="sm" x="130" y="88" text-anchor="middle">依赖变化时自动重算</text>
+
+  <rect class="bx-g" x="520" y="20" width="220" height="90" rx="10"/>
+  <text class="ttl on-g" x="630" y="46" text-anchor="middle">search=…</text>
+  <text class="sm" x="630" y="68" text-anchor="middle">不存储也能搜索：把条件</text>
+  <text class="sm" x="630" y="88" text-anchor="middle">翻译成对存储字段的条件</text>
+
+  <rect class="bx-p" x="270" y="200" width="220" height="60" rx="10"/>
+  <text class="ttl on-p" x="380" y="224" text-anchor="middle">inverse=…</text>
+  <text class="sm" x="380" y="246" text-anchor="middle">写入时执行「反向计算」</text>
+
+  <path class="ln-b" d="M268 120 L242 92" marker-end="url(#ar-b)"/>
+  <path class="ln-g" d="M492 120 L518 92" marker-end="url(#ar-g)"/>
+  <path class="ln-p" d="M380 172 V196" marker-end="url(#ar-p)"/>
+  <text class="sm" x="20" y="150">可搜索、可排序、可分组，</text>
+  <text class="sm" x="20" y="168">代价是占空间、写入时要重算</text>
+</svg>
+<figcaption>图 6-7　让计算字段能被搜索、能被写入</figcaption>
+</figure>
+
+<p><strong>1. 存储：</strong>加上 <code>store=True</code>，值就会被存进数据库，依赖变化时自动重算。存了就能像普通字段一样搜索、排序、分组。</p>
+
+<p><strong>2. 不存储也能搜索和写入：</strong>实现搜索函数和反向函数：</p>
+
+<div class="code" data-lang="py">
+<pre>
+    publisher_country_id = fields.Many2one(
+        "res.country",
+        string="Publisher Country",
+        compute="_compute_publisher_country",
+        inverse="_inverse_publisher_country",
+        search="_search_publisher_country",
+    )
+
+    def _inverse_publisher_country(self):
+        # 在书上改「出版社国家」= 去改出版社的国家
+        for book in self:
+            book.publisher_id.country_id = book.publisher_country_id
+
+    def _search_publisher_country(self, operator, value):
+        # 搜索「出版社国家 = X」= 搜索「出版社.国家 = X」
+        return [("publisher_id.country_id", operator, value)]
+</pre>
+</div>
+
+<ul>
+  <li>
+    <strong>反向函数</strong>（<code>inverse</code>）在用户写入计算字段时被调用，实现「计算的逆运算」。
+    注意：这会改掉出版社本身的国家，所有这个出版社的书都会受影响；而且受常规权限约束，当前用户必须有权修改联系人才能成功。
+  </li>
+  <li>
+    <strong>搜索函数</strong>（<code>search</code>）在域表达式里出现这个字段时被调用，收到运算符和值，返回一个只用存储字段写成的<strong>替代域</strong>。
+  </li>
+</ul>
+
+<h3>可编辑的计算字段</h3>
+
+<p>
+  计算字段还可以设置 <code>readonly=False</code> 并同时 <code>store=True</code>：依赖变化时自动算一个值，但用户也可以手动覆盖它。
+  这在实现「选了 A 自动带出 B，但 B 允许修改」时非常有用，是 <code>onchange</code> 的现代替代品，第 8 章详细讲。
+</p>
+
+<h3>关联字段（related）</h3>
+
+<p>
+  上面的计算字段只是从关联记录上「搬」一个值过来，这种需求非常普遍。Odoo 为此提供了一个简写 —— <strong>关联字段</strong>：
+</p>
+
+<div class="code" data-lang="py">
+<pre>
+    publisher_country_id = fields.Many2one(
+        "res.country",
+        string="Publisher Country",
+        related="publisher_id.country_id",
+    )
+</pre>
+</div>
+
+<p>
+  关联字段本质上就是计算字段，而且自动实现了搜索和反向函数，所以可以被搜索。它默认是只读的，要允许通过它写入，设置 <code>readonly=False</code>；
+  也可以加 <code>store=True</code> 存储。在视图里没法用点号访问关联记录的字段时（比如想在书的表单上显示出版社的国家），关联字段就是标准做法。
+</p>
+
+<h2 id="constraints">模型约束</h2>
+
+<p>
+  应用经常需要保证数据完整、正确。PostgreSQL 本身就支持很多校验（比如防重复、检查简单条件），Odoo 模型可以直接利用；
+  更复杂的检查则用 Python 代码实现。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 230" role="img" aria-label="SQL 约束在数据库层生效，Python 约束在 ORM 层生效">
+  <rect class="bx" x="20" y="90" width="140" height="50" rx="10"/>
+  <text class="lbl" x="90" y="120" text-anchor="middle">create / write</text>
+
+  <rect class="bx-a" x="220" y="40" width="240" height="150" rx="12"/>
+  <text class="ttl on-a" x="340" y="64" text-anchor="middle">ORM（Python）</text>
+  <rect class="bx-p" x="240" y="80" width="200" height="90" rx="8"/>
+  <text class="ttl on-p" x="340" y="104" text-anchor="middle">@api.constrains</text>
+  <text class="sm" x="340" y="126" text-anchor="middle">任意 Python 逻辑</text>
+  <text class="sm" x="340" y="146" text-anchor="middle">相关字段被修改时运行</text>
+  <text class="sm" x="340" y="162" text-anchor="middle">失败 → ValidationError</text>
+
+  <rect class="bx-b" x="520" y="40" width="220" height="150" rx="12"/>
+  <text class="ttl on-b" x="630" y="64" text-anchor="middle">PostgreSQL</text>
+  <rect class="bx-b" x="540" y="80" width="180" height="90" rx="8"/>
+  <text class="ttl on-b" x="630" y="104" text-anchor="middle">models.Constraint</text>
+  <text class="sm" x="630" y="126" text-anchor="middle">UNIQUE / CHECK</text>
+  <text class="sm" x="630" y="146" text-anchor="middle">数据库强制执行</text>
+  <text class="sm" x="630" y="162" text-anchor="middle">连 SQL 直接写都拦得住</text>
+
+  <path class="ln" d="M162 115 H216" marker-end="url(#ar)"/>
+  <path class="ln-a" d="M462 115 H516" marker-end="url(#ar-a)"/>
+  <text class="sm" x="20" y="218">能用 SQL 表达的简单规则优先用 SQL 约束（更快、更可靠）；需要复杂逻辑的用 Python 约束</text>
+</svg>
+<figcaption>图 6-8　两种约束，作用在不同的层</figcaption>
+</figure>
+
+<h3>SQL 约束</h3>
+
+<p>
+  SQL 约束被加到数据库表的定义里，由 PostgreSQL 直接强制执行。最常用的是 <code>UNIQUE</code>（防重复）和 <code>CHECK</code>（检查一个 SQL 表达式）。
+  我们给书加两条：书名 + 出版日期不能重复；出版日期不能是未来。
+</p>
+
+<div class="code" data-lang="py" data-file="library_app/models/library_book.py（片段）">
+<pre>
+class LibraryBook(models.Model):
+    _name = "library.book"
+    # ...
+
+    _name_date_uniq = models.Constraint(
+        "UNIQUE (name, date_published)",
+        "Book title and publication date must be unique.",
+    )
+    _date_check = models.Constraint(
+        "CHECK (date_published &lt;= current_date)",
+        "Publication date must not be in the future.",
+    )
+</pre>
+</div>
+
+<p>
+  每个约束是一个类属性，属性名（以下划线开头）就是约束的名字，<code>models.Constraint</code> 的第一个参数是 SQL 定义，第二个是违反时给用户看的消息。
+  语法细节见 <a href="https://www.postgresql.org/docs/current/ddl-constraints.html">PostgreSQL 约束文档</a>。
+</p>
+
+<div class="vs">
+  <div class="old">
+    <div class="h">Odoo 15（书中写法，Odoo 19 起被忽略）</div>
+    <div class="code" data-lang="py"><pre>
+_sql_constraints = [
+    ("library_book_name_date_uq",
+     "UNIQUE (name, date_published)",
+     "Title and date must be unique."),
+    ("library_book_check_date",
+     "CHECK (date_published &lt;= current_date)",
+     "Date must not be in the future."),
+]
+</pre></div>
+  </div>
+  <div class="new">
+    <div class="h">Odoo 20</div>
+    <div class="code" data-lang="py"><pre>
+_name_date_uniq = models.Constraint(
+    "UNIQUE (name, date_published)",
+    "Title and date must be unique.",
+)
+_date_check = models.Constraint(
+    "CHECK (date_published &lt;= current_date)",
+    "Date must not be in the future.",
+)
+</pre></div>
+  </div>
+</div>
+
+<div class="box warn">
+  <div class="t">&#9888; 旧写法不会报错，只会悄悄失效</div>
+  <p>
+    Odoo 19 起 <code>_sql_constraints</code> 列表<strong>被直接忽略</strong>，只在日志里打一条警告，约束根本不会被创建。
+    迁移老模块时一定要改，Odoo 自带的 <code>odoo-bin upgrade_code</code> 能自动完成这个转换（脚本 <code>18.1-00-sql-constraint.py</code>）。
+  </p>
+</div>
+
+<p>同样的写法还能定义索引：</p>
+
+<div class="code" data-lang="py">
+<pre>
+    # 普通的多列索引
+    _publisher_date_idx = models.Index("(publisher_id, date_published)")
+    # 唯一索引，可以带条件：只有有效的书才要求 ISBN 唯一
+    _isbn_uniq = models.UniqueIndex("(isbn) WHERE active IS TRUE")
+</pre>
+</div>
+
+<h3>Python 约束</h3>
+
+<p>
+  Python 约束可以执行任意代码。约束方法用 <code>@api.constrains</code> 装饰，列出它检查的字段；当这些字段被修改时，方法就会运行，校验失败时抛出异常（通常是 <code>ValidationError</code>）。
+  我们已经有判断 ISBN 是否合法的 <code>_check_isbn()</code>，正好用它阻止保存非法 ISBN：
+</p>
+
+<div class="code" data-lang="py" data-file="library_app/models/library_book.py（片段）">
+<pre>
+from odoo.exceptions import ValidationError
+
+    # （在 LibraryBook 类中）
+    @api.constrains("isbn")
+    def _constrain_isbn_valid(self):
+        for book in self:
+            if book.isbn and not book._check_isbn():
+                raise ValidationError(self.env._("%s is an invalid ISBN", book.isbn))
+</pre>
+</div>
+
+<div class="box note">
+  <div class="t">&#9432; @api.constrains 只看「被写入的字段」</div>
+  <p>
+    它只在列出的字段出现在 <code>create</code> / <code>write</code> 的值里时触发。点号路径（如 <code>"publisher_id.country_id"</code>）在这里<strong>不支持</strong> ——
+    关联记录变了不会触发它。另外，有了这个约束之后，第 3 章那个「Check ISBN」按钮的意义就小多了，因为非法 ISBN 根本存不进去。
+  </p>
+</div>
+
+<h2 id="base-models">Odoo 基础模型概览</h2>
+
+<p>
+  Odoo 核心框架包含 <code>base</code> 模块（在源码 <code>odoo/odoo/addons/base/</code>），提供 Odoo 应用运行所需的基础功能；
+  所有官方应用（在源码 <code>odoo/addons/</code>）都建立在它之上。<code>base</code> 提供两类模型：
+</p>
+
+<div class="vs">
+  <div class="new">
+    <div class="h">ir.* —— 信息仓库（Information Repository）</div>
+    <div style="padding:10px 14px;font-size:14px">
+      框架自身运行需要的数据，「技术」菜单里看到的大多是它们：<br>
+      <code>ir.actions.act_window</code> 窗口动作 · <code>ir.ui.menu</code> 菜单 · <code>ir.ui.view</code> 视图 ·
+      <code>ir.model</code> 模型 · <code>ir.model.fields</code> 字段 · <code>ir.model.data</code> XML ID ·
+      <code>ir.access</code> 访问规则 · <code>ir.config_parameter</code> 系统参数 · <code>ir.cron</code> 定时任务
+    </div>
+  </div>
+  <div class="new">
+    <div class="h">res.* —— 资源（Resources）</div>
+    <div style="padding:10px 14px;font-size:14px">
+      所有模块都可以使用的基础主数据：<br>
+      <code>res.partner</code> 联系人（客户、供应商、地址） · <code>res.company</code> 公司 · <code>res.country</code> 国家 ·
+      <code>res.country.state</code> 省 / 州 · <code>res.currency</code> 币种 · <code>res.groups</code> 用户组 · <code>res.users</code> 用户
+    </div>
+  </div>
+</div>
+
+<p>第 14 章会更详细地介绍这些内置模型。</p>
+
+<h2 id="summary">小结</h2>
+
+<ul>
+  <li>模型由 <code>_name</code> 唯一标识；<code>_order</code>、<code>_rec_name</code>、<code>_table</code> 等属性控制它的行为。</li>
+  <li>普通模型永久存储；临时模型给向导用，会被定期清理；抽象模型没有表，用作混入类。</li>
+  <li>字段类型涵盖文本、数值、日期、布尔、二进制、图片、JSON 等；通用属性有 <code>default</code>、<code>required</code>、<code>readonly</code>、<code>index</code>、<code>copy</code>、<code>groups</code> 等。<code>states</code> 已移除。</li>
+  <li>显示名称由 <code>display_name</code> 计算字段决定，自定义时重写 <code>_compute_display_name</code>（不再用 <code>name_get</code>）。</li>
+  <li>关系：多对一是外键；一对多是反查；多对多用关系表；层级用 <code>parent_id</code> + <code>_parent_store</code>；引用字段能指向多个模型。</li>
+  <li>计算字段用 <code>compute</code> + <code>@api.depends</code>；可以存储，也可以通过 <code>search</code> / <code>inverse</code> 支持搜索和写入；关联字段是它的简写。</li>
+  <li>约束：SQL 约束用 <code>models.Constraint</code>（旧的 <code>_sql_constraints</code> 已失效）；Python 约束用 <code>@api.constrains</code>。</li>
+</ul>
+
+<div class="exercise">
+  <h3>动手练习</h3>
+  <ol>
+    <li>按本章把书模型的字段补全，并把新字段加到表单视图里（可以用 <code>&lt;notebook&gt;</code> / <code>&lt;page&gt;</code> 分页，第 10 章细讲）。</li>
+    <li>创建 <code>library.book.category</code> 模型，记得给它加访问规则、菜单和视图；在书上加一个 <code>category_id</code> 字段。</li>
+    <li>在联系人表单上加一个页签，显示 <code>published_book_ids</code>（这需要一个继承 <code>base.view_partner_form</code> 的视图）。</li>
+    <li>给书加一个存储的计算字段 <code>num_authors</code>（作者人数），依赖写什么？然后在列表视图里按它排序。</li>
+    <li>故意创建两本书名和出版日期都相同的书，看看 SQL 约束给出的错误提示。再把约束从 <code>models.Constraint</code> 改回 <code>_sql_constraints</code>，升级后重试，观察区别。</li>
+    <li>让书的显示名称变成「书名 (年份)」，然后在出版社的「出版的书」列表里看效果。</li>
+  </ol>
+</div>
+<div id="pager"></div>
+</main>
+</div>
+<script src="assets/site.js"></script>
+</body>
+</html>

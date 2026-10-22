@@ -1,0 +1,1288 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 13 章 · 网站与门户 — Odoo 20 开发入门</title>
+<meta name="description" content="面向外部用户的前端页面：网页控制器与路由、request / response 对象、前端 QWeb 页面与静态资源，以及给门户（My Account）添加借书单列表、详情页、首页卡片和面包屑。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-chapter="13">
+<div id="app">
+<aside id="sidebar"></aside>
+<main>
+<span class="chapter-eyebrow">第 13 章</span>
+<h1>网站与门户</h1>
+<p class="lede">
+  到目前为止，我们做的界面都在<strong>后台</strong>：只有员工登录后才能看到。但很多业务需要面向<strong>外部的人</strong>：
+  访客想浏览馆藏书目，会员想查看自己借了哪些书。这一章我们离开后台 Web 客户端，用<strong>网页控制器 + 服务端 QWeb</strong>
+  做两类前端页面：任何人都能打开的公开页面，以及会员登录后在「我的账户」里看到的<strong>门户</strong>页面。
+</p>
+
+<div class="goals">
+  <h4>本章目标</h4>
+  <ul>
+    <li>理解前端页面的三件套：控制器（路由）、QWeb 模板、静态资源</li>
+    <li>掌握 <code>@route</code> 的参数、URL 里取参数的写法，以及 <code>request</code> / <code>response</code> 对象</li>
+    <li>为门户用户配置访问权限：只能看到「自己的」数据</li>
+    <li>在门户首页加一张「借书单」卡片，并做出列表页、详情页和面包屑</li>
+    <li>了解 Odoo 20 门户的新机制：<code>portal.entry</code> 卡片记录和计数器方法</li>
+  </ul>
+</div>
+
+<div id="chapter-toc"></div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 250" role="img" aria-label="后台与前端的对比：后台是 OWL Web 客户端，前端是控制器渲染的网页">
+  <rect class="bx-d" x="20" y="20" width="340" height="210" rx="12"/>
+  <text class="ttl" x="190" y="48" text-anchor="middle">后台（第 10、11 章）</text>
+  <rect class="bx-b" x="45" y="66" width="290" height="44" rx="8"/>
+  <text class="lbl on-b" x="190" y="93" text-anchor="middle">URL：/odoo/…（单页应用）</text>
+  <rect class="bx-b" x="45" y="120" width="290" height="44" rx="8"/>
+  <text class="lbl on-b" x="190" y="147" text-anchor="middle">OWL 在浏览器里渲染视图</text>
+  <rect class="bx-b" x="45" y="174" width="290" height="44" rx="8"/>
+  <text class="lbl on-b" x="190" y="201" text-anchor="middle">使用者：员工（内部用户）</text>
+
+  <rect class="bx-d" x="400" y="20" width="340" height="210" rx="12"/>
+  <text class="ttl" x="570" y="48" text-anchor="middle">前端（本章）</text>
+  <rect class="bx-g" x="425" y="66" width="290" height="44" rx="8"/>
+  <text class="lbl on-g" x="570" y="93" text-anchor="middle">URL：/library/catalog、/my/…</text>
+  <rect class="bx-g" x="425" y="120" width="290" height="44" rx="8"/>
+  <text class="lbl on-g" x="570" y="147" text-anchor="middle">QWeb 在服务器上渲染整页 HTML</text>
+  <rect class="bx-g" x="425" y="174" width="290" height="44" rx="8"/>
+  <text class="lbl on-g" x="570" y="201" text-anchor="middle">使用者：访客、门户用户（客户、会员）</text>
+</svg>
+<figcaption>图 13-1　后台与前端：同一个 Odoo 服务器，两种完全不同的页面生成方式</figcaption>
+</figure>
+
+<h2 id="project">本章的学习项目：图书馆门户</h2>
+
+<p>
+  我们新建一个 <code>library_portal</code> 模块，它依赖第 8 章的 <code>library_checkout</code>（借书单）和 Odoo 自带的 <code>portal</code> 模块。
+  它要提供两样东西：
+</p>
+
+<div class="cards">
+  <div class="card"><span class="ic">&#128218;</span><h4>公开书目 /library/catalog</h4><p>不需要登录，任何访客都能看到馆藏图书清单。</p></div>
+  <div class="card"><span class="ic">&#128100;</span><h4>门户：我的借书单 /my/book-checkouts</h4><p>会员登录后，在「我的账户」里看到自己的借书单列表和每张单的详情。</p></div>
+</div>
+
+<div class="code" data-lang="py" data-file="library_portal/__manifest__.py">
+<pre>
+{
+    "name": "Library Portal",
+    "description": "Create and check book checkout requests.",
+    "author": "Daniel Reis",
+    "license": "AGPL-3",
+    "depends": [
+        "library_checkout",
+        "portal",
+    ],
+    "data": [
+        "security/ir.access.csv",
+        "data/portal_entry_data.xml",
+        "views/main_templates.xml",
+        "views/portal_templates.xml",
+    ],
+    "assets": {
+        "web.assets_frontend": [
+            "library_portal/static/src/css/library.css",
+        ],
+    },
+}
+</pre>
+</div>
+
+<p>最终的模块结构如下，我们一块一块地把它搭起来：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 300" role="img" aria-label="library_portal 模块的目录结构">
+  <rect class="bx-a" x="20" y="20" width="200" height="40" rx="8"/>
+  <text class="ttl mono on-a" x="120" y="45" text-anchor="middle">library_portal/</text>
+  <path class="ln-d" d="M40 60 V284"/>
+  <text class="sm mono" x="60" y="86">__manifest__.py</text>
+  <text class="sm mono" x="60" y="112">controllers/main.py</text>
+  <text class="sm mono" x="60" y="138">controllers/portal.py</text>
+  <text class="sm mono" x="60" y="164">security/ir.access.csv</text>
+  <text class="sm mono" x="60" y="190">data/portal_entry_data.xml</text>
+  <text class="sm mono" x="60" y="216">views/main_templates.xml</text>
+  <text class="sm mono" x="60" y="242">views/portal_templates.xml</text>
+  <text class="sm mono" x="60" y="268">static/src/css/library.css</text>
+  <path class="ln-d" d="M40 82 H54 M40 108 H54 M40 134 H54 M40 160 H54 M40 186 H54 M40 212 H54 M40 238 H54 M40 264 H54"/>
+
+  <path class="ln-d" d="M270 108 H330"/><text class="lbl" x="340" y="112">公开书目页的控制器（第 1 部分）</text>
+  <path class="ln-d" d="M270 134 H330"/><text class="lbl" x="340" y="138">门户列表页、详情页、计数器（第 3 部分）</text>
+  <path class="ln-d" d="M270 160 H330"/><text class="lbl" x="340" y="164">门户用户的访问规则（第 2 部分）</text>
+  <path class="ln-d" d="M270 186 H330"/><text class="lbl" x="340" y="190">门户首页上的「借书单」卡片（Odoo 20 新增）</text>
+  <path class="ln-d" d="M270 212 H330"/><text class="lbl" x="340" y="216">公开书目页的 QWeb 模板</text>
+  <path class="ln-d" d="M270 238 H330"/><text class="lbl" x="340" y="242">门户页面模板和面包屑</text>
+  <path class="ln-d" d="M270 264 H330"/><text class="lbl" x="340" y="268">前端页面用到的样式</text>
+</svg>
+<figcaption>图 13-2　<code>library_portal</code> 模块的文件以及各自负责的部分</figcaption>
+</figure>
+
+<p>
+  别忘了模块根目录的 <code>__init__.py</code> 要导入 <code>controllers</code>，<code>controllers/__init__.py</code> 再导入 <code>main</code> 和 <code>portal</code>：
+</p>
+
+<div class="code" data-lang="py" data-file="library_portal/__init__.py 和 controllers/__init__.py">
+<pre>
+# library_portal/__init__.py
+from . import controllers
+
+# library_portal/controllers/__init__.py
+from . import main
+from . import portal
+</pre>
+</div>
+
+<div class="box note">
+  <div class="t">不安装「网站」应用也可以</div>
+  <p>
+    本章的页面只依赖 <code>portal</code> 模块（它又依赖 <code>web</code>、<code>http_routing</code> 等）。
+    如果你安装了「网站」应用，这些页面会自动套上网站的主题、菜单和页脚，并且可以用网站编辑器拖拽修改；但这不是必需的。
+  </p>
+</div>
+
+<h2 id="frontend-page">做一个前端网页</h2>
+
+<p>一个前端网页由三个部分合作完成：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 230" role="img" aria-label="前端网页的处理流程：浏览器请求、控制器、QWeb 模板、HTML 响应">
+  <rect class="bx-d" x="20" y="70" width="120" height="80" rx="10"/>
+  <text class="ttl" x="80" y="100" text-anchor="middle">浏览器</text>
+  <text class="sm mono" x="80" y="124" text-anchor="middle">GET /library</text>
+  <text class="sm mono" x="80" y="140" text-anchor="middle">/catalog</text>
+
+  <rect class="bx-a" x="190" y="50" width="170" height="120" rx="10"/>
+  <text class="ttl on-a" x="275" y="78" text-anchor="middle">① 控制器</text>
+  <text class="sm mono" x="275" y="102" text-anchor="middle">@route(...)</text>
+  <text class="sm" x="275" y="124" text-anchor="middle">查数据：books</text>
+  <text class="sm mono" x="275" y="146" text-anchor="middle">request.render()</text>
+
+  <rect class="bx-g" x="410" y="50" width="170" height="120" rx="10"/>
+  <text class="ttl on-g" x="495" y="78" text-anchor="middle">② QWeb 模板</text>
+  <text class="sm mono" x="495" y="102" text-anchor="middle">book_catalog</text>
+  <text class="sm" x="495" y="124" text-anchor="middle">t-foreach 生成表格</text>
+  <text class="sm" x="495" y="146" text-anchor="middle">套上页头页脚</text>
+
+  <rect class="bx-p" x="630" y="50" width="110" height="120" rx="10"/>
+  <text class="ttl on-p" x="685" y="78" text-anchor="middle">③ 资源</text>
+  <text class="sm" x="685" y="102" text-anchor="middle">CSS</text>
+  <text class="sm" x="685" y="124" text-anchor="middle">JavaScript</text>
+  <text class="sm" x="685" y="146" text-anchor="middle">图片</text>
+
+  <path class="ln" d="M142 110 H186" marker-end="url(#ar)"/>
+  <path class="ln" d="M362 110 H406" marker-end="url(#ar)"/>
+  <path class="ln-d" d="M582 110 H626"/>
+  <path class="ln-g" d="M495 172 V200 H80 V154" marker-end="url(#ar-g)"/>
+  <text class="sm" x="290" y="194" text-anchor="middle">返回完整的 HTML 页面</text>
+</svg>
+<figcaption>图 13-3　控制器负责「准备数据」，模板负责「长什么样」，资源负责样式和交互</figcaption>
+</figure>
+
+<h3>第一步：网页控制器</h3>
+
+<p>
+  控制器是继承 <code>odoo.http.Controller</code> 的类，里面用 <code>@http.route</code> 装饰的方法会被「挂」到某个 URL 上。
+  Odoo 加载模块时会自动发现这些类，不需要在任何地方注册：
+</p>
+
+<div class="code" data-lang="py" data-file="library_portal/controllers/main.py">
+<pre>
+from odoo import http
+from odoo.http import request
+
+
+class Main(http.Controller):
+
+    @http.route("/library/catalog", auth="public", website=True)
+    def catalog(self, **kwargs):
+        Book = request.env["library.book"]
+        books = Book.sudo().search([])
+        return request.render(
+            "library_portal.book_catalog",
+            {"books": books},
+        )
+</pre>
+</div>
+
+<ul>
+  <li><code>auth="public"</code>：不登录也能访问。没登录的访客会以一个共享的「公共用户」（Public user）身份运行代码。</li>
+  <li><code>website=True</code>：告诉 Odoo 这是一个前端网站页面，渲染时会准备好前端布局需要的变量（语言、网站、菜单等）。</li>
+  <li><code>request.env</code>：和模型方法里的 <code>self.env</code> 一样，是当前用户的环境。</li>
+  <li><code>request.render(模板, 值)</code>：渲染一个 QWeb 模板，第二个参数是模板里能用的变量。</li>
+</ul>
+
+<div class="box warn">
+  <div class="t">关于 sudo()</div>
+  <p>
+    公共用户没有读取图书的权限，所以这里用 <code>sudo()</code> 以超级用户身份搜索。这在<strong>只读、并且数据本来就打算公开</strong>时没问题。
+    但要记住：<code>sudo()</code> 会绕过所有访问规则，千万不要把 URL 参数直接拼进 sudo 的搜索条件里让外部用户随意查询，也不要在 sudo 下写数据。
+    更稳妥的做法是给 <code>base.group_public</code> 组授予图书的只读权限（下一节会讲 <code>ir.access</code>），然后去掉 <code>sudo()</code>。
+  </p>
+</div>
+
+<h3>第二步：QWeb 模板</h3>
+
+<p>
+  模板和第 12 章的报表一样是<strong>服务端 QWeb</strong>，表达式写的是 Python。区别是外层不再调用报表布局，而是调用<strong>前端布局</strong>
+  <code>web.frontend_layout</code>，它会给页面加上 <code>&lt;head&gt;</code>、页头导航栏和页脚：
+</p>
+
+<div class="code" data-lang="xml" data-file="library_portal/views/main_templates.xml">
+<pre>
+&lt;odoo&gt;
+    &lt;template id="book_catalog" name="Book List"&gt;
+        &lt;t t-call="web.frontend_layout"&gt;
+            &lt;t t-set="title"&gt;Book Catalog&lt;/t&gt;
+            &lt;div class="oe_structure"&gt;
+                &lt;div class="container"&gt;
+                    &lt;h1 class="h1-book-catalog"&gt;Book Catalog&lt;/h1&gt;
+                    &lt;table class="table"&gt;
+                        &lt;thead&gt;
+                            &lt;tr&gt;
+                                &lt;th scope="col"&gt;Title&lt;/th&gt;
+                                &lt;th scope="col"&gt;Published&lt;/th&gt;
+                                &lt;th scope="col"&gt;Publisher&lt;/th&gt;
+                            &lt;/tr&gt;
+                        &lt;/thead&gt;
+                        &lt;tbody&gt;
+                            &lt;tr t-foreach="books" t-as="book"&gt;
+                                &lt;td&gt;&lt;span t-field="book.name"/&gt;&lt;/td&gt;
+                                &lt;td&gt;&lt;span t-field="book.date_published"/&gt;&lt;/td&gt;
+                                &lt;td&gt;&lt;span t-field="book.publisher_id"/&gt;&lt;/td&gt;
+                            &lt;/tr&gt;
+                        &lt;/tbody&gt;
+                    &lt;/table&gt;
+                &lt;/div&gt;
+            &lt;/div&gt;
+        &lt;/t&gt;
+    &lt;/template&gt;
+&lt;/odoo&gt;
+</pre>
+</div>
+
+<ul>
+  <li><code>&lt;t t-set="title"&gt;</code>：前端布局会把 <code>title</code> 变量用作浏览器标签页的标题。</li>
+  <li><code>oe_structure</code>：如果安装了网站应用，带这个类的区域可以在网站编辑器里拖入积木块。</li>
+  <li>QWeb 模板是 XML，所以每个标签都必须闭合（<code>&lt;br/&gt;</code> 而不是 <code>&lt;br&gt;</code>）。</li>
+</ul>
+
+<p>前端页面的模板是层层嵌套的，你写的内容只是最里面那一层：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 300" role="img" aria-label="前端页面的模板嵌套：web.layout、web.frontend_layout、portal.portal_layout、你的内容">
+  <rect class="bx-d" x="20" y="16" width="720" height="270" rx="12"/>
+  <text class="ttl mono" x="40" y="42">web.layout</text>
+  <text class="sm" x="200" y="42">&lt;html&gt;、&lt;head&gt;（标题、CSS / JS 资源）、&lt;body&gt;</text>
+
+  <rect class="bx-b" x="45" y="58" width="670" height="214" rx="10"/>
+  <text class="ttl mono on-b" x="65" y="84">web.frontend_layout</text>
+  <text class="sm" x="270" y="84">页头导航栏、用户菜单、页脚（门户 / 网站模块会扩展它）</text>
+
+  <rect class="bx-p" x="70" y="100" width="620" height="158" rx="10"/>
+  <text class="ttl mono on-p" x="90" y="126">portal.portal_layout</text>
+  <text class="sm" x="290" y="126">只用于门户页：面包屑、上一条 / 下一条、容器</text>
+
+  <rect class="bx-g" x="95" y="142" width="570" height="100" rx="10"/>
+  <text class="ttl on-g" x="380" y="176" text-anchor="middle">你的内容</text>
+  <text class="sm" x="380" y="200" text-anchor="middle">公开书目：直接放在 frontend_layout 里</text>
+  <text class="sm" x="380" y="222" text-anchor="middle">门户页面：放在 portal_layout 里</text>
+</svg>
+<figcaption>图 13-4　用 <code>t-call</code> 一层套一层：外层负责公共部分，你只写中间那块</figcaption>
+</figure>
+
+<h3>第三步：CSS 和 JavaScript 资源</h3>
+
+<p>
+  模板里的 <code>&lt;h1 class="h1-book-catalog"&gt;</code> 用到了一个自定义样式。先写 CSS 文件：
+</p>
+
+<div class="code" data-lang="css" data-file="library_portal/static/src/css/library.css">
+<pre>
+.h1-book-catalog {
+    font-size: 62px;
+}
+</pre>
+</div>
+
+<p>
+  然后在清单的 <code>assets</code> 里把它加进<strong>前端资源包</strong> <code>web.assets_frontend</code>（见本章开头的清单）。
+  Odoo 会把同一个资源包里的所有文件合并、压缩成一个文件，在每个前端页面的 <code>&lt;head&gt;</code> 里加载。
+</p>
+
+<div class="tw"><table>
+  <tr><th>资源包</th><th>用在哪里</th></tr>
+  <tr><td><code>web.assets_frontend</code></td><td>前端网页：网站、门户、本章的书目页</td></tr>
+  <tr><td><code>web.assets_backend</code></td><td>后台 Web 客户端（第 11 章的 OWL 组件就放这里）</td></tr>
+  <tr><td><code>web.report_assets_common</code></td><td>PDF 报表（第 12 章）</td></tr>
+</table></div>
+
+<div class="box warn">
+  <div class="t">书中的两处小错误</div>
+  <p>
+    书里正文说要扩展 <code>web.assets_frontend</code>，示例代码却写成了 <code>web.assets_backend</code>，这样 CSS 只会出现在后台，书目页上不会生效。
+    另外书里用花括号 <code>{ ... }</code> 写的是 Python 的<em>集合</em>，集合没有顺序，资源的加载顺序可能变化，应该用方括号写成<em>列表</em>。
+  </p>
+</div>
+
+<div class="box ver">
+  <div class="t">&#8682; Odoo 20 变化</div>
+  <p>
+    书中提到的 <code>web.assets_common</code> 已在 Odoo 16 移除，公共的东西都已经包含在 <code>web.assets_frontend</code> 和 <code>web.assets_backend</code> 里了。
+    在前端页面写交互逻辑，Odoo 20 推荐用 <code>@web/public/interaction</code> 提供的 <code>Interaction</code> 类（取代了老的 <code>publicWidget</code>），
+    或者直接用 OWL 组件。
+  </p>
+</div>
+
+<p>
+  安装或升级 <code>library_portal</code> 后，打开 <code>http://localhost:8069/library/catalog</code>，就能看到一张图书表格：
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 280" role="img" aria-label="公开书目页的示意图">
+  <rect class="bx-d" x="20" y="16" width="720" height="250" rx="12"/>
+  <rect class="bx" x="20" y="16" width="720" height="40" rx="12"/>
+  <text class="lbl" x="44" y="42">&#9675; &#9675; &#9675;</text>
+  <text class="sm mono" x="140" y="41">localhost:8069/library/catalog</text>
+  <text class="lbl" x="630" y="41">登录</text>
+  <text class="ttl" x="50" y="100" style="font-size:30px">Book Catalog</text>
+  <path class="ln-d" d="M50 124 H710"/>
+  <text class="lbl" x="56" y="146">Title</text><text class="lbl" x="400" y="146">Published</text><text class="lbl" x="560" y="146">Publisher</text>
+  <path class="ln-d" d="M50 158 H710"/>
+  <text class="sm" x="56" y="182">Odoo Development Essentials 11</text><text class="sm" x="400" y="182">2018-03-01</text><text class="sm" x="560" y="182">Packt</text>
+  <text class="sm" x="56" y="210">Odoo 11 Development Cookbook</text><text class="sm" x="400" y="210">2018-01-01</text><text class="sm" x="560" y="210">Packt</text>
+  <text class="sm" x="56" y="238">Brave New World</text><text class="sm" x="400" y="238">1932-01-01</text><text class="sm" x="560" y="238">Chatto &amp; Windus</text>
+</svg>
+<figcaption>图 13-5　公开书目页：页头和页脚来自前端布局，表格来自我们的模板</figcaption>
+</figure>
+
+<div class="box tip">
+  <div class="t">开发时的小技巧</div>
+  <p>
+    用 <code>--dev=xml</code>（或 <code>--dev=all</code>）启动服务器，修改模板 XML 后刷新页面就能看到效果，不用每次都升级模块。
+    改 CSS 时可以在 URL 后加 <code>?debug=assets</code>，让资源以未压缩的形式加载，方便在浏览器开发者工具里调试。
+  </p>
+</div>
+
+<h2 id="controllers">深入理解网页控制器</h2>
+
+<p>
+  控制器是服务器端响应 Web 请求的组件。一个请求从进入 Odoo 到返回页面，大致经过下面这些步骤：
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 250" role="img" aria-label="请求的生命周期：路由匹配、认证、调用方法、渲染模板、返回响应">
+  <rect class="bx-d" x="20" y="90" width="110" height="64" rx="10"/>
+  <text class="ttl" x="75" y="118" text-anchor="middle">HTTP</text>
+  <text class="ttl" x="75" y="138" text-anchor="middle">请求</text>
+
+  <rect class="bx-b" x="160" y="80" width="120" height="84" rx="10"/>
+  <text class="ttl on-b" x="220" y="108" text-anchor="middle">路由匹配</text>
+  <text class="sm" x="220" y="130" text-anchor="middle">URL → 方法</text>
+  <text class="sm" x="220" y="148" text-anchor="middle">取出 URL 参数</text>
+
+  <rect class="bx-p" x="310" y="80" width="120" height="84" rx="10"/>
+  <text class="ttl on-p" x="370" y="108" text-anchor="middle">认证</text>
+  <text class="sm mono" x="370" y="130" text-anchor="middle">auth=...</text>
+  <text class="sm" x="370" y="148" text-anchor="middle">确定当前用户</text>
+
+  <rect class="bx-a" x="460" y="80" width="130" height="84" rx="10"/>
+  <text class="ttl on-a" x="525" y="108" text-anchor="middle">你的方法</text>
+  <text class="sm mono" x="525" y="130" text-anchor="middle">request.env</text>
+  <text class="sm mono" x="525" y="148" text-anchor="middle">request.render</text>
+
+  <rect class="bx-g" x="620" y="80" width="120" height="84" rx="10"/>
+  <text class="ttl on-g" x="680" y="108" text-anchor="middle">响应</text>
+  <text class="sm" x="680" y="130" text-anchor="middle">最后一刻</text>
+  <text class="sm" x="680" y="148" text-anchor="middle">才渲染模板</text>
+
+  <path class="ln" d="M132 122 H156" marker-end="url(#ar)"/>
+  <path class="ln" d="M282 122 H306" marker-end="url(#ar)"/>
+  <path class="ln" d="M432 122 H456" marker-end="url(#ar)"/>
+  <path class="ln" d="M592 122 H616" marker-end="url(#ar)"/>
+
+  <path class="ln-r" d="M370 166 V206" marker-end="url(#ar-r)"/>
+  <text class="sm" x="370" y="226" text-anchor="middle">auth="user" 但没登录 → 跳转到登录页</text>
+  <path class="ln-r" d="M220 78 V44" marker-end="url(#ar-r)"/>
+  <text class="sm" x="220" y="34" text-anchor="middle">没有匹配的路由 → 404</text>
+</svg>
+<figcaption>图 13-6　一个请求的处理过程。模板渲染被推迟到最后，这样继承的控制器还有机会修改要渲染的数据</figcaption>
+</figure>
+
+<h3>声明路由</h3>
+
+<p><code>@http.route</code> 装饰器最常用的参数：</p>
+
+<div class="tw"><table>
+  <tr><th>参数</th><th>含义</th></tr>
+  <tr><td>第一个位置参数</td><td>URL 路径，可以是一个字符串，也可以是字符串列表（多个 URL 指向同一个方法）</td></tr>
+  <tr><td><code>type</code></td><td><code>'http'</code>（默认，普通网页请求）或 <code>'jsonrpc'</code>（前端 JavaScript 用 JSON-RPC 调用）</td></tr>
+  <tr><td><code>auth</code></td><td>
+    <code>'user'</code>：必须登录；<code>'public'</code>：可以不登录，以公共用户身份运行；
+    <code>'bearer'</code>：用请求头里的 API 密钥认证（适合给程序调用的接口）；
+    <code>'none'</code>：连数据库都不需要，框架内部用</td></tr>
+  <tr><td><code>methods</code></td><td>允许的 HTTP 方法，比如 <code>['GET']</code>、<code>['POST']</code>；不写就全部允许</td></tr>
+  <tr><td><code>website</code></td><td>是否是前端网站页面（影响语言、网站变量等）</td></tr>
+  <tr><td><code>csrf</code></td><td>是否做 CSRF 校验。<code>http</code> 类型默认开启，所以提交表单时要带上 <code>csrf_token</code></td></tr>
+  <tr><td><code>readonly</code></td><td>只读请求可以在只读副本数据库上执行，减轻主库压力</td></tr>
+</table></div>
+
+<div class="box ver">
+  <div class="t">&#8682; Odoo 20 变化</div>
+  <p>
+    JSON 请求的类型名从 <code>type='json'</code> 改成了 <code>type='jsonrpc'</code>（Odoo 19 起，旧名字还能用但会有弃用警告）。
+    新增的 <code>auth='bearer'</code> 让同一个路由既能被浏览器会话访问，也能被带 <code>Authorization: Bearer &lt;API 密钥&gt;</code> 的程序访问，
+    第 9 章的 JSON-2 API 就是这样实现的。<code>readonly</code> 参数也是新加的。
+  </p>
+</div>
+
+<h3>从 URL 里取参数</h3>
+
+<p>
+  路由字符串里可以用 <code>&lt;类型:名字&gt;</code> 的格式声明参数，取出来的值会作为同名关键字参数传给方法。
+  URL 里 <code>?</code> 后面的查询参数（或者 POST 表单提交的字段）也会作为关键字参数传入：
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 230" role="img" aria-label="URL 各部分如何变成方法参数">
+  <rect class="bx-d" x="30" y="26" width="230" height="40" rx="6"/>
+  <rect class="bx-a" x="262" y="26" width="98" height="40" rx="6"/>
+  <rect class="bx-g" x="362" y="26" width="150" height="40" rx="6"/>
+  <text class="ttl mono" x="40" y="54">/my/book-checkouts</text>
+  <text class="ttl mono on-a" x="268" y="54">/page/2</text>
+  <text class="ttl mono on-g" x="368" y="54">?sortby=date</text>
+
+  <path class="ln-d" d="M145 68 V100"/>
+  <text class="sm" x="145" y="118" text-anchor="middle">固定路径</text>
+  <path class="ln-a" d="M311 68 V100" marker-end="url(#ar-a)"/>
+  <text class="sm mono" x="311" y="118" text-anchor="middle">&lt;int:page&gt;</text>
+  <path class="ln-g" d="M437 68 V100" marker-end="url(#ar-g)"/>
+  <text class="sm" x="437" y="118" text-anchor="middle">查询参数</text>
+
+  <rect class="bx-b" x="30" y="146" width="700" height="62" rx="10"/>
+  <text class="lbl mono on-b" x="50" y="172">def my_book_checkouts(self, page=1, sortby=None, **kw):</text>
+  <text class="sm" x="50" y="194">page = 2（已经转换成整数），sortby = 'date'，其他不认识的参数都进 kw</text>
+</svg>
+<figcaption>图 13-7　路由参数和查询参数都变成了方法的关键字参数</figcaption>
+</figure>
+
+<div class="tw"><table>
+  <tr><th>写法</th><th>得到的值</th></tr>
+  <tr><td><code>&lt;int:page&gt;</code></td><td>整数</td></tr>
+  <tr><td><code>&lt;name&gt;</code> 或 <code>&lt;string:name&gt;</code></td><td>字符串（不含 <code>/</code>）</td></tr>
+  <tr><td><code>&lt;path:subpath&gt;</code></td><td>可以包含 <code>/</code> 的字符串</td></tr>
+  <tr><td><code>&lt;model("library.book"):book&gt;</code></td><td>直接得到一条记录。URL 里可以写数字 id，也可以写 <code>book-title-7</code> 这种「slug」形式</td></tr>
+</table></div>
+
+<div class="box tip">
+  <div class="t">方法参数最后加上 **kw</div>
+  <p>
+    如果 URL 带了一个方法没有声明的查询参数（比如广告跟踪加的 <code>?utm_source=...</code>），而方法没有 <code>**kw</code>，请求就会报错。
+    加上 <code>**kw</code> 把多余的参数「兜住」，是写路由方法的好习惯。
+  </p>
+</div>
+
+<p>路由方法的返回值可以是：</p>
+<ul>
+  <li><code>request.render(...)</code> 返回的响应对象：最常见，渲染一个 QWeb 模板；</li>
+  <li>一个字符串：直接作为 HTML 返回；</li>
+  <li><code>request.redirect(url)</code>：跳转到另一个地址；</li>
+  <li><code>request.make_response(...)</code> / <code>request.make_json_response(...)</code>：返回文件、JSON 等非 HTML 内容；</li>
+  <li>对于 <code>type='jsonrpc'</code> 的路由，直接返回 Python 字典或列表，框架会转成 JSON。</li>
+</ul>
+
+<h3>request 对象</h3>
+
+<p>
+  每个 Web 请求到来时，Odoo 都会创建一个 <code>request</code> 对象，在代码里用 <code>from odoo.http import request</code> 导入就能直接用：
+</p>
+
+<div class="tw"><table>
+  <tr><th>属性 / 方法</th><th>用途</th></tr>
+  <tr><td><code>request.env</code></td><td>Odoo 环境，和 <code>self.env</code> 用法相同。数据库游标用 <code>request.env.cr</code></td></tr>
+  <tr><td><code>request.env.user</code></td><td>当前用户（访客则是公共用户）</td></tr>
+  <tr><td><code>request.session</code></td><td>会话，可以在里面存一些跨请求的小数据</td></tr>
+  <tr><td><code>request.db</code></td><td>数据库名</td></tr>
+  <tr><td><code>request.httprequest</code></td><td>底层的 werkzeug 请求对象：请求头、路径、原始数据等</td></tr>
+  <tr><td><code>request.csrf_token()</code></td><td>生成 CSRF 令牌，放进 HTML 表单的隐藏字段</td></tr>
+  <tr><td><code>request.render(模板, 值)</code></td><td>返回一个「延迟渲染」的 QWeb 响应</td></tr>
+  <tr><td><code>request.redirect(url)</code></td><td>重定向</td></tr>
+  <tr><td><code>request.not_found()</code></td><td>返回 404</td></tr>
+  <tr><td><code>request.update_env(user=..., context=...)</code></td><td>切换当前用户或上下文</td></tr>
+</table></div>
+
+<div class="box ver">
+  <div class="t">&#8682; Odoo 20 变化</div>
+  <p>
+    书里列出的 <code>request.cr</code> 从 Odoo 19 起已弃用（使用时会有警告），请写 <code>request.env.cr</code>。
+    书里 Tip 提到网站变量是在 <code>ir.ui.view</code> 的 <code>_prepare_qcontext</code> 里准备的，现在改由 <code>ir.qweb</code> 模型的 <code>_prepare_environment</code> 方法负责。
+  </p>
+</div>
+
+<h3>response 对象</h3>
+
+<p>
+  <code>request.render()</code> 并不会马上渲染模板，而是返回一个「记着要渲染什么」的响应对象。这样做的好处是：
+  其他模块继承你的控制器时，可以先调用 <code>super()</code> 拿到这个响应，修改里面的数据，再交给框架去渲染：
+</p>
+
+<div class="code" data-lang="py" data-file="另一个模块里继承书目页">
+<pre>
+from odoo import http
+from odoo.addons.library_portal.controllers.main import Main
+
+
+class MainExtended(Main):
+
+    @http.route()          # 重写路由方法时必须重新加上装饰器，参数可以省略
+    def catalog(self, **kwargs):
+        response = super().catalog(**kwargs)
+        books = response.qcontext["books"]
+        response.qcontext["books"] = books.filtered("active")
+        return response
+</pre>
+</div>
+
+<div class="tw"><table>
+  <tr><th>响应对象的属性 / 方法</th><th>用途</th></tr>
+  <tr><td><code>template</code></td><td>要渲染的模板名</td></tr>
+  <tr><td><code>qcontext</code></td><td>传给模板的数据字典</td></tr>
+  <tr><td><code>render()</code></td><td>立即渲染，返回 HTML</td></tr>
+  <tr><td><code>flatten()</code></td><td>强制渲染，把结果固定为响应体</td></tr>
+</table></div>
+
+<p>它同时也是 werkzeug 的 <code>Response</code>，可以设置状态码、响应头、Cookie 等。</p>
+
+<h2 id="portal">门户：给外部用户看的「我的账户」</h2>
+
+<p>
+  <strong>门户（Portal）</strong>是 Odoo 给外部用户（客户、供应商、会员……）准备的自助区域。不同的应用会往门户里加功能：
+  销售应用让客户查看报价单和订单，项目应用让客户跟进任务。我们要让图书馆会员在这里查看自己的借书单。
+</p>
+
+<h3>创建门户用户</h3>
+
+<p>
+  门户用户不需要单独去「用户」菜单创建，而是从<strong>联系人</strong>发起：打开会员对应的联系人，点击「齿轮」动作菜单 →
+  <strong>Grant portal access（授予门户访问权限）</strong>，在弹出的向导里确认邮箱并点「Grant Access」，Odoo 会发一封邀请邮件。
+  对方点链接设置密码后就能登录了。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 210" role="img" aria-label="创建门户用户的流程">
+  <rect class="bx-b" x="20" y="60" width="150" height="80" rx="10"/>
+  <text class="ttl on-b" x="95" y="92" text-anchor="middle">联系人</text>
+  <text class="sm" x="95" y="116" text-anchor="middle">会员对应的 partner</text>
+  <rect class="bx-p" x="210" y="60" width="160" height="80" rx="10"/>
+  <text class="ttl on-p" x="290" y="92" text-anchor="middle">授予门户访问</text>
+  <text class="sm mono" x="290" y="116" text-anchor="middle">portal.wizard</text>
+  <rect class="bx-a" x="410" y="60" width="150" height="80" rx="10"/>
+  <text class="ttl on-a" x="485" y="92" text-anchor="middle">邀请邮件</text>
+  <text class="sm" x="485" y="116" text-anchor="middle">设置密码</text>
+  <rect class="bx-g" x="600" y="60" width="140" height="80" rx="10"/>
+  <text class="ttl on-g" x="670" y="92" text-anchor="middle">门户用户</text>
+  <text class="sm mono" x="670" y="116" text-anchor="middle">base.group_portal</text>
+  <path class="ln" d="M172 100 H206" marker-end="url(#ar)"/>
+  <path class="ln" d="M372 100 H406" marker-end="url(#ar)"/>
+  <path class="ln" d="M562 100 H596" marker-end="url(#ar)"/>
+  <text class="sm" x="380" y="180" text-anchor="middle">登录后点右上角的用户名 → 「My Account」，进入门户首页 /my</text>
+</svg>
+<figcaption>图 13-8　门户用户由联系人「升级」而来，属于 <code>base.group_portal</code> 组</figcaption>
+</figure>
+
+<div class="box tip">
+  <div class="t">本地测试不想收邮件？</div>
+  <p>
+    在开发环境里，授予门户权限后可以直接以管理员身份到「设置 → 用户和公司 → 用户」里找到这个新用户（记得去掉「内部用户」筛选），
+    手动设置密码，然后用隐身窗口以这个用户登录测试。
+  </p>
+</div>
+
+<p>门户功能的实现分三部分：访问权限、控制器、QWeb 模板。我们依次来做。</p>
+
+<h3 id="portal-security">第 1 部分：门户用户的访问权限</h3>
+
+<p>
+  门户用户默认看不到任何图书馆数据。我们要给 <code>base.group_portal</code> 组授权：
+  图书和借书阶段可以读全部；但会员、借书单和借书单明细<strong>只能读属于自己的</strong>。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 290" role="img" aria-label="门户用户只能看到自己的借书单">
+  <rect class="bx-g" x="20" y="110" width="150" height="70" rx="10"/>
+  <text class="ttl on-g" x="95" y="138" text-anchor="middle">门户用户 Ann</text>
+  <text class="sm mono" x="95" y="160" text-anchor="middle">partner_id = 42</text>
+
+  <rect class="bx-p" x="220" y="90" width="210" height="110" rx="10"/>
+  <text class="ttl on-p" x="325" y="116" text-anchor="middle">ir.access（读）</text>
+  <text class="sm mono" x="325" y="140" text-anchor="middle">member_id.partner_id</text>
+  <text class="sm mono" x="325" y="160" text-anchor="middle">= user.partner_id.id</text>
+  <text class="sm" x="325" y="182" text-anchor="middle">只放行满足条件的记录</text>
+
+  <rect class="bx-d" x="480" y="20" width="260" height="250" rx="12"/>
+  <text class="ttl" x="610" y="46" text-anchor="middle">library.checkout</text>
+  <rect class="bx-g" x="500" y="62" width="220" height="36" rx="6"/>
+  <text class="sm on-g" x="610" y="85" text-anchor="middle">借书单 #1 · 会员 Ann &#10003;</text>
+  <rect class="bx" x="500" y="106" width="220" height="36" rx="6"/>
+  <text class="sm" x="610" y="129" text-anchor="middle">借书单 #2 · 会员 Bob &#10007;</text>
+  <rect class="bx-g" x="500" y="150" width="220" height="36" rx="6"/>
+  <text class="sm on-g" x="610" y="173" text-anchor="middle">借书单 #3 · 会员 Ann &#10003;</text>
+  <rect class="bx" x="500" y="194" width="220" height="36" rx="6"/>
+  <text class="sm" x="610" y="217" text-anchor="middle">借书单 #4 · 会员 Cy &#10007;</text>
+  <text class="sm" x="610" y="254" text-anchor="middle">Ann 搜索时只会得到 #1 和 #3</text>
+
+  <path class="ln" d="M172 145 H216" marker-end="url(#ar)"/>
+  <path class="ln-g" d="M432 120 L496 80" marker-end="url(#ar-g)"/>
+  <path class="ln-g" d="M432 160 L496 168" marker-end="url(#ar-g)"/>
+</svg>
+<figcaption>图 13-9　带域的访问规则就像一个过滤器：搜索、读取都只会看到满足条件的记录</figcaption>
+</figure>
+
+<div class="code" data-lang="csv" data-file="library_portal/security/ir.access.csv">
+<pre>
+id,name,model_id,group_id/id,operation,domain
+access_book_portal,Book: portal,library.book,base.group_portal,r,
+access_stage_portal,Checkout Stage: portal,library.checkout.stage,base.group_portal,r,
+access_member_portal,Member: portal own,library.member,base.group_portal,r,"[('partner_id', '=', user.partner_id.id)]"
+access_checkout_portal,Checkout: portal own,library.checkout,base.group_portal,r,"[('member_id.partner_id', '=', user.partner_id.id)]"
+access_checkout_line_portal,Checkout Line: portal own,library.checkout.line,base.group_portal,r,"[('checkout_id.member_id.partner_id', '=', user.partner_id.id)]"
+</pre>
+</div>
+
+<p>
+  回忆第 3 章：<code>operation</code> 写 <code>r</code> 表示只读；<code>domain</code> 列里可以使用 <code>user</code>（当前用户）变量。
+  因为这些规则都指定了组，它们是<strong>「授权」</strong>：门户用户能读的就是满足这些条件的记录，其余一概看不到。
+</p>
+
+<div class="vs">
+  <div class="old">
+    <div class="h">Odoo 15（书中写法）</div>
+    <div class="code" data-lang="xml"><pre>
+&lt;!-- ir.model.access.csv：只管「能不能读这个模型」 --&gt;
+access_checkout_portal,...,base.group_portal,1,0,0,0
+
+&lt;!-- 再用 ir.rule 限制「能读哪些记录」 --&gt;
+&lt;record id="checkout_portal_rule" model="ir.rule"&gt;
+  &lt;field name="model_id"
+         ref="library_checkout.model_library_checkout"/&gt;
+  &lt;field name="domain_force"&gt;
+    [('member_id.partner_id', '=', user.partner_id.id)]
+  &lt;/field&gt;
+  &lt;field name="groups"
+         eval="[(4, ref('base.group_portal'))]"/&gt;
+&lt;/record&gt;
+</pre></div>
+  </div>
+  <div class="new">
+    <div class="h">Odoo 20</div>
+    <div class="code" data-lang="csv"><pre>
+id,name,model_id,group_id/id,operation,domain
+access_checkout_portal,Checkout: portal own,library.checkout,base.group_portal,r,"[('member_id.partner_id', '=', user.partner_id.id)]"
+</pre></div>
+  </div>
+</div>
+
+<div class="box ver">
+  <div class="t">&#8682; Odoo 20 变化</div>
+  <p>
+    <code>ir.model.access</code>（模型级权限）和 <code>ir.rule</code>（记录规则）合并成了一个 <code>ir.access</code> 模型，
+    一行 CSV 就同时说清了「哪个组、哪个模型、什么操作、哪些记录」。书里的 <code>library_security.xml</code> 不再需要。
+    另外书里漏掉了借书单<strong>明细</strong>的记录过滤（只给了模型权限），门户用户能读到所有人的借书明细；上面的 CSV 补上了这一条。
+  </p>
+</div>
+
+<h3 id="portal-controller">第 2 部分：门户控制器</h3>
+
+<p>
+  门户的控制器都继承自 <code>portal</code> 模块的 <code>CustomerPortal</code> 类。继承它有两个好处：
+  可以重写它的方法给门户首页添加内容，也可以复用它的工具方法（比如准备布局数据、检查访问权限）：
+</p>
+
+<div class="tw"><table>
+  <tr><th><code>CustomerPortal</code> 的成员</th><th>用途</th></tr>
+  <tr><td><code>_items_per_page</code></td><td>每页显示多少条，默认 80</td></tr>
+  <tr><td><code>_prepare_portal_layout_values()</code></td><td>门户页面通用的模板数据（页面名、首页卡片、负责的销售员等）</td></tr>
+  <tr><td><code>_prepare_portal_counter_values(counter)</code></td><td>告诉门户首页某张卡片的记录怎么数（下一节讲）</td></tr>
+  <tr><td><code>_document_check_access(模型, id)</code></td><td>检查当前用户能否读这条记录，能则返回它（sudo 版），否则抛出异常</td></tr>
+  <tr><td><code>_get_page_view_values(...)</code></td><td>准备详情页的数据，包括「上一条 / 下一条」导航</td></tr>
+</table></div>
+
+<p>另外 <code>portal</code> 模块还提供了一个分页函数 <code>pager()</code>。先看列表页：</p>
+
+<div class="code" data-lang="py" data-file="library_portal/controllers/portal.py（列表页）">
+<pre>
+from odoo.exceptions import AccessError, MissingError
+from odoo.http import request, route
+from odoo.addons.portal.controllers import portal
+
+
+class CustomerPortal(portal.CustomerPortal):
+
+    @route(
+        ["/my/book-checkouts", "/my/book-checkouts/page/&lt;int:page&gt;"],
+        auth="user",
+        website=True,
+    )
+    def my_book_checkouts(self, page=1, **kw):
+        Checkout = request.env["library.checkout"]
+        domain = []  # 访问规则已经保证只能看到自己的借书单
+        # 分页数据
+        checkout_count = Checkout.search_count(domain)
+        pager_data = portal.pager(
+            url="/my/book-checkouts",
+            total=checkout_count,
+            page=page,
+            step=self._items_per_page,
+        )
+        # 当前页的记录
+        checkouts = Checkout.search(
+            domain,
+            limit=self._items_per_page,
+            offset=pager_data["offset"],
+        )
+        # 记下浏览顺序，详情页上的「上一条 / 下一条」会用到
+        request.session["my_checkouts_history"] = checkouts.ids[:100]
+        # 模板数据
+        values = self._prepare_portal_layout_values()
+        values.update({
+            "checkouts": checkouts,
+            "page_name": "book_checkouts",
+            "default_url": "/my/book-checkouts",
+            "pager": pager_data,
+        })
+        return request.render("library_portal.my_book_checkouts", values)
+</pre>
+</div>
+
+<p>
+  注意 <code>domain</code> 是空的：我们<strong>没有</strong>在代码里写「只查自己的」，因为上一节的访问规则已经替我们过滤了。
+  把权限放在访问规则里而不是控制器里，任何地方（门户、API、后台）读数据时都同样安全。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 220" role="img" aria-label="pager 函数如何计算分页">
+  <rect class="bx-d" x="20" y="30" width="260" height="160" rx="10"/>
+  <text class="ttl mono" x="40" y="56">pager(...)</text>
+  <text class="sm mono" x="40" y="82">url   = "/my/book-checkouts"</text>
+  <text class="sm mono" x="40" y="104">total = 200</text>
+  <text class="sm mono" x="40" y="126">page  = 2</text>
+  <text class="sm mono" x="40" y="148">step  = 80</text>
+  <text class="sm" x="40" y="174">（共 200 条，每页 80 条）</text>
+
+  <path class="ln" d="M282 110 H330" marker-end="url(#ar)"/>
+
+  <rect class="bx-a" x="335" y="30" width="200" height="160" rx="10"/>
+  <text class="ttl on-a" x="435" y="56" text-anchor="middle">返回的字典</text>
+  <text class="sm mono" x="355" y="84">offset: 80</text>
+  <text class="sm mono" x="355" y="106">page_count: 3</text>
+  <text class="sm mono" x="355" y="128">page_previous: {...}</text>
+  <text class="sm mono" x="355" y="150">page_next: {...}</text>
+  <text class="sm mono" x="355" y="172">pages: [...]</text>
+
+  <path class="ln" d="M537 110 H576" marker-end="url(#ar)"/>
+  <text class="sm" x="560" y="96" text-anchor="middle">给模板</text>
+
+  <rect class="bx" x="582" y="88" width="34" height="34" rx="6"/><text class="lbl" x="599" y="110" text-anchor="middle">1</text>
+  <rect class="bx-a" x="622" y="88" width="34" height="34" rx="6"/><text class="lbl on-a" x="639" y="110" text-anchor="middle">2</text>
+  <rect class="bx" x="662" y="88" width="34" height="34" rx="6"/><text class="lbl" x="679" y="110" text-anchor="middle">3</text>
+  <text class="sm" x="660" y="150" text-anchor="middle">第 81～160 条</text>
+</svg>
+<figcaption>图 13-10　<code>pager()</code> 算出 <code>offset</code> 给 <code>search()</code> 用，其余数据交给 <code>portal.pager</code> 模板画出页码</figcaption>
+</figure>
+
+<div class="box warn">
+  <div class="t">书中的小错误</div>
+  <p>
+    书里分页器的 <code>url</code> 写成了 <code>"/my/book_checkouts"</code>（下划线），而路由是 <code>"/my/book-checkouts"</code>（连字符），
+    点击第 2 页时会 404。上面的代码已经改正。
+  </p>
+</div>
+
+<p>
+  然后是详情页。Odoo 自带的应用都用 <code>_document_check_access()</code> 来取记录：它会检查当前用户能不能读这条记录，
+  记录不存在时抛出 <code>MissingError</code>，没有权限时抛出 <code>AccessError</code>，我们捕获后跳回门户首页：
+</p>
+
+<div class="code" data-lang="py" data-file="library_portal/controllers/portal.py（详情页）">
+<pre>
+    @route(
+        ["/my/book-checkout/&lt;int:checkout_id&gt;"],
+        auth="user",
+        website=True,
+    )
+    def my_book_checkout(self, checkout_id, **kw):
+        try:
+            checkout_sudo = self._document_check_access(
+                "library.checkout", checkout_id
+            )
+        except (AccessError, MissingError):
+            return request.redirect("/my")
+        values = self._prepare_portal_layout_values()
+        values = self._get_page_view_values(
+            checkout_sudo, None, values,
+            "my_checkouts_history", False,
+        )
+        values.update({
+            "doc": checkout_sudo,
+            "page_name": "book_checkout",
+        })
+        return request.render("library_portal.book_checkout", values)
+</pre>
+</div>
+
+<div class="box note">
+  <div class="t">为什么不用 &lt;model(...)&gt; 直接取记录？</div>
+  <p>
+    书里用的是 <code>&lt;model('library.checkout'):doc&gt;</code>，也能工作：没有权限时会在渲染模板时报错。
+    但用 <code>&lt;int:checkout_id&gt;</code> + <code>_document_check_access()</code> 可以自己决定没权限时怎么办（这里是跳回首页），
+    还能配合 <code>_get_page_view_values()</code> 得到「上一条 / 下一条」按钮。这也是 Odoo 20 官方应用的写法。
+  </p>
+</div>
+
+<h3 id="portal-home">第 3 部分：在门户首页加一张卡片</h3>
+
+<p>
+  门户首页 <code>/my</code> 显示一组卡片，每张卡片通向一类文档（订单、发票、项目……）。我们要加一张「Book Checkouts」卡片。
+  在 Odoo 20 里，这张卡片是一条 <code>portal.entry</code> <strong>数据记录</strong>：
+</p>
+
+<div class="code" data-lang="xml" data-file="library_portal/data/portal_entry_data.xml">
+<pre>
+&lt;?xml version="1.0" encoding="utf-8"?&gt;
+&lt;odoo noupdate="1"&gt;
+    &lt;record id="portal_book_checkouts" model="portal.entry"&gt;
+        &lt;field name="name"&gt;Book Checkouts&lt;/field&gt;
+        &lt;field name="description"&gt;Follow the books you borrowed&lt;/field&gt;
+        &lt;field name="url"&gt;/my/book-checkouts&lt;/field&gt;
+        &lt;field name="image" type="bytes" file="web/static/img/folder.svg"/&gt;
+        &lt;field name="placeholder_count"&gt;book_checkout_count&lt;/field&gt;
+        &lt;field name="sequence" eval="200"/&gt;
+    &lt;/record&gt;
+&lt;/odoo&gt;
+</pre>
+</div>
+
+<div class="tw"><table>
+  <tr><th>字段</th><th>含义</th></tr>
+  <tr><td><code>name</code> / <code>description</code></td><td>卡片的标题和说明文字（可翻译）</td></tr>
+  <tr><td><code>url</code></td><td>点击卡片跳转到哪里，就是我们的列表页</td></tr>
+  <tr><td><code>image</code></td><td>卡片上的图标。<code>type="bytes" file="..."</code> 表示从模块里的文件读取（这里借用 <code>web</code> 模块自带的文件夹图标，也可以放自己的 SVG）</td></tr>
+  <tr><td><code>placeholder_count</code></td><td>计数器的名字。首页会询问服务器这个计数器的值：大于 0 才显示卡片</td></tr>
+  <tr><td><code>sequence</code></td><td>排序，数字小的在前</td></tr>
+  <tr><td><code>category</code></td><td>分组，默认 <code>common_category</code>；<code>alert</code> 分组会显示成页面顶部的醒目提示条</td></tr>
+</table></div>
+
+<p>
+  卡片要不要显示，取决于计数器。门户首页加载后，浏览器里的脚本会收集所有卡片的 <code>placeholder_count</code>，
+  一次性请求 <code>/my/counters</code>，服务器对每个计数器调用 <code>_prepare_portal_counter_values()</code>：
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 300" role="img" aria-label="门户首页卡片计数的流程">
+  <rect class="bx-p" x="20" y="30" width="190" height="90" rx="10"/>
+  <text class="ttl on-p" x="115" y="58" text-anchor="middle">portal.entry 记录</text>
+  <text class="sm" x="115" y="82" text-anchor="middle">Book Checkouts</text>
+  <text class="sm mono" x="115" y="104" text-anchor="middle">book_checkout_count</text>
+
+  <rect class="bx-b" x="270" y="30" width="200" height="90" rx="10"/>
+  <text class="ttl on-b" x="370" y="58" text-anchor="middle">① 打开 /my</text>
+  <text class="sm" x="370" y="82" text-anchor="middle">先渲染出所有卡片</text>
+  <text class="sm" x="370" y="104" text-anchor="middle">（暂时隐藏，等计数）</text>
+
+  <rect class="bx-a" x="530" y="30" width="210" height="90" rx="10"/>
+  <text class="ttl on-a" x="635" y="58" text-anchor="middle">② POST /my/counters</text>
+  <text class="sm mono" x="635" y="82" text-anchor="middle">{"book_checkout_count":</text>
+  <text class="sm mono" x="635" y="104" text-anchor="middle">"common_category"}</text>
+
+  <rect class="bx-g" x="430" y="170" width="310" height="110" rx="10"/>
+  <text class="ttl on-g" x="585" y="196" text-anchor="middle">③ 你的方法</text>
+  <text class="sm mono" x="585" y="220" text-anchor="middle">_prepare_portal_counter_values(counter)</text>
+  <text class="sm" x="585" y="244" text-anchor="middle">返回（模型, 域, 需要的权限）</text>
+  <text class="sm" x="585" y="266" text-anchor="middle">框架用它执行 search_count</text>
+
+  <rect class="bx-b" x="20" y="170" width="350" height="110" rx="10"/>
+  <text class="ttl on-b" x="195" y="196" text-anchor="middle">④ 回到浏览器</text>
+  <text class="sm mono" x="195" y="220" text-anchor="middle">{"book_checkout_count": 1}</text>
+  <text class="sm" x="195" y="244" text-anchor="middle">大于 0 → 显示卡片</text>
+  <text class="sm" x="195" y="266" text-anchor="middle">等于 0 → 卡片保持隐藏</text>
+
+  <path class="ln-p" d="M212 75 H266" marker-end="url(#ar-p)"/>
+  <path class="ln" d="M472 75 H526" marker-end="url(#ar)"/>
+  <path class="ln" d="M635 122 V166" marker-end="url(#ar)"/>
+  <path class="ln-g" d="M428 225 H374" marker-end="url(#ar-g)"/>
+</svg>
+<figcaption>图 13-11　卡片是数据，计数靠方法：没有借书单的会员就看不到这张卡片</figcaption>
+</figure>
+
+<div class="code" data-lang="py" data-file="library_portal/controllers/portal.py（计数器）">
+<pre>
+class CustomerPortal(portal.CustomerPortal):
+
+    def _prepare_portal_counter_values(self, counter):
+        if counter == "book_checkout_count":
+            return "library.checkout", [], "read"
+        return super()._prepare_portal_counter_values(counter)
+
+    # ... 上面的 my_book_checkouts 和 my_book_checkout 方法
+</pre>
+</div>
+
+<p>
+  返回值是一个三元组：要数的模型、搜索域、需要的访问权限（<code>'read'</code> 表示「当前用户有读权限才数」，
+  <code>'sudo'</code> 表示以超级用户身份数）。不认识的计数器交给 <code>super()</code>，让其他模块处理。
+</p>
+
+<div class="vs">
+  <div class="old">
+    <div class="h">Odoo 15（书中写法）</div>
+    <div class="code" data-lang="py"><pre>
+# 控制器：计算计数
+def _prepare_home_portal_values(self, counters):
+    values = super()._prepare_home_portal_values(counters)
+    if "book_checkout_count" in counters:
+        values["book_checkout_count"] = (
+            request.env["library.checkout"].search_count([]))
+    return values
+
+&lt;!-- 模板：继承 portal_my_home 加入卡片 --&gt;
+&lt;xpath expr="//div[hasclass('o_portal_docs')]"
+       position="inside"&gt;
+  &lt;t t-call="portal.portal_docs_entry"&gt;
+    &lt;t t-set="title"&gt;Book Checkouts&lt;/t&gt;
+    &lt;t t-set="url" t-value="'/my/book-checkouts'"/&gt;
+    &lt;t t-set="placeholder_count"
+       t-value="'book_checkout_count'"/&gt;
+  &lt;/t&gt;
+&lt;/xpath&gt;
+</pre></div>
+  </div>
+  <div class="new">
+    <div class="h">Odoo 20</div>
+    <div class="code" data-lang="py"><pre>
+# 控制器：只说明「怎么数」
+def _prepare_portal_counter_values(self, counter):
+    if counter == "book_checkout_count":
+        return "library.checkout", [], "read"
+    return super()._prepare_portal_counter_values(counter)
+
+&lt;!-- 卡片：一条 portal.entry 数据记录 --&gt;
+&lt;record id="portal_book_checkouts"
+        model="portal.entry"&gt;
+  &lt;field name="name"&gt;Book Checkouts&lt;/field&gt;
+  &lt;field name="url"&gt;/my/book-checkouts&lt;/field&gt;
+  &lt;field name="placeholder_count"
+    &gt;book_checkout_count&lt;/field&gt;
+&lt;/record&gt;
+</pre></div>
+  </div>
+</div>
+
+<div class="box ver">
+  <div class="t">&#8682; Odoo 20 变化</div>
+  <p>
+    门户首页的卡片变成了 <code>portal.entry</code> 模型的记录，不用再继承 <code>portal.portal_my_home</code> 模板；
+    <code>_prepare_home_portal_values()</code> 方法已经移除，改为重写 <code>_prepare_portal_counter_values()</code>，只返回「数什么」，由框架统一计数和缓存。
+    因为卡片是记录，管理员在网站编辑器里还可以直接隐藏或调整卡片。
+  </p>
+</div>
+
+<h3 id="portal-templates">第 4 部分：门户页面模板</h3>
+
+<p>
+  列表页调用 <code>portal.portal_layout</code> 得到门户的外框，再用 <code>portal.portal_table</code> 画出表格（它会自动在下面加上分页器）：
+</p>
+
+<div class="code" data-lang="xml" data-file="library_portal/views/portal_templates.xml（列表页）">
+<pre>
+&lt;odoo&gt;
+    &lt;template id="my_book_checkouts" name="My Book Checkouts"&gt;
+        &lt;t t-call="portal.portal_layout"&gt;
+            &lt;t t-if="checkouts" t-call="portal.portal_table"&gt;
+                &lt;thead&gt;
+                    &lt;tr&gt;
+                        &lt;th&gt;Title&lt;/th&gt;
+                        &lt;th&gt;Request Date&lt;/th&gt;
+                        &lt;th class="text-end"&gt;Stage&lt;/th&gt;
+                    &lt;/tr&gt;
+                &lt;/thead&gt;
+                &lt;tbody&gt;
+                    &lt;tr t-foreach="checkouts" t-as="doc"&gt;
+                        &lt;td&gt;
+                            &lt;a t-attf-href="/my/book-checkout/{{ doc.id }}"&gt;
+                                &lt;span t-field="doc.name"/&gt;
+                            &lt;/a&gt;
+                        &lt;/td&gt;
+                        &lt;td&gt;&lt;span t-field="doc.request_date"/&gt;&lt;/td&gt;
+                        &lt;td class="text-end"&gt;
+                            &lt;span t-field="doc.stage_id.name"
+                                  class="badge rounded-pill text-bg-info"/&gt;
+                        &lt;/td&gt;
+                    &lt;/tr&gt;
+                &lt;/tbody&gt;
+            &lt;/t&gt;
+            &lt;div t-else="" class="alert alert-warning" role="alert"&gt;
+                There are no book checkouts.
+            &lt;/div&gt;
+        &lt;/t&gt;
+    &lt;/template&gt;
+&lt;/odoo&gt;
+</pre>
+</div>
+
+<p>
+  <code>portal_table</code> 模板里有一个 <code>&lt;t t-out="0"/&gt;</code>，它会被我们写在 <code>t-call</code> 里面的内容（表头、表体）替换。
+  这是第 11、12 章见过的「把内容传进子模板」的技巧。
+</p>
+
+<p>
+  详情页书里用的是 <code>portal.portal_record_layout</code>，Odoo 20 已经没有这个模板了。我们直接用 Bootstrap 的卡片组件来排版：
+</p>
+
+<div class="code" data-lang="xml" data-file="library_portal/views/portal_templates.xml（详情页）">
+<pre>
+    &lt;template id="book_checkout" name="Checkout Form"&gt;
+        &lt;t t-call="portal.portal_layout"&gt;
+            &lt;div class="card"&gt;
+                &lt;div class="card-header d-flex align-items-center"&gt;
+                    &lt;h5 class="mb-0 flex-grow-1 text-truncate" t-field="doc.name"/&gt;
+                    &lt;span t-field="doc.stage_id.name"
+                          class="badge rounded-pill text-bg-info"
+                          title="Current stage"/&gt;
+                &lt;/div&gt;
+                &lt;div class="card-body"&gt;
+                    &lt;strong&gt;Member&lt;/strong&gt;
+                    &lt;div class="d-flex gap-3 my-2"&gt;
+                        &lt;img t-if="doc.member_id.image_128"
+                             class="rounded-circle"
+                             t-att-src="image_data_uri(doc.member_id.image_128)"
+                             alt="Member"/&gt;
+                        &lt;address t-field="doc.member_id.partner_id"
+                                 t-options='{"widget": "contact", "fields": ["name", "email", "phone"]}'/&gt;
+                    &lt;/div&gt;
+                    &lt;strong&gt;Borrowed books&lt;/strong&gt;
+                    &lt;ul class="mt-2"&gt;
+                        &lt;li t-foreach="doc.line_ids" t-as="line"&gt;
+                            &lt;span t-field="line.book_id.display_name"/&gt;
+                        &lt;/li&gt;
+                    &lt;/ul&gt;
+                &lt;/div&gt;
+            &lt;/div&gt;
+        &lt;/t&gt;
+    &lt;/template&gt;
+</pre>
+</div>
+
+<ul>
+  <li><code>image_data_uri()</code> 是 QWeb 里可以直接用的辅助函数，把图片字段转换成 <code>data:</code> URL 放进 <code>src</code>。</li>
+  <li><code>t-field</code> 配合 <code>contact</code> 组件，把联系人渲染成带图标的姓名、邮箱、电话，和第 12 章的报表一样。</li>
+  <li>因为控制器里给的是 sudo 版记录，模板里读会员和明细不会遇到权限问题；而能不能打开这张单，已经由 <code>_document_check_access()</code> 把过关。</li>
+</ul>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 330" role="img" aria-label="门户列表页和详情页的示意图">
+  <rect class="bx-d" x="20" y="16" width="350" height="300" rx="12"/>
+  <text class="sm mono" x="40" y="42">/my/book-checkouts</text>
+  <text class="sm" x="40" y="72">&#8962; / Checkouts</text>
+  <path class="ln-d" d="M40 86 H350"/>
+  <text class="lbl" x="44" y="110">Title</text><text class="lbl" x="170" y="110">Request Date</text><text class="lbl" x="296" y="110">Stage</text>
+  <path class="ln-d" d="M40 122 H350"/>
+  <text class="sm on-b" x="44" y="148">Ann · 3 books</text><text class="sm" x="170" y="148">2026-10-02</text>
+  <rect class="bx-b" x="290" y="134" width="56" height="22" rx="11"/><text class="sm on-b" x="318" y="150" text-anchor="middle">Open</text>
+  <text class="sm on-b" x="44" y="184">Ann · 1 book</text><text class="sm" x="170" y="184">2026-09-14</text>
+  <rect class="bx-b" x="290" y="170" width="56" height="22" rx="11"/><text class="sm on-b" x="318" y="186" text-anchor="middle">Done</text>
+  <rect class="bx" x="130" y="250" width="30" height="28" rx="6"/><text class="sm" x="145" y="269" text-anchor="middle">1</text>
+  <rect class="bx" x="166" y="250" width="30" height="28" rx="6"/><text class="sm" x="181" y="269" text-anchor="middle">2</text>
+  <text class="sm" x="230" y="269">← portal_table 的分页器</text>
+
+  <path class="ln" d="M352 146 L404 118" marker-end="url(#ar)"/>
+
+  <rect class="bx-d" x="390" y="16" width="350" height="300" rx="12"/>
+  <text class="sm mono" x="410" y="42">/my/book-checkout/7</text>
+  <text class="sm" x="410" y="72">&#8962; / Checkouts / Ann · 3 books</text>
+  <rect class="bx" x="410" y="90" width="310" height="44" rx="8"/>
+  <text class="lbl" x="424" y="118">Ann · 3 books</text>
+  <rect class="bx-b" x="650" y="102" width="56" height="22" rx="11"/><text class="sm on-b" x="678" y="118" text-anchor="middle">Open</text>
+  <rect class="bx" x="410" y="134" width="310" height="164" rx="8"/>
+  <text class="lbl" x="424" y="160">Member</text>
+  <circle class="bx-g" cx="440" cy="190" r="16"/>
+  <text class="sm" x="466" y="186">Ann · ann@example.com</text>
+  <text class="sm" x="466" y="204">+86 138 0000 0000</text>
+  <text class="lbl" x="424" y="236">Borrowed books</text>
+  <text class="sm" x="434" y="258">• Brave New World</text>
+  <text class="sm" x="434" y="278">• Odoo 11 Development Cookbook</text>
+</svg>
+<figcaption>图 13-12　列表页点击一行进入详情页；顶部的面包屑告诉用户「我在哪」</figcaption>
+</figure>
+
+<h3 id="breadcrumbs">第 5 部分：面包屑导航</h3>
+
+<p>
+  门户页面顶部有一条面包屑（<code>portal.portal_breadcrumbs</code> 模板），第一项永远是首页图标。各个应用通过<strong>继承这个模板</strong>，
+  根据 <code>page_name</code> 等变量往里面追加自己的项：
+</p>
+
+<div class="code" data-lang="xml" data-file="library_portal/views/portal_templates.xml（面包屑）">
+<pre>
+    &lt;template id="portal_breadcrumbs" name="Portal breadcrumb: book checkout"
+              inherit_id="portal.portal_breadcrumbs"&gt;
+        &lt;xpath expr="//ol[hasclass('o_portal_submenu')]" position="inside"&gt;
+            &lt;li t-if="page_name == 'book_checkouts'"
+                class="breadcrumb-item active"&gt;Checkouts&lt;/li&gt;
+            &lt;li t-if="page_name == 'book_checkout'" class="breadcrumb-item"&gt;
+                &lt;a href="/my/book-checkouts"&gt;Checkouts&lt;/a&gt;
+            &lt;/li&gt;
+            &lt;li t-if="page_name == 'book_checkout'"
+                class="breadcrumb-item active text-truncate"&gt;
+                &lt;t t-out="doc.name"/&gt;
+            &lt;/li&gt;
+        &lt;/xpath&gt;
+    &lt;/template&gt;
+</pre>
+</div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 200" role="img" aria-label="面包屑在不同页面上的样子">
+  <text class="lbl" x="20" y="44">page_name = 'book_checkouts'</text>
+  <rect class="bx-d" x="300" y="22" width="440" height="36" rx="8"/>
+  <text class="lbl" x="318" y="46">&#8962;</text>
+  <text class="sm" x="342" y="45">/</text>
+  <text class="lbl on-a" x="360" y="46">Checkouts</text>
+  <text class="sm" x="560" y="45">（当前页，不是链接）</text>
+
+  <text class="lbl" x="20" y="104">page_name = 'book_checkout'</text>
+  <rect class="bx-d" x="300" y="82" width="440" height="36" rx="8"/>
+  <text class="lbl" x="318" y="106">&#8962;</text>
+  <text class="sm" x="342" y="105">/</text>
+  <text class="lbl on-b" x="360" y="106">Checkouts</text>
+  <text class="sm" x="452" y="105">/</text>
+  <text class="lbl on-a" x="470" y="106">Ann · 3 books</text>
+
+  <path class="ln-b" d="M400 122 V150" marker-end="url(#ar-b)"/>
+  <text class="sm" x="400" y="172" text-anchor="middle">链接回列表页</text>
+  <path class="ln-a" d="M520 122 V150" marker-end="url(#ar-a)"/>
+  <text class="sm" x="520" y="172" text-anchor="middle">当前记录名</text>
+</svg>
+<figcaption>图 13-13　同一个继承模板，根据 <code>page_name</code> 输出不同的面包屑</figcaption>
+</figure>
+
+<p>
+  这就是为什么控制器里要设置 <code>page_name</code>：它是门户模板之间约定好的「我是哪个页面」的标记。
+  书里列表页用的是 <code>'book-checkouts'</code>、详情页靠判断 <code>doc</code> 变量是否存在；这里给两个页面都设了明确的 <code>page_name</code>，更不容易和其他模块冲突。
+</p>
+
+<div class="box ver">
+  <div class="t">&#8682; Bootstrap 5 与图标</div>
+  <p>
+    书中模板里的 <code>badge badge-pill badge-info</code>、<code>text-right</code>、<code>pl-sm-0</code> 是 Bootstrap 4 写法，
+    在 Odoo 20（Bootstrap 5.3）里分别是 <code>badge rounded-pill text-bg-info</code>、<code>text-end</code>、<code>ps-sm-0</code>。
+    门户自带模板里的图标也从 Font Awesome 换成了 <code>&lt;i class="oi" data-icon="home"/&gt;</code> 这样的 Material Symbols 写法。
+  </p>
+</div>
+
+<h3>完整的门户控制器</h3>
+
+<p>把前面的片段合起来，<code>controllers/portal.py</code> 的完整代码如下：</p>
+
+<div class="code" data-lang="py" data-file="library_portal/controllers/portal.py">
+<pre>
+from odoo.exceptions import AccessError, MissingError
+from odoo.http import request, route
+from odoo.addons.portal.controllers import portal
+
+
+class CustomerPortal(portal.CustomerPortal):
+
+    def _prepare_portal_counter_values(self, counter):
+        if counter == "book_checkout_count":
+            return "library.checkout", [], "read"
+        return super()._prepare_portal_counter_values(counter)
+
+    @route(
+        ["/my/book-checkouts", "/my/book-checkouts/page/&lt;int:page&gt;"],
+        auth="user",
+        website=True,
+    )
+    def my_book_checkouts(self, page=1, **kw):
+        Checkout = request.env["library.checkout"]
+        domain = []
+        checkout_count = Checkout.search_count(domain)
+        pager_data = portal.pager(
+            url="/my/book-checkouts",
+            total=checkout_count,
+            page=page,
+            step=self._items_per_page,
+        )
+        checkouts = Checkout.search(
+            domain,
+            limit=self._items_per_page,
+            offset=pager_data["offset"],
+        )
+        request.session["my_checkouts_history"] = checkouts.ids[:100]
+        values = self._prepare_portal_layout_values()
+        values.update({
+            "checkouts": checkouts,
+            "page_name": "book_checkouts",
+            "default_url": "/my/book-checkouts",
+            "pager": pager_data,
+        })
+        return request.render("library_portal.my_book_checkouts", values)
+
+    @route(["/my/book-checkout/&lt;int:checkout_id&gt;"], auth="user", website=True)
+    def my_book_checkout(self, checkout_id, **kw):
+        try:
+            checkout_sudo = self._document_check_access(
+                "library.checkout", checkout_id
+            )
+        except (AccessError, MissingError):
+            return request.redirect("/my")
+        values = self._prepare_portal_layout_values()
+        values = self._get_page_view_values(
+            checkout_sudo, None, values, "my_checkouts_history", False
+        )
+        values.update({
+            "doc": checkout_sudo,
+            "page_name": "book_checkout",
+        })
+        return request.render("library_portal.book_checkout", values)
+</pre>
+</div>
+
+<div class="box tip">
+  <div class="t">测试一下</div>
+  <p>
+    升级模块后，确认至少有一张借书单的会员属于某个门户用户。用这个门户用户登录，进入「My Account」：首页应该出现「Book Checkouts」卡片，
+    点进去只能看到自己的借书单。再试试在地址栏里把 <code>/my/book-checkout/7</code> 改成别人的借书单 id，应该被送回 <code>/my</code>。
+  </p>
+</div>
+
+<h2 id="summary">小结</h2>
+
+<ul>
+  <li>前端页面 = 控制器（<code>@http.route</code>）+ 服务端 QWeb 模板 + <code>web.assets_frontend</code> 里的资源。</li>
+  <li><code>auth</code> 决定谁能访问：<code>user</code> 要登录、<code>public</code> 可匿名、<code>bearer</code> 用 API 密钥；JSON 路由用 <code>type='jsonrpc'</code>。</li>
+  <li>URL 里的 <code>&lt;int:id&gt;</code>、<code>&lt;model(...):rec&gt;</code> 和查询参数都会变成方法参数；记得加 <code>**kw</code>。</li>
+  <li><code>request.render()</code> 返回延迟渲染的响应，继承者可以通过 <code>response.qcontext</code> 修改数据。</li>
+  <li>门户用户属于 <code>base.group_portal</code>。在 Odoo 20 用带域的 <code>ir.access</code> 规则让他们只读到自己的记录。</li>
+  <li>门户控制器继承 <code>CustomerPortal</code>：首页卡片是 <code>portal.entry</code> 记录，计数靠 <code>_prepare_portal_counter_values()</code>；
+      列表页用 <code>pager()</code> + <code>portal.portal_table</code>，详情页用 <code>_document_check_access()</code>；面包屑继承 <code>portal.portal_breadcrumbs</code>。</li>
+</ul>
+
+<div class="exercise">
+  <h3>动手练习</h3>
+  <ol>
+    <li>给公共用户组 <code>base.group_public</code> 加上图书的只读访问规则，然后去掉书目页控制器里的 <code>sudo()</code>，确认未登录时依然能看到书目。</li>
+    <li>给书目页加一个 <code>/library/book/&lt;model("library.book"):book&gt;</code> 详情页，并在书目表格里用 <code>slug(book)</code> 生成链接。</li>
+    <li>在借书单列表页加上按申请日期 / 阶段排序的功能（提示：参考 <code>project</code> 模块的 <code>searchbar_sortings</code>，并调用 <code>portal.portal_searchbar</code> 模板）。</li>
+    <li>修改 <code>portal_entry_data.xml</code>，换一个自己画的 SVG 图标，并把卡片放到 <code>category</code> 为 <code>alert</code> 的分组里，看看效果有何不同。</li>
+    <li>写一个 <code>type="jsonrpc"</code>、<code>auth="user"</code> 的路由 <code>/library/my-books</code>，返回当前用户正在借阅的书名列表，在浏览器控制台里用 <code>fetch</code> 调用它。</li>
+  </ol>
+</div>
+<div id="pager"></div>
+</main>
+</div>
+<script src="assets/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,1170 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 10 章 · 后台视图 — Odoo 20 开发入门</title>
+<meta name="description" content="设计后台用户界面：菜单与窗口动作、单据式表单（页眉、状态栏、标题、分组、页签、智能按钮）、字段与组件、动态属性、列表视图、搜索视图，以及活动、日历、透视表、图表视图。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-chapter="10">
+<div id="app">
+<aside id="sidebar"></aside>
+<main>
+<span class="chapter-eyebrow">第 10 章</span>
+<h1>后台视图</h1>
+<p class="lede">
+  业务逻辑再完善，如果界面难用，用户还是会出错、会抱怨。Odoo 的 Web 客户端提供了一整套构建界面的积木：菜单、动作、各种视图类型、几十种字段组件。
+  这一章以借书单为例，把这些积木一块块用起来，最后得到一个专业的「单据式」表单，以及列表、搜索、日历、透视表、图表等视图。
+</p>
+
+<div class="goals">
+  <h4>本章目标</h4>
+  <ul>
+    <li>掌握菜单项和窗口动作的全部常用属性，并把动作放进「操作」菜单</li>
+    <li>搭出单据式表单：页眉按钮、状态栏、标题、分组布局、页签、智能按钮</li>
+    <li>熟悉字段的属性和常用组件（widget）</li>
+    <li>用 Odoo 17+ 的条件表达式实现动态的隐藏 / 只读 / 必填</li>
+    <li>做出带装饰、汇总、页眉按钮的列表视图，以及带筛选、分组、搜索面板的搜索视图</li>
+    <li>认识活动、日历、透视表、图表视图</li>
+  </ul>
+</div>
+
+<div id="chapter-toc"></div>
+
+<h2 id="menus">菜单项</h2>
+
+<p>
+  菜单是界面导航的起点。它是一个树状结构：顶层是应用，下一层是应用的主菜单，还可以继续往下嵌套。
+  <strong>没有子菜单的「叶子」菜单项</strong>才能挂一个动作，告诉 Web 客户端点击后做什么。菜单存储在 <code>ir.ui.menu</code> 模型中，
+  可以在 <strong>设置 → 技术 → 用户界面 → 菜单项</strong>里浏览。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 260" role="img" aria-label="图书馆应用的菜单树：应用、主菜单、子菜单，叶子菜单挂动作">
+  <rect class="bx-a" x="300" y="20" width="160" height="44" rx="10"/>
+  <text class="ttl on-a" x="380" y="47" text-anchor="middle">Library（应用）</text>
+
+  <rect class="bx" x="40" y="104" width="140" height="40" rx="8"/><text class="lbl" x="110" y="129" text-anchor="middle">Books</text>
+  <rect class="bx" x="210" y="104" width="140" height="40" rx="8"/><text class="lbl" x="280" y="129" text-anchor="middle">Members</text>
+  <rect class="bx" x="380" y="104" width="140" height="40" rx="8"/><text class="lbl" x="450" y="129" text-anchor="middle">Checkout</text>
+  <rect class="bx-d" x="560" y="104" width="160" height="40" rx="8"/><text class="lbl" x="640" y="129" text-anchor="middle">Configuration</text>
+  <rect class="bx" x="580" y="184" width="120" height="40" rx="8"/><text class="lbl" x="640" y="209" text-anchor="middle">Stages</text>
+
+  <path class="ln" d="M380 66 V86 H110 V100"/>
+  <path class="ln" d="M380 86 H280 V100"/>
+  <path class="ln" d="M380 86 H450 V100"/>
+  <path class="ln" d="M380 86 H640 V100"/>
+  <path class="ln" d="M640 146 V180"/>
+
+  <text class="sm on-p" x="110" y="166" text-anchor="middle">⚡ 动作</text>
+  <text class="sm on-p" x="280" y="166" text-anchor="middle">⚡ 动作</text>
+  <text class="sm on-p" x="450" y="166" text-anchor="middle">⚡ 动作</text>
+  <text class="sm on-p" x="640" y="246" text-anchor="middle">⚡ 动作</text>
+  <text class="sm" x="40" y="214">library_app 定义</text>
+  <text class="sm" x="40" y="232">Library、Books、Configuration；</text>
+  <text class="sm" x="40" y="250">其余由扩展模块挂上来</text>
+</svg>
+<figcaption>图 10-1　菜单树。只有叶子节点（⚡）关联动作；中间节点只是分组</figcaption>
+</figure>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;menuitem id="menu_library_checkout"
+          name="Checkout"
+          action="action_library_checkout"
+          parent="library_app.menu_library"
+          sequence="20"
+          groups="library_app.library_group_user"/&gt;
+</pre>
+</div>
+
+<div class="tw"><table>
+  <tr><th>属性</th><th>含义</th></tr>
+  <tr><td><code>name</code></td><td>菜单标题</td></tr>
+  <tr><td><code>action</code></td><td>点击时执行的动作的 XML ID</td></tr>
+  <tr><td><code>parent</code></td><td>上级菜单的 XML ID。在别的模块里定义的，要写完整的 <code>模块.标识符</code></td></tr>
+  <tr><td><code>sequence</code></td><td>排序号，越小越靠前</td></tr>
+  <tr><td><code>groups</code></td><td>能看到这个菜单的用户组，逗号分隔的 XML ID 列表</td></tr>
+  <tr><td><code>web_icon</code></td><td>顶层菜单在应用切换器里的图标，格式 <code>模块名,文件路径</code></td></tr>
+</table></div>
+
+<div class="box tip">
+  <div class="t">&#128161; 菜单也能嵌套着写</div>
+  <p>
+    <code>&lt;menuitem&gt;</code> 可以嵌套：内层菜单自动以外层为父菜单，不用写 <code>parent</code>。Odoo 自己的 <code>base_menus.xml</code> 大量使用这种写法，结构一目了然。
+  </p>
+</div>
+
+<h2 id="actions">窗口动作</h2>
+
+<p>
+  窗口动作告诉 Web 客户端：打开哪个模型、用哪些视图、过滤哪些记录、带什么上下文。它既能挂在菜单上，也能被按钮调用。
+  存储在 <code>ir.actions.act_window</code> 模型中（<strong>设置 → 技术 → 动作 → 窗口动作</strong>）。
+</p>
+
+<div class="code" data-lang="xml" data-file="library_checkout/views/library_menu.xml">
+<pre>
+&lt;record id="action_library_checkout" model="ir.actions.act_window"&gt;
+    &lt;field name="name"&gt;Checkouts&lt;/field&gt;
+    &lt;field name="res_model"&gt;library.checkout&lt;/field&gt;
+    &lt;field name="view_mode"&gt;kanban,list,form,activity,calendar,pivot,graph&lt;/field&gt;
+    &lt;field name="context"&gt;{'search_default_filter_not_done': 1}&lt;/field&gt;
+&lt;/record&gt;
+</pre>
+</div>
+
+<div class="tw"><table>
+  <tr><th>字段</th><th>含义</th></tr>
+  <tr><td><code>name</code></td><td>打开的视图的标题</td></tr>
+  <tr><td><code>res_model</code></td><td>目标模型</td></tr>
+  <tr><td><code>view_mode</code></td><td>可用的视图类型，逗号分隔，<strong>第一个是默认打开的</strong></td></tr>
+  <tr><td><code>target</code></td><td><code>current</code>（默认，在主区域打开）或 <code>new</code>（在弹出对话框中打开）</td></tr>
+  <tr><td><code>context</code></td><td>带给目标视图的上下文：设置默认值、默认筛选等，如 <code>{'default_user_id': uid}</code></td></tr>
+  <tr><td><code>domain</code></td><td>强制的过滤条件，用户无法取消，如 <code>[('user_id', '=', uid)]</code></td></tr>
+  <tr><td><code>limit</code></td><td>列表视图每页显示的记录数，默认 80</td></tr>
+  <tr><td><code>view_id</code></td><td>指定使用某一个具体的视图（常和 <code>target="new"</code> 配合，弹出特定表单）</td></tr>
+  <tr><td><code>help</code></td><td>没有记录时显示的 HTML 提示（「还没有借书单，点新建开始吧」）</td></tr>
+</table></div>
+
+<div class="box warn">
+  <div class="t">&#9888; 先写视图，再加 view_mode</div>
+  <p>
+    上面的 <code>view_mode</code> 列出了本章后面才会定义的视图类型。看板（kanban）在第 11 章才写；在它们的视图定义完成之前，先别把它们加进 <code>view_mode</code>
+    （Odoo 会为部分类型自动生成默认视图，但看板等类型没有可用的默认视图会报错）。
+  </p>
+</div>
+
+<h3>放进「操作」菜单</h3>
+
+<p>
+  窗口动作还能出现在表单顶部、或列表选中记录后出现的 <strong>⚙ 操作</strong>菜单里，作用于当前（选中的）记录。只需再设置两个字段：
+</p>
+<ul>
+  <li><code>binding_model_id</code>：绑定到哪个模型，如 <code>ref="model_library_checkout"</code></li>
+  <li><code>binding_view_types</code>：在哪些视图类型里出现，如 <code>form,list</code></li>
+</ul>
+<p>第 8 章的群发消息向导就是这么做的。</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 210" role="img" aria-label="带 binding_model_id 的动作出现在目标模型的操作菜单里">
+  <rect class="bx" x="20" y="20" width="420" height="170" rx="10"/>
+  <rect class="bx-d" x="20" y="20" width="420" height="36" rx="10"/>
+  <text class="lbl" x="36" y="43">Checkouts　　☑ 3 selected</text>
+  <rect class="bx-a" x="300" y="26" width="120" height="24" rx="5"/>
+  <text class="sm on-a" x="360" y="43" text-anchor="middle">⚙ 操作 ▾</text>
+  <rect class="bx" x="270" y="56" width="160" height="110" rx="6"/>
+  <text class="sm" x="286" y="80">导出</text>
+  <text class="sm" x="286" y="102">归档 / 取消归档</text>
+  <text class="sm" x="286" y="124">删除</text>
+  <rect class="bx-a" x="278" y="134" width="144" height="24" rx="4"/>
+  <text class="sm on-a" x="286" y="151">Send Messages</text>
+  <text class="sm" x="36" y="90">☑ 借书单 #1</text>
+  <text class="sm" x="36" y="112">☑ 借书单 #4</text>
+  <text class="sm" x="36" y="134">☑ 借书单 #7</text>
+
+  <rect class="bx-p" x="480" y="60" width="260" height="110" rx="10"/>
+  <text class="ttl on-p" x="610" y="84" text-anchor="middle">ir.actions.act_window</text>
+  <text class="sm mono" x="496" y="108">binding_model_id →</text>
+  <text class="sm mono" x="496" y="126">  library.checkout</text>
+  <text class="sm mono" x="496" y="148">binding_view_types = form,list</text>
+  <path class="ln-p" d="M478 140 L426 146" marker-end="url(#ar-p)"/>
+</svg>
+<figcaption>图 10-2　绑定到模型的动作，会自动出现在该模型的操作菜单里</figcaption>
+</figure>
+
+<h2 id="form">表单视图的结构</h2>
+
+<p>
+  表单视图是用户和数据交互的主要场所。它可以是简单的布局，也可以模仿纸质单据 —— 很多组织过去就是用纸质表单驱动流程的，
+  让表单看起来像一张单据，用户上手更快。下面是本节最终要做出来的借书单表单的结构：
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 520" role="img" aria-label="单据式表单的结构：页眉、纸张区域、按钮盒、标题、分组、页签、消息区">
+  <rect class="bx-p" x="20" y="16" width="720" height="50" rx="8"/>
+  <text class="sm on-p" x="30" y="32">&lt;header&gt;</text>
+  <rect class="bx-a" x="40" y="38" width="120" height="22" rx="4"/><text class="sm on-a" x="100" y="54" text-anchor="middle">Return Books</text>
+  <rect class="bx" x="440" y="36" width="280" height="24" rx="12"/>
+  <text class="sm" x="480" y="53" text-anchor="middle">Draft</text>
+  <rect class="bx-a" x="520" y="38" width="80" height="20" rx="10"/><text class="sm on-a" x="560" y="53" text-anchor="middle">Borrowed</text>
+  <text class="sm" x="630" y="53" text-anchor="middle">Completed</text>
+  <text class="sm" x="580" y="30">状态栏 statusbar</text>
+
+  <rect class="bx" x="50" y="80" width="660" height="330" rx="8"/>
+  <text class="sm" x="62" y="98">&lt;sheet&gt;</text>
+  <rect class="bx-g" x="550" y="90" width="150" height="48" rx="6"/>
+  <text class="sm on-g" x="625" y="108" text-anchor="middle">📖 3</text>
+  <text class="sm on-g" x="625" y="126" text-anchor="middle">Checkouts</text>
+  <text class="sm" x="540" y="152" text-anchor="end">按钮盒（智能按钮）→</text>
+
+  <rect class="bx-d" x="70" y="110" width="56" height="56" rx="28"/>
+  <text class="sm" x="98" y="142" text-anchor="middle">头像</text>
+  <text class="ttl" x="140" y="132" style="font-size:20px">《借书单标题》</text>
+  <text class="lbl" x="140" y="158">By  张三（会员）</text>
+  <text class="sm" x="140" y="176">&lt;div class="oe_title"&gt;</text>
+
+  <rect class="bx-b" x="70" y="190" width="300" height="80" rx="6"/>
+  <text class="sm on-b" x="80" y="206">group_col1</text>
+  <text class="lbl" x="90" y="230">Request Date</text><rect class="bx" x="200" y="218" width="150" height="18" rx="3"/>
+  <rect class="bx-b" x="390" y="190" width="300" height="80" rx="6"/>
+  <text class="sm on-b" x="400" y="206">group_col2</text>
+  <text class="lbl" x="410" y="230">Librarian</text><rect class="bx" x="520" y="218" width="150" height="18" rx="3"/>
+  <text class="lbl" x="410" y="256">Close Date</text><rect class="bx" x="520" y="244" width="150" height="18" rx="3"/>
+
+  <rect class="bx-a" x="70" y="288" width="620" height="110" rx="6"/>
+  <rect class="bx" x="80" y="296" width="130" height="24" rx="4"/><text class="sm" x="145" y="313" text-anchor="middle">Borrowed Books</text>
+  <rect class="bx-d" x="214" y="296" width="80" height="24" rx="4"/><text class="sm" x="254" y="313" text-anchor="middle">Notes</text>
+  <text class="sm on-a" x="600" y="313">&lt;notebook&gt;</text>
+  <text class="sm mono" x="96" y="346">Book                         Note</text>
+  <text class="sm mono" x="96" y="368">Brave New World              ...</text>
+  <text class="sm mono" x="96" y="388">Odoo Development Essentials  ...</text>
+
+  <rect class="bx-d" x="50" y="424" width="660" height="80" rx="8"/>
+  <text class="sm" x="62" y="442">&lt;chatter/&gt;</text>
+  <text class="lbl" x="80" y="468">发送消息 · 记录备注 · 活动　　　👤 关注者</text>
+  <text class="sm" x="80" y="490">消息历史……</text>
+</svg>
+<figcaption>图 10-3　单据式表单：页眉（按钮 + 状态栏）、纸张（按钮盒、标题、字段分组、页签）、消息区</figcaption>
+</figure>
+
+<p>先把骨架写出来：</p>
+
+<div class="code" data-lang="xml" data-file="library_checkout/views/checkout_view.xml（表单骨架）">
+<pre>
+&lt;record id="view_form_checkout" model="ir.ui.view"&gt;
+    &lt;field name="model"&gt;library.checkout&lt;/field&gt;
+    &lt;field name="arch" type="xml"&gt;
+        &lt;form&gt;
+            &lt;header&gt;
+                &lt;!-- 按钮和状态栏 --&gt;
+            &lt;/header&gt;
+            &lt;sheet&gt;
+                &lt;!-- 表单内容 --&gt;
+            &lt;/sheet&gt;
+            &lt;chatter/&gt;
+        &lt;/form&gt;
+    &lt;/field&gt;
+&lt;/record&gt;
+</pre>
+</div>
+
+<p>视图的 <code>name</code> 字段可以省略，会自动生成，所以这里没写。</p>
+
+<h3>页眉：按钮</h3>
+
+<p>
+  页眉通常放推动单据前进的操作按钮，「下一步」那个按钮一般会被高亮。加一个「还书」按钮，只在「已借出」状态下显示：
+</p>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;header&gt;
+    &lt;button name="button_done"
+            type="object"
+            string="Return Books"
+            invisible="state != 'open'"
+            class="oe_highlight"/&gt;
+&lt;/header&gt;
+</pre>
+</div>
+
+<ul>
+  <li><code>type="object"</code> + <code>name="button_done"</code>：点击时调用模型的 <code>button_done()</code> 方法。</li>
+  <li><code>class="oe_highlight"</code>：高亮为主按钮。有多个按钮时，突出最常用的那个。</li>
+  <li><code>invisible="state != 'open'"</code>：一个 Python 风格的条件表达式，为真时隐藏按钮。表达式里可以直接使用记录的字段值。</li>
+</ul>
+
+<div class="vs">
+  <div class="old">
+    <div class="h">Odoo 15（书中写法，Odoo 17 起不再支持）</div>
+    <div class="code" data-lang="xml"><pre>
+&lt;field name="state" invisible="True"/&gt;
+&lt;button name="button_done" type="object"
+    string="Return Books"
+    attrs="{'invisible':
+        [('state', 'in', ['new', 'done', 'cancel'])]}"
+    class="oe_highlight"/&gt;
+&lt;!-- 或者 --&gt;
+&lt;button ... states="open"/&gt;
+</pre></div>
+  </div>
+  <div class="new">
+    <div class="h">Odoo 20</div>
+    <div class="code" data-lang="xml"><pre>
+&lt;button name="button_done" type="object"
+    string="Return Books"
+    invisible="state != 'open'"
+    class="oe_highlight"/&gt;
+</pre></div>
+  </div>
+</div>
+
+<div class="box ver">
+  <div class="t">&#8682; attrs 和 states 已经被移除</div>
+  <p>
+    Odoo 17 删除了 <code>attrs</code>（用域表达式控制 invisible / readonly / required）和 <code>states</code>（列出可见的状态）两个属性，
+    改为直接在 <code>invisible</code>、<code>readonly</code>、<code>required</code> 属性里写<strong>条件表达式</strong>。
+    另一个好处是：表达式里用到的字段，Web 客户端会自动加载，不再需要像书里那样额外放一个 <code>&lt;field name="state" invisible="True"/&gt;</code>。
+    旧写法在 Odoo 20 上会导致视图校验失败、模块无法安装。
+  </p>
+</div>
+
+<p>按钮调用的方法要在模型里实现：找到第一个 <code>done</code> 状态的阶段，把借书单移过去：</p>
+
+<div class="code" data-lang="py" data-file="library_checkout/models/library_checkout.py（片段）">
+<pre>
+    def button_done(self):
+        Stage = self.env["library.checkout.stage"]
+        done_stage = Stage.search([("state", "=", "done")], limit=1)
+        for checkout in self:
+            checkout.stage_id = done_stage
+        return True
+</pre>
+</div>
+
+<p><code>self</code> 通常是一条记录，但 API 允许对多条记录调用，所以用循环处理。修改 <code>stage_id</code> 会触发第 8 章写的 <code>write()</code>，自动记录归还日期。</p>
+
+<h3>页眉：状态栏</h3>
+
+<p>页眉里另一个常见元素是<strong>状态栏</strong>：一条显示流程各步骤、并标出当前所在位置的「管道」。它是一个使用 <code>statusbar</code> 组件的字段：</p>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;header&gt;
+    &lt;button name="button_done" type="object" string="Return Books"
+            invisible="state != 'open'" class="oe_highlight"/&gt;
+    &lt;field name="stage_id"
+           widget="statusbar"
+           options="{'clickable': True, 'fold_field': 'fold'}"/&gt;
+&lt;/header&gt;
+</pre>
+</div>
+
+<ul>
+  <li><code>statusbar</code> 组件既可以用于阶段（多对一字段），也可以用于状态（选择字段）。</li>
+  <li><code>clickable</code>：允许用户直接点击状态栏切换阶段。如果希望流程只能通过按钮推进（比如要先做检查），就不要开启。</li>
+  <li><code>fold_field</code>：阶段模型里哪个布尔字段表示「折叠」。被折叠的阶段（比如「已取消」）不单独显示，而是收进一个「更多」下拉里。</li>
+</ul>
+
+<p>如果模型用的是选择字段 <code>state</code>，没有 <code>fold_field</code>，可以用 <code>statusbar_visible</code> 列出要显示的状态：</p>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;field name="state" widget="statusbar" statusbar_visible="draft,open,done"/&gt;
+</pre>
+</div>
+
+<h3>纸张区域</h3>
+
+<p><code>&lt;sheet&gt;</code> 是表单的主体，通常由这几部分组成：</p>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;sheet&gt;
+    &lt;div class="oe_button_box" name="button_box"&gt;&lt;!-- 智能按钮 --&gt;&lt;/div&gt;
+    &lt;div class="oe_title"&gt;&lt;!-- 标题 --&gt;&lt;/div&gt;
+    &lt;group&gt;&lt;!-- 头部字段 --&gt;&lt;/group&gt;
+    &lt;notebook&gt;&lt;!-- 页签：明细行、其他信息 --&gt;&lt;/notebook&gt;
+&lt;/sheet&gt;
+</pre>
+</div>
+
+<h3>标题</h3>
+
+<p>先给借书单加两个字段：一个标题，一个借书人的头像（关联字段）：</p>
+
+<div class="code" data-lang="py">
+<pre>
+    name = fields.Char(string="Title")
+    member_image = fields.Binary(related="member_id.image_128")
+</pre>
+</div>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;sheet&gt;
+    &lt;div class="oe_button_box" name="button_box"/&gt;
+    &lt;field name="member_image" widget="image" class="oe_avatar"/&gt;
+    &lt;div class="oe_title"&gt;
+        &lt;label for="name"/&gt;
+        &lt;h1&gt;&lt;field name="name" placeholder="e.g. Summer reading list"/&gt;&lt;/h1&gt;
+        &lt;h3&gt;
+            &lt;span&gt;By &lt;/span&gt;
+            &lt;field name="member_id" class="oe_inline"/&gt;
+        &lt;/h3&gt;
+    &lt;/div&gt;
+    &lt;!-- 后面的内容从这里继续…… --&gt;
+&lt;/sheet&gt;
+</pre>
+</div>
+
+<ul>
+  <li><code>class="oe_avatar"</code> 的图片组件显示为右上角的小头像。</li>
+  <li><code>oe_title</code> 里可以用普通的 HTML 元素：<code>div</code>、<code>span</code>、<code>h1</code>、<code>h3</code>……</li>
+  <li><strong>不在 <code>&lt;group&gt;</code> 里的字段不会自动显示标签</strong>，所以用 <code>&lt;label for="name"/&gt;</code> 显式加一个。</li>
+  <li><code>oe_inline</code> 让字段像行内元素一样跟着文字排版。</li>
+  <li><code>placeholder</code> 是输入框为空时显示的提示文字。</li>
+</ul>
+
+<div class="box ver">
+  <div class="t">&#8682; 表单没有「编辑模式」了</div>
+  <p>
+    书里用 <code>class="oe_edit_only"</code> / <code>oe_read_only</code> 让元素只在编辑 / 只读模式下出现（比如「By」只在只读时显示）。
+    Odoo 16 起表单<strong>始终处于可编辑状态</strong>（没有「编辑」按钮了，改了自动保存），这两个类已失去意义，直接去掉即可。
+  </p>
+</div>
+
+<h3>用 group 组织字段</h3>
+
+<p>
+  主要内容用 <code>&lt;group&gt;</code> 组织。一个 group 在画布上划出两列：字段放进去，第一列是标签，第二列是值，字段越多就往下堆。
+  常见的做法是一个外层 group 套两个内层 group，得到左右两栏：
+</p>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;group name="group_top"&gt;
+    &lt;group name="group_col1"&gt;
+        &lt;field name="request_date"/&gt;
+    &lt;/group&gt;
+    &lt;group name="group_col2"&gt;
+        &lt;field name="user_id"/&gt;
+        &lt;field name="close_date"/&gt;
+    &lt;/group&gt;
+&lt;/group&gt;
+</pre>
+</div>
+
+<p>
+  给 group 起 <code>name</code> 不是必须的，但推荐 —— 方便别的模块扩展。<code>&lt;group string="..."&gt;</code> 会给这一组加一个标题。
+  更细的布局控制：
+</p>
+<ul>
+  <li><code>&lt;separator string="..."/&gt;</code>：加一条带标题的分隔线。</li>
+  <li><code>&lt;newline/&gt;</code>：强制换行，下一个元素从新一行的第一列开始。</li>
+  <li><code>col</code>（用在 group 上）：这个 group 有几列，默认 2。最好用偶数，因为一个字段默认占两列（标签 + 值）。</li>
+  <li><code>colspan</code>（用在 group 里的元素上）：这个元素占几列。</li>
+</ul>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 220" role="img" aria-label="col=4 的 group 网格，字段从左到右、从上到下排列">
+  <text class="ttl" x="20" y="24">&lt;group col="4"&gt;：四列网格，字段从左到右、再从上到下填</text>
+  <rect class="bx" x="20" y="40" width="720" height="150" rx="8"/>
+  <rect class="bx-b" x="30" y="52" width="170" height="56" rx="6"/><text class="sm on-b" x="115" y="76" text-anchor="middle">Request Date 标签</text><text class="sm" x="115" y="94" text-anchor="middle">第 1 列</text>
+  <rect class="bx-b" x="210" y="52" width="170" height="56" rx="6"/><text class="sm on-b" x="295" y="76" text-anchor="middle">Request Date 值</text><text class="sm" x="295" y="94" text-anchor="middle">第 2 列</text>
+  <rect class="bx-g" x="390" y="52" width="170" height="56" rx="6"/><text class="sm on-g" x="475" y="76" text-anchor="middle">Librarian 标签</text><text class="sm" x="475" y="94" text-anchor="middle">第 3 列</text>
+  <rect class="bx-g" x="570" y="52" width="160" height="56" rx="6"/><text class="sm on-g" x="650" y="76" text-anchor="middle">Librarian 值</text><text class="sm" x="650" y="94" text-anchor="middle">第 4 列</text>
+  <rect class="bx-d" x="30" y="122" width="350" height="56" rx="6"/><text class="sm" x="205" y="146" text-anchor="middle">&lt;span colspan="2"/&gt;</text><text class="sm" x="205" y="164" text-anchor="middle">占位，空出两列</text>
+  <rect class="bx-a" x="390" y="122" width="170" height="56" rx="6"/><text class="sm on-a" x="475" y="154" text-anchor="middle">Close Date 标签</text>
+  <rect class="bx-a" x="570" y="122" width="160" height="56" rx="6"/><text class="sm on-a" x="650" y="154" text-anchor="middle">Close Date 值</text>
+  <text class="sm" x="20" y="210">每个字段占 2 列（标签 + 值）；用 colspan 控制占位，就能把 Close Date 放到右下角</text>
+</svg>
+<figcaption>图 10-4　<code>col</code> 和 <code>colspan</code> 的效果</figcaption>
+</figure>
+
+<div class="code" data-lang="xml" data-file="与上图对应的写法">
+<pre>
+&lt;group name="group_top" col="4"&gt;
+    &lt;field name="request_date"/&gt;
+    &lt;field name="user_id"/&gt;
+    &lt;span colspan="2"/&gt;
+    &lt;field name="close_date"/&gt;
+&lt;/group&gt;
+</pre>
+</div>
+
+<h3>页签</h3>
+
+<p>
+  <code>&lt;notebook&gt;</code> 是带多个页签的容器，用来把不常用的数据收起来，或者按主题组织大量字段。借书单的第一个页签放借的书：
+</p>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;notebook&gt;
+    &lt;page name="page_lines" string="Borrowed Books"&gt;
+        &lt;field name="line_ids"&gt;
+            &lt;list editable="bottom"&gt;
+                &lt;field name="book_id"/&gt;
+                &lt;field name="note"/&gt;
+            &lt;/list&gt;
+            &lt;form&gt;
+                &lt;group&gt;
+                    &lt;field name="book_id"/&gt;
+                    &lt;field name="note"/&gt;
+                &lt;/group&gt;
+            &lt;/form&gt;
+        &lt;/field&gt;
+    &lt;/page&gt;
+&lt;/notebook&gt;
+</pre>
+</div>
+
+<ul>
+  <li>多加几个 <code>&lt;page&gt;</code> 就是多个页签。<code>string</code> 是页签标题；<code>invisible</code> 可以按条件隐藏整个页签。</li>
+  <li>页签里和 sheet 一样，<strong>不在 group 里的字段不显示标签</strong>。这里一对多字段占满整页，不需要标签。</li>
+  <li>关系字段内部可以内嵌视图定义：明细列表用内嵌的 <code>&lt;list&gt;</code>；如果去掉 <code>editable</code>，点击一行会弹出用内嵌 <code>&lt;form&gt;</code> 渲染的对话框。</li>
+</ul>
+
+<h2 id="fields">字段</h2>
+
+<p>在表单和列表里，<code>&lt;field&gt;</code> 元素用组件（widget）显示和编辑模型字段的数据。它的许多属性默认取自模型定义，但可以在视图里覆盖：</p>
+
+<div class="tw"><table>
+  <tr><th>属性</th><th>作用</th></tr>
+  <tr><td><code>name</code></td><td>模型里的字段名</td></tr>
+  <tr><td><code>string</code></td><td>标签文字，覆盖模型定义</td></tr>
+  <tr><td><code>help</code></td><td>悬停提示</td></tr>
+  <tr><td><code>placeholder</code></td><td>输入框为空时的提示文字</td></tr>
+  <tr><td><code>widget</code></td><td>使用指定的组件显示</td></tr>
+  <tr><td><code>options</code></td><td>传给组件的选项，JSON 风格的字典</td></tr>
+  <tr><td><code>class</code></td><td>CSS 类</td></tr>
+  <tr><td><code>nolabel="1"</code></td><td>在 group 里不显示自动标签，常和单独的 <code>&lt;label for&gt;</code> 配合</td></tr>
+  <tr><td><code>invisible</code> / <code>readonly</code> / <code>required</code></td><td>隐藏 / 只读 / 必填。可以是 <code>1</code>，也可以是条件表达式（见「动态属性」一节）</td></tr>
+  <tr><td><code>password="True"</code></td><td>文本字段按密码框显示</td></tr>
+  <tr><td><code>filename</code></td><td>二进制字段：存放上传文件名的那个字段</td></tr>
+  <tr><td><code>context</code> / <code>domain</code></td><td>关系字段：新建关联记录时的默认值 / 可选记录的范围</td></tr>
+</table></div>
+
+<div class="box note">
+  <div class="t">&#9432; 隐藏字段不能被写入</div>
+  <p><code>invisible</code> 的字段数据仍然会加载到表单上，但用户无法修改它。</p>
+</div>
+
+<h3>常用组件</h3>
+
+<p>每种字段类型都有默认组件，另外还有很多可选的。最常用的：</p>
+
+<div class="tw"><table>
+  <tr><th>字段类型</th><th>组件</th><th>效果</th></tr>
+  <tr><td rowspan="3">文本</td><td><code>email</code> / <code>phone</code> / <code>url</code></td><td>可点击的邮件 / 电话 / 网址链接</td></tr>
+  <tr><td><code>html</code></td><td>所见即所得的富文本编辑器</td></tr>
+  <tr><td><code>CopyClipboardChar</code></td><td>旁边带「复制」按钮（注意这个组件名是驼峰式的）</td></tr>
+  <tr><td rowspan="5">数值</td><td><code>handle</code></td><td>列表里的拖动手柄，用于 <code>sequence</code> 字段</td></tr>
+  <tr><td><code>float_time</code></td><td>浮点数显示为 时:分</td></tr>
+  <tr><td><code>monetary</code></td><td>按币种格式显示金额，默认找 <code>currency_id</code> 字段，可用 <code>options="{'currency_field': '...'}"</code> 指定</td></tr>
+  <tr><td><code>progressbar</code></td><td>进度条</td></tr>
+  <tr><td><code>percentage</code> / <code>percentpie</code></td><td>百分比 / 百分比饼图</td></tr>
+  <tr><td rowspan="6">关系 / 选择</td><td><code>many2many_tags</code></td><td>以标签形式显示</td></tr>
+  <tr><td><code>many2many_checkboxes</code></td><td>可选项列成一组复选框</td></tr>
+  <tr><td><code>many2one_avatar_user</code></td><td>多对一显示为用户头像</td></tr>
+  <tr><td><code>radio</code> / <code>badge</code></td><td>选择字段显示为单选按钮 / 徽章</td></tr>
+  <tr><td><code>priority</code></td><td>可点击的星星（选择字段，值通常是数字）</td></tr>
+  <tr><td><code>state_selection</code></td><td>红绿灯样式的状态按钮，常用于看板状态</td></tr>
+  <tr><td rowspan="2">布尔</td><td><code>boolean_toggle</code></td><td>开关样式</td></tr>
+  <tr><td><code>boolean_favorite</code></td><td>星标收藏样式</td></tr>
+  <tr><td rowspan="2">二进制</td><td><code>image</code></td><td>显示图片</td></tr>
+  <tr><td><code>pdf_viewer</code></td><td>PDF 预览</td></tr>
+</table></div>
+
+<p>关系字段默认允许打开关联记录、在下拉框里直接新建（快速创建）。可以用选项关掉：</p>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;field name="member_id" options="{'no_open': True, 'no_create': True}"/&gt;
+</pre>
+</div>
+
+<p>
+  <code>domain</code> 可以引用表单上的其他字段，实现「选了 A 之后，B 的可选范围随之变化」。
+  对多字段还可以用 <code>mode</code> 属性指定用哪种视图展示（默认 <code>list</code>，也可以是 <code>kanban</code> 等）。
+</p>
+
+<div class="box tip">
+  <div class="t">&#128161; 找组件的地方</div>
+  <p>
+    所有可用组件都在源码 <code>addons/web/static/src/views/fields/</code> 下，每个子目录一个。其他应用也会注册自己的组件（比如 <code>mail</code> 的活动组件）。
+    开发者模式下悬停在字段上，提示里会显示它当前用的是哪个组件 —— 看到一个喜欢的效果，这样就能知道该怎么写。
+  </p>
+</div>
+
+<h2 id="buttons">按钮</h2>
+
+<p>按钮让用户触发动作：打开另一个视图，或者执行服务器上的业务逻辑。它可以放在页眉里，也可以放在表单和列表的任何地方。</p>
+
+<div class="tw"><table>
+  <tr><th>属性</th><th>作用</th></tr>
+  <tr><td><code>string</code></td><td>按钮文字（有图标时作为提示文字）</td></tr>
+  <tr><td><code>type</code></td><td><code>object</code>（调用模型方法）或 <code>action</code>（执行一个动作）</td></tr>
+  <tr><td><code>name</code></td><td>方法名，或动作的数据库 ID。用 <code>%(xml_id)d</code> 可以在加载视图时把 XML ID 翻译成数据库 ID</td></tr>
+  <tr><td><code>args</code></td><td><code>type="object"</code> 时传给方法的额外参数</td></tr>
+  <tr><td><code>context</code></td><td>设置上下文，被调用的方法或打开的视图都能读到</td></tr>
+  <tr><td><code>confirm</code></td><td>点击后、执行前弹出的确认提示</td></tr>
+  <tr><td><code>special="cancel"</code></td><td>向导里的「取消」按钮：关闭对话框，什么都不做</td></tr>
+  <tr><td><code>icon</code></td><td>图标名，如 <code>icon="book"</code></td></tr>
+  <tr><td><code>class</code></td><td>样式，如 <code>oe_highlight</code>、<code>btn-primary</code>、<code>btn-secondary</code>、<code>oe_link</code></td></tr>
+</table></div>
+
+<div class="box ver">
+  <div class="t">&#8682; 图标换成了 Material Symbols</div>
+  <p>
+    书里的图标来自 Font Awesome：<code>icon="fa-book"</code>、<code>&lt;i class="fa fa-calendar"/&gt;</code>。
+    Odoo 19.5 起，界面图标统一换成了 Google 的 <a href="https://fonts.google.com/icons">Material Symbols</a>，按钮的 <code>icon</code> 属性直接写图标名：
+    <code>icon="book"</code>、<code>icon="calendar_month"</code>；HTML 里写成 <code>&lt;i class="oi" data-icon="book"/&gt;</code>。
+    旧的 <code>fa-</code> 名字不会再显示。可以在 Material Symbols 网站上按英文关键词搜图标名；<code>odoo-bin upgrade_code</code> 带有自动转换脚本。
+  </p>
+</div>
+
+<h3>智能按钮</h3>
+
+<p>
+  很多单据表单右上角有一排<strong>智能按钮</strong>：小方块，显示一个统计数字，点击后跳到相关记录。
+  比如在借书单上显示「这位会员还有几张未还的借书单」，点击打开它们的列表。
+</p>
+
+<p>先需要一个计算字段提供统计数字。直观的写法是在循环里对每条记录做一次计数查询：</p>
+
+<div class="code" data-lang="py">
+<pre>
+    count_checkouts = fields.Integer(compute="_compute_count_checkouts")
+
+    def _compute_count_checkouts(self):
+        for checkout in self:
+            domain = [
+                ("member_id", "=", checkout.member_id.id),
+                ("state", "not in", ["done", "cancel"]),
+            ]
+            checkout.count_checkouts = self.search_count(domain)
+</pre>
+</div>
+
+<div class="box warn">
+  <div class="t">&#9888; 别在循环里查数据库</div>
+  <p>
+    上面的写法违反了一个性能原则：在列表里显示 80 条借书单，就会执行 80 次查询。正确的做法是在循环<strong>之前</strong>一次性查出所有需要的数据，循环里只做查表：
+  </p>
+</div>
+
+<div class="code" data-lang="py" data-file="library_checkout/models/library_checkout.py（片段）">
+<pre>
+    def _compute_count_checkouts(self):
+        domain = [
+            ("member_id", "in", self.member_id.ids),
+            ("state", "not in", ["done", "cancel"]),
+        ]
+        # _read_group 返回 [(会员记录, 数量), ...]，转成字典便于查找
+        counts = dict(self._read_group(domain, ["member_id"], ["__count"]))
+        for checkout in self:
+            checkout.count_checkouts = counts.get(checkout.member_id, 0)
+</pre>
+</div>
+
+<p>
+  <code>self.member_id</code> 对多条记录调用时，返回所有不重复的会员组成的记录集。<code>_read_group</code>（第 7 章）一次查询得到每位会员的数量。
+  字典的键是会员记录本身，所以直接用 <code>checkout.member_id</code> 查找。
+</p>
+
+<p>然后在按钮盒里放智能按钮：</p>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;div class="oe_button_box" name="button_box"&gt;
+    &lt;button type="action"
+            name="%(action_library_checkout)d"
+            class="oe_stat_button"
+            icon="book"
+            domain="[('member_id', '=', member_id)]"
+            context="{'default_member_id': member_id}"&gt;
+        &lt;field name="count_checkouts" string="Checkouts" widget="statinfo"/&gt;
+    &lt;/button&gt;
+&lt;/div&gt;
+</pre>
+</div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 200" role="img" aria-label="智能按钮的组成：图标、统计字段、点击执行的动作">
+  <rect class="bx-g" x="40" y="40" width="200" height="90" rx="10"/>
+  <text class="ttl on-g" x="80" y="94" style="font-size:26px">📖</text>
+  <text class="ttl" x="160" y="80" text-anchor="middle" style="font-size:22px">3</text>
+  <text class="lbl" x="160" y="106" text-anchor="middle">Checkouts</text>
+
+  <path class="ln-d" d="M90 132 V170"/><text class="sm" x="90" y="186" text-anchor="middle">icon="book"</text>
+  <path class="ln-d" d="M175 132 V150"/><text class="sm" x="210" y="164" text-anchor="middle">statinfo 组件：值 + string</text>
+
+  <rect class="bx-a" x="320" y="30" width="420" height="120" rx="10"/>
+  <text class="ttl on-a" x="336" y="54">点击 → type="action"</text>
+  <text class="sm mono" x="336" y="80">name="%(action_library_checkout)d"　打开借书单列表</text>
+  <text class="sm mono" x="336" y="102">domain="[('member_id','=',member_id)]"  只看这位会员</text>
+  <text class="sm mono" x="336" y="124">context="{'default_member_id': member_id}" 新建时默认</text>
+  <path class="ln-a" d="M242 85 H316" marker-end="url(#ar-a)"/>
+</svg>
+<figcaption>图 10-5　智能按钮 = 一个装着统计字段的动作按钮</figcaption>
+</figure>
+
+<ul>
+  <li><code>class="oe_stat_button"</code> 让按钮显示为方块样式；<code>icon</code> 设置图标。</li>
+  <li>按钮是一个<strong>容器</strong>，里面放一个用 <code>statinfo</code> 组件的统计字段，字段的 <code>string</code> 作为按钮上的文字。</li>
+  <li><code>type="action"</code> 执行窗口动作，<code>%(action_library_checkout)d</code> 把 XML ID 转成动作的数据库 ID。</li>
+  <li><code>domain</code> 只显示相关记录；<code>context</code> 让在打开的列表里新建的记录自动填上当前会员。<code>help</code> 属性可以加悬停提示。</li>
+</ul>
+
+<h2 id="dynamic">动态视图元素</h2>
+
+<h3>onchange 与计算字段</h3>
+
+<p>
+  用户在表单上修改数据时，onchange 机制会把修改发给服务器，执行 <code>@api.onchange</code> 方法，并<strong>自动重算</strong>相关的计算字段，
+  结果立即反映到表单上（第 8 章）。这一切不需要在视图里写任何东西。
+</p>
+
+<h3>条件属性：invisible、readonly、required</h3>
+
+<p>
+  视图元素的 <code>invisible</code>、<code>readonly</code>、<code>required</code> 属性可以是一个<strong>条件表达式</strong>，根据记录当前的值动态求值：
+</p>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;!-- 只有已归还的借书单才显示归还日期 --&gt;
+&lt;field name="close_date" invisible="state != 'done'"/&gt;
+
+&lt;!-- 已借出之后，会员不能再改 --&gt;
+&lt;field name="member_id" readonly="state in ('open', 'done')"/&gt;
+
+&lt;!-- 已取消时备注必填 --&gt;
+&lt;field name="note" required="state == 'cancel'"/&gt;
+
+&lt;!-- 用于任何元素：页签、分组、按钮…… --&gt;
+&lt;page name="page_admin" string="Admin" invisible="not user_id"/&gt;
+
+&lt;!-- 也可以引用父记录（在一对多的明细行里）和上下文 --&gt;
+&lt;field name="note" readonly="parent.state == 'done'"/&gt;
+</pre>
+</div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 200" role="img" aria-label="条件属性根据记录当前值在浏览器中实时求值">
+  <rect class="bx-b" x="20" y="50" width="200" height="100" rx="10"/>
+  <text class="ttl on-b" x="120" y="76" text-anchor="middle">记录当前的值</text>
+  <text class="sm mono" x="36" y="102">state = "open"</text>
+  <text class="sm mono" x="36" y="122">user_id = 2</text>
+  <text class="sm mono" x="36" y="142">close_date = False</text>
+
+  <rect class="bx-p" x="280" y="30" width="230" height="140" rx="10"/>
+  <text class="ttl on-p" x="395" y="54" text-anchor="middle">浏览器中实时求值</text>
+  <text class="sm mono" x="296" y="82">state != 'done'  → True</text>
+  <text class="sm mono" x="296" y="106">state in (…) → True</text>
+  <text class="sm mono" x="296" y="130">state == 'cancel' → False</text>
+  <text class="sm" x="296" y="158">值一变，立即重新求值</text>
+
+  <rect class="bx-g" x="570" y="30" width="170" height="140" rx="10"/>
+  <text class="ttl on-g" x="655" y="54" text-anchor="middle">界面</text>
+  <text class="sm" x="586" y="82">归还日期：隐藏</text>
+  <text class="sm" x="586" y="106">会员：只读</text>
+  <text class="sm" x="586" y="130">备注：可选填</text>
+  <path class="ln-b" d="M222 100 H276" marker-end="url(#ar-b)"/>
+  <path class="ln-p" d="M512 100 H566" marker-end="url(#ar-p)"/>
+</svg>
+<figcaption>图 10-6　条件属性的求值过程</figcaption>
+</figure>
+
+<p>表达式里可以使用：</p>
+<ul>
+  <li>当前记录的任意字段名（字段不必出现在视图里，会自动加载）</li>
+  <li><code>parent</code>：在一对多内嵌视图里引用父记录</li>
+  <li><code>context</code>、<code>uid</code>（当前用户 ID）、<code>context_today()</code> 等</li>
+  <li>Python 风格的运算：<code>==</code>、<code>!=</code>、<code>in</code>、<code>not</code>、<code>and</code>、<code>or</code></li>
+</ul>
+
+<p>另外，任何元素都可以用 <code>groups</code> 属性，只对指定用户组的成员显示：<code>groups="library_app.library_group_manager"</code>。</p>
+
+<div class="box note">
+  <div class="t">&#9432; 界面限制不是安全措施</div>
+  <p>
+    <code>readonly</code>、<code>invisible</code> 只影响界面。懂技术的用户依然可以通过外部 API 写入这些字段。
+    真正需要禁止的事情，要用访问规则、约束或在 <code>write()</code> 里检查来保证。（字段定义上的 <code>groups</code> 属性是例外，它会在服务端限制访问。）
+  </p>
+</div>
+
+<h2 id="list">列表视图</h2>
+
+<p>列表视图把记录显示为行、字段显示为列，默认只读，也可以设为可编辑。上面讲的字段和按钮属性在列表里同样适用。</p>
+
+<div class="code" data-lang="xml" data-file="library_checkout/views/checkout_view.xml（列表）">
+<pre>
+&lt;record id="view_list_checkout" model="ir.ui.view"&gt;
+    &lt;field name="name"&gt;Checkout List&lt;/field&gt;
+    &lt;field name="model"&gt;library.checkout&lt;/field&gt;
+    &lt;field name="arch" type="xml"&gt;
+        &lt;list decoration-muted="state in ('done', 'cancel')"
+              decoration-bf="state == 'open'"&gt;
+            &lt;header&gt;
+                &lt;button type="action"
+                        name="%(action_checkout_message)d"
+                        string="Send Messages"/&gt;
+            &lt;/header&gt;
+            &lt;field name="name"/&gt;
+            &lt;field name="request_date"/&gt;
+            &lt;field name="member_id"/&gt;
+            &lt;field name="user_id" optional="hide" widget="many2one_avatar_user"/&gt;
+            &lt;field name="stage_id"/&gt;
+            &lt;field name="num_books" sum="Total Books"/&gt;
+        &lt;/list&gt;
+    &lt;/field&gt;
+&lt;/record&gt;
+</pre>
+</div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 260" role="img" aria-label="列表视图的组成：页眉按钮、可选列、行装饰、列汇总">
+  <rect class="bx" x="20" y="20" width="720" height="220" rx="10"/>
+  <rect class="bx-d" x="20" y="20" width="720" height="36" rx="10"/>
+  <rect class="bx-a" x="36" y="27" width="130" height="22" rx="4"/><text class="sm on-a" x="101" y="43" text-anchor="middle">Send Messages</text>
+  <text class="sm" x="180" y="43">← &lt;header&gt; 按钮：选中记录后出现</text>
+  <text class="sm mono" x="36" y="80">☐ Title        Request Date  Member     Stage      Books   ⋮</text>
+  <text class="sm" x="560" y="80">⋮ = 可选列开关（optional）</text>
+  <path class="ln" d="M30 88 H730"/>
+  <text class="ttl mono" x="36" y="112">☐ 暑期书单      2026-10-01    张三       Borrowed   3</text>
+  <text class="sm mono" x="36" y="138">☐ 课程参考      2026-10-08    李四       Draft      2</text>
+  <text class="sm mono" x="36" y="164" style="fill:var(--fg-faint)">☐ 旧借阅        2026-09-02    王五       Completed  1</text>
+  <path class="ln" d="M30 178 H730"/>
+  <text class="ttl mono" x="36" y="204">                                                    6</text>
+  <text class="sm on-p" x="590" y="112">← decoration-bf：加粗</text>
+  <text class="sm on-p" x="590" y="164">← decoration-muted：变灰</text>
+  <text class="sm on-a" x="460" y="228">↑ sum：列汇总（分组时也有小计）</text>
+</svg>
+<figcaption>图 10-7　列表视图的常用功能</figcaption>
+</figure>
+
+<h3>页眉按钮</h3>
+<p>
+  列表也可以有 <code>&lt;header&gt;</code>，放作用于选中记录的按钮，比藏在「操作」菜单里更显眼。按钮只在有记录被选中时出现。
+</p>
+
+<h3>行装饰</h3>
+
+<p>根据条件表达式改变整行的颜色或字体：</p>
+
+<div class="tw"><table>
+  <tr><th>属性</th><th>效果</th><th>属性</th><th>效果</th></tr>
+  <tr><td><code>decoration-bf</code></td><td>加粗</td><td><code>decoration-it</code></td><td>斜体</td></tr>
+  <tr><td><code>decoration-muted</code></td><td>灰色</td><td><code>decoration-primary</code></td><td>主题色</td></tr>
+  <tr><td><code>decoration-info</code></td><td>蓝色</td><td><code>decoration-success</code></td><td>绿色</td></tr>
+  <tr><td><code>decoration-warning</code></td><td>黄色</td><td><code>decoration-danger</code></td><td>红色</td></tr>
+</table></div>
+
+<p>这些名字来自 Bootstrap 的颜色体系。装饰属性也可以用在单个 <code>&lt;field&gt;</code> 上，只改变那一个单元格。</p>
+
+<h3>列汇总</h3>
+
+<p>
+  数值字段可以在列底部显示汇总：<code>sum</code>、<code>avg</code>、<code>min</code>、<code>max</code>，属性值是汇总的说明文字。
+  例子里的 <code>num_books</code> 是第 8 章练习里的计算字段：
+</p>
+
+<div class="code" data-lang="py">
+<pre>
+    num_books = fields.Integer(compute="_compute_num_books", store=True)
+
+    @api.depends("line_ids")
+    def _compute_num_books(self):
+        for checkout in self:
+            checkout.num_books = len(checkout.line_ids)
+</pre>
+</div>
+
+<p>分组小计只对<strong>存储</strong>的字段有效，所以加了 <code>store=True</code>。后面的透视表和图表视图也需要它是存储字段。</p>
+
+<h3>其他列表属性</h3>
+
+<div class="tw"><table>
+  <tr><th>属性</th><th>作用</th></tr>
+  <tr><td><code>default_order</code></td><td>默认排序，如 <code>default_order="request_date desc"</code></td></tr>
+  <tr><td><code>create</code> / <code>edit</code> / <code>delete</code></td><td>设为 <code>false</code> 时禁用相应操作</td></tr>
+  <tr><td><code>editable="top|bottom"</code></td><td>在列表里直接编辑，新行加在顶部 / 底部</td></tr>
+  <tr><td><code>multi_edit="1"</code></td><td>选中多行后可以一次修改它们的同一个字段</td></tr>
+  <tr><td><code>optional="show|hide"</code>（用在字段上）</td><td>用户可以在列表右上角的 ⋮ 菜单里自己开关这一列，默认显示 / 隐藏</td></tr>
+  <tr><td><code>column_invisible</code>（用在字段上）</td><td>按条件隐藏<strong>整列</strong>（<code>invisible</code> 只隐藏单元格）。条件通常基于 <code>parent</code> 或上下文</td></tr>
+  <tr><td><code>sample="1"</code></td><td>没有数据时显示示例数据，让空白页面不那么空</td></tr>
+</table></div>
+
+<h2 id="search">搜索视图</h2>
+
+<p>
+  视图右上方的搜索框，以及它下面的「筛选」「分组」「收藏」，都由<strong>搜索视图</strong>配置。开发者模式下，调试菜单 → <strong>SearchView</strong> 可以查看当前的搜索视图。
+</p>
+
+<div class="code" data-lang="xml" data-file="library_checkout/views/checkout_view.xml（搜索）">
+<pre>
+&lt;record id="view_filter_checkout" model="ir.ui.view"&gt;
+    &lt;field name="model"&gt;library.checkout&lt;/field&gt;
+    &lt;field name="arch" type="xml"&gt;
+        &lt;search&gt;
+            &lt;field name="name"/&gt;
+            &lt;field name="member_id"/&gt;
+            &lt;field name="user_id"/&gt;
+
+            &lt;filter name="filter_not_done" string="To Return"
+                    domain="[('state', '=', 'open')]"/&gt;
+            &lt;filter name="filter_my_checkouts" string="My Checkouts"
+                    domain="[('user_id', '=', uid)]"/&gt;
+            &lt;separator/&gt;
+            &lt;filter name="filter_request_date" string="Request Date"
+                    date="request_date"/&gt;
+
+            &lt;filter name="group_member" string="By Member"
+                    context="{'group_by': 'member_id'}"/&gt;
+
+            &lt;searchpanel&gt;
+                &lt;field name="member_id" enable_counters="1"/&gt;
+                &lt;field name="stage_id" select="multi"/&gt;
+            &lt;/searchpanel&gt;
+        &lt;/search&gt;
+    &lt;/field&gt;
+&lt;/record&gt;
+</pre>
+</div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 300" role="img" aria-label="搜索视图元素与界面的对应关系">
+  <rect class="bx-p" x="20" y="20" width="170" height="260" rx="10"/>
+  <text class="ttl on-p" x="105" y="44" text-anchor="middle">&lt;searchpanel&gt;</text>
+  <text class="sm" x="36" y="72">Member</text>
+  <text class="sm" x="48" y="92">张三　　3</text>
+  <text class="sm" x="48" y="112">李四　　1</text>
+  <text class="sm" x="36" y="144">Stage</text>
+  <text class="sm" x="48" y="164">☑ Draft</text>
+  <text class="sm" x="48" y="184">☑ Borrowed</text>
+  <text class="sm" x="48" y="204">☐ Completed</text>
+  <text class="sm" x="36" y="236">左侧导航面板</text>
+  <text class="sm" x="36" y="254">点一下即筛选</text>
+
+  <rect class="bx-a" x="220" y="20" width="520" height="40" rx="8"/>
+  <text class="lbl" x="236" y="45">🔍 张│</text>
+  <rect class="bx" x="236" y="62" width="300" height="80" rx="6"/>
+  <text class="sm" x="248" y="84">在 Title 中搜索：张</text>
+  <text class="sm" x="248" y="104">在 Member 中搜索：张</text>
+  <text class="sm" x="248" y="124">在 Librarian 中搜索：张</text>
+  <text class="sm on-a" x="560" y="96">← &lt;field&gt;：打字时的</text>
+  <text class="sm on-a" x="560" y="114">　搜索建议</text>
+
+  <rect class="bx-b" x="220" y="160" width="250" height="120" rx="8"/>
+  <text class="ttl on-b" x="236" y="182">筛选（&lt;filter domain&gt;）</text>
+  <text class="sm" x="236" y="206">To Return</text>
+  <text class="sm" x="236" y="224">My Checkouts</text>
+  <text class="sm" x="236" y="244">────── separator ──────</text>
+  <text class="sm" x="236" y="266">Request Date ▸ 按年 / 季 / 月</text>
+
+  <rect class="bx-g" x="490" y="160" width="250" height="120" rx="8"/>
+  <text class="ttl on-g" x="506" y="182">分组（&lt;filter context&gt;）</text>
+  <text class="sm" x="506" y="206">By Member</text>
+  <text class="sm" x="506" y="236">group_by 上下文键</text>
+  <text class="sm" x="506" y="256">指定按哪个字段分组</text>
+</svg>
+<figcaption>图 10-8　搜索视图的三类元素在界面上的位置</figcaption>
+</figure>
+
+<h3>&lt;field&gt;：搜索建议</h3>
+
+<p>用户在搜索框里打字时，会看到「在 xxx 中搜索」的建议，每个 <code>&lt;field&gt;</code> 对应一条。可用属性：</p>
+<ul>
+  <li><code>name</code>：要搜索的字段；<code>string</code>：显示的标签。</li>
+  <li><code>operator</code>：使用不同于默认的运算符（默认：数值用 <code>=</code>，其他用 <code>ilike</code>）。</li>
+  <li><code>filter_domain</code>：自定义搜索用的域，输入的文字用 <code>self</code> 引用。比如同时搜书名和 ISBN：<code>filter_domain="['|', ('name', 'ilike', self), ('isbn', 'ilike', self)]"</code>。</li>
+  <li><code>groups</code>：只对某些组开放。</li>
+</ul>
+
+<h3>&lt;filter&gt;：预定义的筛选和分组</h3>
+
+<ul>
+  <li><code>name</code>：标识符，用于扩展，或在动作上下文里用 <code>search_default_名字</code> 默认开启。强烈建议总是写上。</li>
+  <li><code>string</code>：显示的文字，必填。</li>
+  <li><code>domain</code>：筛选条件。可以用 <code>uid</code> 表示当前用户。</li>
+  <li><code>context</code>：通常用 <code>{'group_by': '字段'}</code> 定义一个分组选项（日期字段可写 <code>'request_date:month'</code>）。</li>
+  <li><code>date="日期字段"</code>：日期筛选，自动提供按年、季度、月选择的子菜单。</li>
+  <li><code>groups</code>：只对某些组显示。</li>
+</ul>
+
+<p>
+  筛选之间的组合规则：<strong>同一块里的筛选同时选中时是「或」</strong>，被 <code>&lt;separator/&gt;</code> 分开的不同块之间是「且」。
+  所以把互斥的选项放在一块（「已借出」或「已归还」），把正交的条件分开（「我的」且「本月的」）。
+</p>
+
+<div class="box ver">
+  <div class="t">&#8682; 日期筛选的范围属性被移除</div>
+  <p>
+    Odoo 20 不再解析日期筛选上的 <code>start_month</code>、<code>end_month</code>、<code>start_year</code>、<code>end_year</code> 属性（RNG 校验会直接拒绝它们），
+    只写 <code>&lt;filter name="..." date="request_date"/&gt;</code> 即可。
+  </p>
+</div>
+
+<h3>搜索面板</h3>
+
+<p>
+  <code>&lt;searchpanel&gt;</code> 在视图左侧显示一个导航面板，列出某个字段的所有取值，点击即按它筛选。默认在列表和看板视图中显示（可用 <code>view_types</code> 属性修改）。
+  面板里的 <code>&lt;field&gt;</code> 支持：
+</p>
+<ul>
+  <li><code>select="multi"</code>：显示复选框，可以多选（用于多对一和多对多字段）。</li>
+  <li><code>enable_counters="1"</code>：每个值旁边显示记录数。数据量大时注意性能。</li>
+  <li><code>icon</code>、<code>color</code>：图标和颜色。</li>
+  <li><code>limit</code>：最多显示多少个值，默认 200，0 表示不限。</li>
+  <li><code>string</code>、<code>groups</code>：标签和可见组。</li>
+</ul>
+
+<h2 id="other">其他视图类型</h2>
+
+<p>表单、列表、搜索是最基本的三种。社区版还提供这些视图类型：</p>
+
+<div class="cards">
+  <div class="card"><span class="ic">&#128203;</span><h4>kanban</h4><p>卡片，可以分列组成看板。第 11 章专门讲。</p></div>
+  <div class="card"><span class="ic">&#9200;</span><h4>activity</h4><p>计划活动的总览矩阵，需要 mail 模块。</p></div>
+  <div class="card"><span class="ic">&#128197;</span><h4>calendar</h4><p>按日 / 周 / 月 / 年显示在日历上。</p></div>
+  <div class="card"><span class="ic">&#128202;</span><h4>graph</h4><p>柱状图、折线图、饼图。</p></div>
+  <div class="card"><span class="ic">&#9638;</span><h4>pivot</h4><p>可交互的透视表（数据透视）。</p></div>
+  <div class="card"><span class="ic">&#128196;</span><h4>qweb</h4><p>QWeb 模板，用于报表、网页（不是 Web 客户端里的视图）。</p></div>
+</div>
+
+<p>
+  企业版还有甘特图（gantt）、地图（map）、网格（grid）、群组分析（cohort）等视图类型。
+  社区的 <a href="https://github.com/OCA/web">OCA/web</a> 仓库里也有不少额外的视图类型和组件，比如提供时间轴视图的 <code>web_timeline</code>，可以作为甘特图的社区版替代。
+</p>
+
+<p>别忘了：要让这些视图在菜单里可用，要把类型加进窗口动作的 <code>view_mode</code>。</p>
+
+<h3>活动视图</h3>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;record id="view_activity_checkout" model="ir.ui.view"&gt;
+    &lt;field name="model"&gt;library.checkout&lt;/field&gt;
+    &lt;field name="arch" type="xml"&gt;
+        &lt;activity string="Checkouts"&gt;
+            &lt;templates&gt;
+                &lt;div t-name="activity-box"&gt;
+                    &lt;field name="member_id" widget="many2one_avatar" class="me-2"/&gt;
+                    &lt;field name="name" display="full" class="o_text_block o_text_bold"/&gt;
+                &lt;/div&gt;
+            &lt;/templates&gt;
+        &lt;/activity&gt;
+    &lt;/field&gt;
+&lt;/record&gt;
+</pre>
+</div>
+
+<p>活动视图以「记录 × 活动类型」的矩阵展示所有计划活动，<code>&lt;templates&gt;</code> 里的 HTML 描述每一行左侧如何显示记录。没有定义时 Odoo 会自动生成一个。</p>
+
+<h3>日历视图</h3>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;record id="view_calendar_checkout" model="ir.ui.view"&gt;
+    &lt;field name="model"&gt;library.checkout&lt;/field&gt;
+    &lt;field name="arch" type="xml"&gt;
+        &lt;calendar date_start="request_date" color="user_id" mode="month"&gt;
+            &lt;field name="member_id"/&gt;
+            &lt;field name="stage_id"/&gt;
+        &lt;/calendar&gt;
+    &lt;/field&gt;
+&lt;/record&gt;
+</pre>
+</div>
+
+<div class="tw"><table>
+  <tr><th>属性</th><th>含义</th></tr>
+  <tr><td><code>date_start</code></td><td>开始日期字段（必填）</td></tr>
+  <tr><td><code>date_stop</code> / <code>date_delay</code></td><td>结束日期字段 / 持续时长（天）字段，二选一</td></tr>
+  <tr><td><code>all_day</code></td><td>表示「全天事件」的布尔字段</td></tr>
+  <tr><td><code>color</code></td><td>按哪个字段给条目着色，同一个值同一种颜色</td></tr>
+  <tr><td><code>mode</code> / <code>scales</code></td><td>默认显示方式（day / week / month / year）/ 可选的显示方式</td></tr>
+  <tr><td><code>event_open_popup</code></td><td>点击条目时以对话框打开表单</td></tr>
+  <tr><td><code>quick_create</code></td><td>是否允许点击空白处快速创建</td></tr>
+</table></div>
+
+<p>里面的 <code>&lt;field&gt;</code> 是每个条目上显示的信息；加上 <code>filters="1"</code> 的字段会在侧边栏提供按值筛选。</p>
+
+<h3>透视表和图表视图</h3>
+
+<div class="code" data-lang="xml">
+<pre>
+&lt;record id="view_pivot_checkout" model="ir.ui.view"&gt;
+    &lt;field name="model"&gt;library.checkout&lt;/field&gt;
+    &lt;field name="arch" type="xml"&gt;
+        &lt;pivot sample="1"&gt;
+            &lt;field name="stage_id" type="col"/&gt;
+            &lt;field name="member_id" type="row"/&gt;
+            &lt;field name="request_date" interval="week" type="row"/&gt;
+            &lt;field name="num_books" type="measure"/&gt;
+        &lt;/pivot&gt;
+    &lt;/field&gt;
+&lt;/record&gt;
+
+&lt;record id="view_graph_checkout" model="ir.ui.view"&gt;
+    &lt;field name="model"&gt;library.checkout&lt;/field&gt;
+    &lt;field name="arch" type="xml"&gt;
+        &lt;graph type="bar" stacked="True" sample="1"&gt;
+            &lt;field name="stage_id"/&gt;
+            &lt;field name="num_books" type="measure"/&gt;
+        &lt;/graph&gt;
+    &lt;/field&gt;
+&lt;/record&gt;
+</pre>
+</div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 240" role="img" aria-label="透视表中的行、列、度量字段，以及图表中的分组与度量">
+  <text class="ttl" x="20" y="24">pivot</text>
+  <rect class="bx" x="20" y="34" width="380" height="190" rx="8"/>
+  <rect class="bx-a" x="150" y="44" width="240" height="30" rx="4"/>
+  <text class="sm on-a" x="270" y="64" text-anchor="middle">type="col"：stage_id → 列</text>
+  <rect class="bx-b" x="30" y="84" width="110" height="130" rx="4"/>
+  <text class="sm on-b" x="85" y="110" text-anchor="middle">type="row"</text>
+  <text class="sm" x="85" y="132" text-anchor="middle">member_id</text>
+  <text class="sm" x="85" y="152" text-anchor="middle">└ 按周</text>
+  <rect class="bx-g" x="150" y="84" width="240" height="130" rx="4"/>
+  <text class="sm on-g" x="270" y="140" text-anchor="middle">type="measure"</text>
+  <text class="sm" x="270" y="160" text-anchor="middle">num_books 求和</text>
+
+  <text class="ttl" x="430" y="24">graph type="bar"</text>
+  <rect class="bx" x="430" y="34" width="310" height="190" rx="8"/>
+  <path class="ln" d="M460 200 H720"/>
+  <path class="ln" d="M460 200 V50"/>
+  <rect class="bx-a" x="490" y="120" width="40" height="80"/>
+  <rect class="bx-b" x="560" y="80" width="40" height="120"/>
+  <rect class="bx-g" x="630" y="150" width="40" height="50"/>
+  <text class="sm" x="510" y="216" text-anchor="middle">Draft</text>
+  <text class="sm" x="580" y="216" text-anchor="middle">Borrowed</text>
+  <text class="sm" x="650" y="216" text-anchor="middle">Done</text>
+  <text class="sm" x="470" y="64">num_books（measure）</text>
+</svg>
+<figcaption>图 10-9　透视表和图表都由「分组字段 + 度量字段」构成</figcaption>
+</figure>
+
+<ul>
+  <li><code>type</code>：<code>row</code>（默认，行分组）、<code>col</code>（列分组，仅透视表）、<code>measure</code>（度量，被汇总的值）。</li>
+  <li><code>interval</code>：日期字段的分组粒度，<code>day</code>、<code>week</code>、<code>month</code>、<code>quarter</code>、<code>year</code>。</li>
+  <li>图表的 <code>type</code> 可以是 <code>bar</code>（默认）、<code>line</code>、<code>pie</code>；柱状图加 <code>stacked="True"</code> 变成堆叠柱状图。</li>
+  <li>度量字段必须是<strong>存储</strong>的字段，所以 <code>num_books</code> 要 <code>store=True</code>。</li>
+</ul>
+
+<h2 id="summary">小结</h2>
+
+<ul>
+  <li>菜单是树，叶子菜单挂窗口动作；窗口动作决定模型、视图、域、上下文，<code>binding_model_id</code> 把它放进操作菜单。</li>
+  <li>单据式表单 = <code>&lt;header&gt;</code>（按钮 + 状态栏）+ <code>&lt;sheet&gt;</code>（按钮盒、标题、group、notebook）+ <code>&lt;chatter/&gt;</code>。</li>
+  <li>group 默认两列，嵌套 group 得到左右两栏；<code>col</code> / <code>colspan</code> 精细控制。</li>
+  <li>字段可以覆盖标签、组件和选项；按钮分 <code>object</code> 和 <code>action</code> 两类；智能按钮是装着 <code>statinfo</code> 字段的动作按钮。</li>
+  <li>Odoo 17+ 用条件表达式写 <code>invisible</code> / <code>readonly</code> / <code>required</code>，<code>attrs</code> 和 <code>states</code> 已移除；图标改用 Material Symbols 名称。</li>
+  <li>列表视图：页眉按钮、行装饰、列汇总、可选列、行内编辑。</li>
+  <li>搜索视图：<code>&lt;field&gt;</code> 提供搜索建议，<code>&lt;filter&gt;</code> 提供筛选和分组，<code>&lt;searchpanel&gt;</code> 提供左侧导航。</li>
+  <li>活动、日历、透视表、图表视图让同一份数据有更多看法；度量字段需要存储。</li>
+</ul>
+
+<div class="exercise">
+  <h3>动手练习</h3>
+  <ol>
+    <li>把借书单表单按本章完整改造，并确认「Return Books」按钮只在「已借出」时出现。</li>
+    <li>给借书单加一个「Cancel」按钮，只在「草稿」或「已借出」时显示，点击后移到取消阶段，并加上 <code>confirm</code> 确认提示。</li>
+    <li>在会员表单上加一个智能按钮，显示这位会员的借书单数量，点击打开列表。</li>
+    <li>给书的列表视图加上可选列（出版社默认隐藏），并让已归档的书显示为灰色。</li>
+    <li>给书的搜索视图加一个按出版年份的日期筛选，和一个按出版社分组的选项，再加一个按分类的搜索面板。</li>
+    <li>把动作的默认视图改成日历，看看借书单在日历上的分布；再在透视表里看每位会员每周借了多少本书。</li>
+  </ol>
+</div>
+<div id="pager"></div>
+</main>
+</div>
+<script src="assets/site.js"></script>
+</body>
+</html>

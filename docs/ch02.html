@@ -1,0 +1,750 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 2 章 · 准备开发环境 — Odoo 20 开发入门</title>
+<meta name="description" content="在 Ubuntu 24.04（或 Windows 的 WSL）上从源码安装 Odoo 20，学会管理数据库、配置文件、日志、插件路径和开发选项。">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-chapter="2">
+<div id="app">
+<aside id="sidebar"></aside>
+<main>
+<span class="chapter-eyebrow">第 2 章</span>
+<h1>准备开发环境</h1>
+<p class="lede">
+  第 1 章是在浏览器里「点」，从这一章开始我们要写代码了。写代码之前，得先有一个属于自己的 Odoo：
+  从源码安装、能随时重启、能同时跑好几个数据库、能看懂日志。这一章就把这套工作台搭好。
+</p>
+
+<div class="goals">
+  <h4>本章目标</h4>
+  <ul>
+    <li>准备一台 Ubuntu 主机（真机、云服务器或 Windows 上的 WSL 都行）</li>
+    <li>在 Python 虚拟环境里从 GitHub 源码安装 Odoo 20</li>
+    <li>用命令行创建、复制、删除数据库</li>
+    <li>理解配置文件、端口、数据库过滤、日志这些常用服务器选项</li>
+    <li>把第三方模块（包括本书代码）加入插件路径，并打开开发者选项 <code>--dev</code></li>
+  </ul>
+</div>
+
+<div id="chapter-toc"></div>
+
+<h2 id="host">准备一台 Ubuntu 主机</h2>
+
+<p>
+  Odoo 官方推荐、也最常用的运行平台是 Debian / Ubuntu：Odoo 自己的 SaaS 就跑在 Debian 系统上，社区里绝大多数经验也基于它。
+  遇到问题时，用 Ubuntu 最容易找到答案。
+</p>
+
+<div class="box ver">
+  <div class="t">&#8682; 环境要求升级了</div>
+  <p>
+    书里用的是 Ubuntu 20.04 + Python 3.6+。Odoo 20 的源码里写明了最低要求：<strong>Python 3.12</strong>、<strong>PostgreSQL 16</strong>，
+    官方支持的发行版是 Ubuntu 24.04 LTS。本章所有命令都以 <strong>Ubuntu 24.04</strong> 为准，它自带的正好是 Python 3.12 和 PostgreSQL 16。
+  </p>
+</div>
+
+<p>你可以选择：</p>
+<ul>
+  <li><strong>已有的 Ubuntu 24.04</strong>：桌面版、服务器版、云主机都行，不需要图形界面，只要终端。先运行 <code>sudo apt list</code> 确认自己有管理员权限。</li>
+  <li><strong>Windows 10/11 用 WSL</strong>：在 Windows 里跑一个真正的 Ubuntu，下面详述。</li>
+  <li><strong>虚拟机</strong>：用 VirtualBox 等软件装一个 Ubuntu Server。</li>
+</ul>
+
+<div class="box note">
+  <div class="t">&#9432; 不想自己管服务器？</div>
+  <p>
+    Odoo 官方有一个托管平台 <strong>Odoo.sh</strong>，基于 Git 分支提供开发、测试、生产环境和邮件等配套服务。
+    它适合正式项目，但学习阶段在本机装一个更直观，我们也更能看清楚每一步在做什么。
+  </p>
+</div>
+
+<h3>在 Windows 上安装 WSL</h3>
+
+<p>
+  WSL（Windows Subsystem for Linux）让你在 Windows 里运行一个完整的 Linux。以管理员身份打开 PowerShell，执行：
+</p>
+
+<div class="code" data-lang="bash" data-file="Windows PowerShell（管理员）">
+<pre>
+wsl --install -d Ubuntu-24.04
+</pre>
+</div>
+
+<p>
+  重启后打开开始菜单里的「Ubuntu」，按提示设置 Linux 用户名和密码。记住这个密码，以后执行 <code>sudo</code> 都要用它。
+  在 Windows 资源管理器里输入 <code>\\wsl$</code> 可以直接访问 Linux 里的文件。
+</p>
+
+<h2 id="install">从源码安装 Odoo 20</h2>
+
+<p>为什么从源码装，而不是用安装包？</p>
+<ul>
+  <li>开发时你会频繁读 Odoo 自己的源码 —— 它是最好的文档。源码就在手边，随时 <code>grep</code>。</li>
+  <li>用 Git 管理，切换版本、更新到最新修复都只需要一条命令。</li>
+  <li>可以在同一台机器上并存多个 Odoo 版本，各自用独立的 Python 环境。</li>
+</ul>
+
+<p>整个安装由下面几块组成，我们一块块来：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 330" role="img" aria-label="从源码安装 Odoo 后的目录与组件结构">
+  <rect class="bx-d" x="20" y="20" width="460" height="290" rx="12"/>
+  <text class="ttl" x="40" y="46">~/work20/　你的工作目录</text>
+
+  <rect class="bx-a" x="40" y="62" width="200" height="104" rx="10"/>
+  <text class="ttl on-a" x="56" y="86">odoo/</text>
+  <text class="sm" x="56" y="106">Odoo 源码（git clone）</text>
+  <text class="sm mono" x="56" y="126">odoo-bin</text>
+  <text class="sm mono" x="56" y="144">odoo/addons/　base 等</text>
+  <text class="sm mono" x="56" y="160">addons/　标准应用</text>
+
+  <rect class="bx-b" x="260" y="62" width="200" height="104" rx="10"/>
+  <text class="ttl on-b" x="276" y="86">env20/</text>
+  <text class="sm" x="276" y="106">Python 虚拟环境</text>
+  <text class="sm" x="276" y="126">requirements.txt 里的</text>
+  <text class="sm" x="276" y="144">全部依赖装在这里</text>
+
+  <rect class="bx-g" x="40" y="182" width="200" height="56" rx="10"/>
+  <text class="ttl on-g" x="56" y="206">library/</text>
+  <text class="sm" x="56" y="226">本书示例代码 / 你的模块</text>
+
+  <rect class="bx-p" x="260" y="182" width="200" height="56" rx="10"/>
+  <text class="ttl on-p" x="276" y="206">20-demo.conf</text>
+  <text class="sm" x="276" y="226">配置文件</text>
+
+  <rect class="bx" x="40" y="254" width="420" height="40" rx="8"/>
+  <text class="sm" x="250" y="279" text-anchor="middle">~/.local/share/Odoo/filestore/　各数据库的附件目录（自动创建）</text>
+
+  <rect class="bx-b" x="540" y="90" width="200" height="110" rx="10"/>
+  <text class="ttl on-b" x="640" y="118" text-anchor="middle">PostgreSQL 16</text>
+  <text class="sm" x="640" y="140" text-anchor="middle">系统服务，端口 5432</text>
+  <text class="sm" x="640" y="160" text-anchor="middle">20-demo · 20-library …</text>
+  <text class="sm" x="640" y="180" text-anchor="middle">每个 Odoo 数据库一个库</text>
+
+  <path class="ln-b" d="M482 150 H536" marker-end="url(#ar-b)"/>
+  <text class="sm" x="509" y="140" text-anchor="middle">连接</text>
+</svg>
+<figcaption>图 2-1　本章结束时，你的机器上会有这些东西</figcaption>
+</figure>
+
+<h3>第一步：安装 PostgreSQL</h3>
+
+<div class="code" data-lang="bash">
+<pre>
+sudo apt update
+sudo apt install postgresql                     # 安装 PostgreSQL
+sudo -u postgres createuser -s $USER            # 为当前系统用户创建数据库超级用户
+</pre>
+</div>
+
+<p>
+  最后一行很关键：它以 <code>postgres</code> 管理员身份，创建一个和你的 Linux 用户<strong>同名</strong>的数据库用户，并赋予超级用户权限。
+  这样以你的身份运行的 Odoo 就能连上数据库，并且能创建、删除数据库。PostgreSQL 默认用「同名本地用户免密」的方式认证，所以不需要设密码。
+</p>
+
+<div class="box tip">
+  <div class="t">&#128161; WSL 用户注意</div>
+  <p>WSL 里的系统服务默认不会自动启动。每次打开 Ubuntu 后，先执行 <code>sudo service postgresql start</code>。</p>
+</div>
+
+<div class="box warn">
+  <div class="t">&#9888; 开发可以，生产不行</div>
+  <p>开发环境里让 Odoo 用超级用户连数据库很方便；生产环境中，Odoo 应该用一个<strong>非超级用户</strong>的数据库账号运行。第 15 章会讲。</p>
+</div>
+
+<h3>第二步：安装系统依赖</h3>
+
+<div class="code" data-lang="bash">
+<pre>
+sudo apt install git python3-dev python3-pip python3-venv \
+    build-essential libpq-dev libxml2-dev libxslt1-dev \
+    libldap2-dev libsasl2-dev libssl-dev libjpeg-dev zlib1g-dev
+</pre>
+</div>
+
+<p>
+  有些 Python 库（比如连接 PostgreSQL 的 <code>psycopg2</code>、处理 XML 的 <code>lxml</code>、处理图片的 <code>Pillow</code>）在安装时需要编译 C 代码，
+  所以要先装这些「-dev」开发包。如果后面 <code>pip install</code> 报编译错误，十有八九是这里少了什么。
+</p>
+
+<div class="box note">
+  <div class="t">&#9432; 另一条路：直接用系统包</div>
+  <p>
+    Odoo 源码里附带了一个脚本 <code>setup/debinstall.sh</code>，它会读取 <code>debian/control</code> 里的依赖列表，用 <code>apt</code> 一次性装好所有
+    <code>python3-*</code> 系统包。这样连虚拟环境都不需要。不过本教程仍然推荐虚拟环境，因为它能让不同项目互不干扰。
+  </p>
+</div>
+
+<h3>第三步：获取 Odoo 源码</h3>
+
+<div class="code" data-lang="bash">
+<pre>
+mkdir ~/work20 &amp;&amp; cd ~/work20
+git clone https://github.com/odoo/odoo.git -b 20.0 --depth=1
+</pre>
+</div>
+
+<ul>
+  <li><code>-b 20.0</code>：明确只取 20.0 这个分支。不要用 <code>master</code>，那是还在开发中的下一个版本。</li>
+  <li><code>--depth=1</code>：只下载最新一次提交，不要几十年的完整历史，体积能小一个数量级。</li>
+</ul>
+
+<div class="box tip">
+  <div class="t">&#128161; 以后想要历史记录？</div>
+  <p>
+    <code>git fetch --unshallow</code> 补全全部历史；<code>git fetch --depth=100</code> 只补最近 100 次提交；
+    <code>git fetch --shallow-since=2026-01-01</code> 补某个日期之后的。
+  </p>
+</div>
+
+<h3>第四步：创建虚拟环境并安装依赖</h3>
+
+<p>
+  <strong>虚拟环境</strong>是一个独立的 Python 安装目录。在它里面装的库不会影响系统，也不会被系统更新影响；
+  你还可以为不同的 Odoo 版本建不同的虚拟环境。
+</p>
+
+<div class="code" data-lang="bash">
+<pre>
+python3 -m venv ~/work20/env20          # 创建虚拟环境
+source ~/work20/env20/bin/activate      # 激活它
+(env20) $ which python                  # 确认现在用的是虚拟环境里的 python
+/home/you/work20/env20/bin/python
+
+(env20) $ pip install -U pip
+(env20) $ pip install -r ~/work20/odoo/requirements.txt   # 安装 Odoo 的全部依赖
+(env20) $ pip install -e ~/work20/odoo                    # 把 Odoo 本身装成「可编辑」模式
+</pre>
+</div>
+
+<p>
+  激活后，命令提示符前面会出现 <code>(env20)</code>，这时 <code>python</code> 和 <code>pip</code> 都指向虚拟环境里的版本。
+  要退出，执行 <code>deactivate</code>。<strong>以后每次开新终端，都要先激活。</strong>
+</p>
+
+<p>
+  <code>pip install -e</code> 的 <code>-e</code> 表示「可编辑安装」：pip 不会把源码拷贝到别处，而是直接引用 <code>~/work20/odoo</code> 目录。
+  这样你 <code>git pull</code> 更新源码后，不需要重新安装就生效。安装后会多出一个 <code>odoo</code> 命令。
+</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 210" role="img" aria-label="启动 Odoo 的三种等价方式">
+  <rect class="bx-a" x="20" y="20" width="230" height="74" rx="10"/>
+  <text class="mono on-a" x="135" y="50" text-anchor="middle">odoo</text>
+  <text class="sm" x="135" y="74" text-anchor="middle">激活虚拟环境后的快捷命令</text>
+
+  <rect class="bx" x="265" y="20" width="230" height="74" rx="10"/>
+  <text class="mono" x="380" y="50" text-anchor="middle">./odoo/odoo-bin</text>
+  <text class="sm" x="380" y="74" text-anchor="middle">直接运行源码里的启动脚本</text>
+
+  <rect class="bx" x="510" y="20" width="230" height="74" rx="10"/>
+  <text class="mono" x="625" y="44" text-anchor="middle">env20/bin/python</text>
+  <text class="mono" x="625" y="62" text-anchor="middle">odoo/odoo-bin</text>
+  <text class="sm" x="625" y="82" text-anchor="middle">不激活也行：指定解释器</text>
+
+  <path class="ln" d="M135 96 V130 H380"/>
+  <path class="ln" d="M380 96 V160" marker-end="url(#ar)"/>
+  <path class="ln" d="M625 96 V130 H380"/>
+  <rect class="bx-g" x="230" y="164" width="300" height="36" rx="8"/>
+  <text class="lbl on-g" x="380" y="187" text-anchor="middle">同一个 Odoo 服务器，监听 8069 端口</text>
+</svg>
+<figcaption>图 2-2　三种写法效果一样。本教程统一用最短的 <code>odoo</code>，你在官方文档里更常见到的是 <code>odoo-bin</code></figcaption>
+</figure>
+
+<div class="code" data-lang="bash">
+<pre>
+(env20) $ odoo --version
+Odoo Server 20.0
+</pre>
+</div>
+
+<p>
+  去掉 <code>--version</code> 直接运行 <code>odoo</code>，服务器就会启动并一直等待请求。浏览器访问 <code>http://localhost:8069</code>。
+  按 <kbd>Ctrl</kbd>+<kbd>C</kbd> 停止服务器。
+</p>
+
+<h2 id="database">创建和管理数据库</h2>
+
+<h3>在网页上创建</h3>
+
+<p>第一次访问 <code>http://localhost:8069</code> 时还没有任何数据库，Odoo 会显示一个创建数据库的表单：</p>
+
+<div class="tw"><table>
+  <tr><th>字段</th><th>含义</th></tr>
+  <tr><td>Master Password</td><td>数据库管理器的主密码，存在服务器配置文件里。新版本会自动生成一个。</td></tr>
+  <tr><td>Database Name</td><td>数据库名。同一个 PostgreSQL 里可以放很多个 Odoo 数据库，靠名字区分。</td></tr>
+  <tr><td>Email</td><td>管理员的登录名，不一定要是真实邮箱，比如 <code>admin</code>。</td></tr>
+  <tr><td>Password</td><td>管理员的登录密码。</td></tr>
+  <tr><td>Language / Country</td><td>默认语言和公司所在国家（会影响会计等本地化功能）。</td></tr>
+  <tr><td>Demo data</td><td>是否装入演示数据。开发和测试时通常勾上，有现成的客户、产品等数据可以玩。</td></tr>
+</table></div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 200" role="img" aria-label="主密码和管理员密码的区别">
+  <rect class="bx-r" x="20" y="20" width="350" height="160" rx="12"/>
+  <text class="ttl on-r" x="195" y="48" text-anchor="middle">主密码（Master Password）</text>
+  <text class="sm" x="40" y="76">· 属于整个 Odoo 服务器</text>
+  <text class="sm" x="40" y="98">· 保存在配置文件 admin_passwd</text>
+  <text class="sm" x="40" y="120">· 用于数据库管理器：</text>
+  <text class="sm" x="40" y="142">　创建 / 备份 / 恢复 / 复制 / 删除数据库</text>
+  <text class="sm" x="40" y="164">· 泄露 = 整个服务器的数据可被拖走</text>
+
+  <rect class="bx-b" x="390" y="20" width="350" height="160" rx="12"/>
+  <text class="ttl on-b" x="565" y="48" text-anchor="middle">管理员密码（admin 用户）</text>
+  <text class="sm" x="410" y="76">· 属于某一个数据库里的一个用户</text>
+  <text class="sm" x="410" y="98">· 保存在该数据库的用户表里</text>
+  <text class="sm" x="410" y="120">· 用于登录这个数据库：</text>
+  <text class="sm" x="410" y="142">　配置应用、管理用户</text>
+  <text class="sm" x="410" y="164">· 每个数据库各有各的</text>
+</svg>
+<figcaption>图 2-3　两个密码是完全不同的东西，别搞混</figcaption>
+</figure>
+
+<p>
+  创建完成后会跳到登录页。登录页底部的 <strong>Manage databases</strong>，或者直接访问 <code>/web/database/manager</code>，就是<strong>数据库管理器</strong>：
+  可以创建、备份、复制、删除数据库。
+</p>
+
+<div class="box warn">
+  <div class="t">&#9888; 生产环境要保护好数据库管理器</div>
+  <p>
+    数据库管理器能做的事非常危险。生产环境中务必在配置文件里设置强主密码（<code>admin_passwd = ...</code>），
+    更好的做法是直接关掉它（<code>list_db = False</code>）。
+  </p>
+</div>
+
+<h3>在命令行创建</h3>
+
+<p>开发时我们会经常建库、删库，命令行更快。先 <kbd>Ctrl</kbd>+<kbd>C</kbd> 停掉服务器，然后：</p>
+
+<div class="code" data-lang="bash">
+<pre>
+(env20) $ odoo -d 20-demo --with-demo --stop-after-init
+</pre>
+</div>
+
+<ul>
+  <li><code>-d 20-demo</code>：使用名为 <code>20-demo</code> 的数据库，不存在就自动创建并初始化。</li>
+  <li><code>--with-demo</code>：装入演示数据。</li>
+  <li><code>--stop-after-init</code>：初始化完就退出，回到命令行。去掉它，服务器会在初始化后继续运行。</li>
+</ul>
+
+<div class="box ver">
+  <div class="t">&#8682; 演示数据默认不装了</div>
+  <p>
+    Odoo 15 新建数据库时<strong>默认装演示数据</strong>，书里要用 <code>--without-demo=all</code> 才能不装。
+    从 Odoo 18.3 起反过来了：<strong>默认不装</strong>，需要时加 <code>--with-demo</code>。
+  </p>
+</div>
+
+<p>
+  如果没有用 <code>--stop-after-init</code>，留意日志里一行 <code>INFO ... odoo.modules.loading: Modules loaded.</code>，看到它就说明数据库加载完毕、可以接受请求了。
+  它不一定是最后一行，可能在倒数三四行。启动日志开头还有一行 <code>HTTP service running on 主机名:8069</code>，告诉你该访问哪个地址。
+</p>
+
+<div class="box tip">
+  <div class="t">&#128161; 开发时最常按的组合键</div>
+  <p><kbd>Ctrl</kbd>+<kbd>C</kbd> 停止 → <kbd>↑</kbd> 调出上一条命令 → <kbd>Enter</kbd>。这就是「重启 Odoo」。</p>
+</div>
+
+<h3>Odoo 20 的数据库子命令</h3>
+
+<p>
+  Odoo 20 自带了一个命令行版的数据库管理器 <code>odoo db</code>，所有操作都会<strong>连同 filestore 一起处理</strong>：
+</p>
+
+<div class="code" data-lang="bash">
+<pre>
+odoo db init 20-test --with-demo          # 创建并初始化一个新数据库
+odoo db duplicate 20-demo 20-demo-copy    # 复制（含附件）
+odoo db dump 20-demo                      # 导出为带 filestore 的 zip
+odoo db load backup.zip                   # 从 dump 恢复
+odoo db drop 20-demo-copy                 # 删除（含附件）
+
+odoo module install -d 20-test contacts   # 给某个库安装模块
+</pre>
+</div>
+
+<h3>用 PostgreSQL 工具直接操作</h3>
+
+<p>这些 PostgreSQL 自带的命令也很常用，但要注意它们<strong>只处理数据库，不处理 filestore</strong>：</p>
+
+<div class="code" data-lang="bash">
+<pre>
+createdb MyDB                          # 手动创建一个空库
+createdb --template=MyDB MyDBCopy      # 以 MyDB 为模板复制一个库（MyDB 不能有连接）
+psql -l                                # 列出所有数据库
+dropdb MyDBCopy                        # 删除数据库，不可恢复！
+</pre>
+</div>
+
+<div class="box warn">
+  <div class="t">&#9888; dropdb 没有回收站</div>
+  <p>删掉就是删掉了。对重要的数据库，动手之前先备份。</p>
+</div>
+
+<h2 id="config">服务器选项和配置文件</h2>
+
+<p>Odoo 服务器有上百个选项，<code>odoo --help</code> 可以看全部。下面介绍最常用的几个。</p>
+
+<h3>配置文件</h3>
+
+<p>
+  每次都在命令行敲一长串选项太累了。几乎所有选项都可以写进一个<strong>配置文件</strong>。不指定时，Odoo 默认读取 <code>~/.odoorc</code>。
+  用 <code>--save</code> 可以把当前命令行上的选项保存进去：
+</p>
+
+<div class="code" data-lang="bash">
+<pre>
+# 把选项存进指定的配置文件（不存在就创建）
+(env20) $ odoo -c ~/work20/20-demo.conf -d 20-demo --save --stop
+
+# 以后只要指定配置文件就行
+(env20) $ odoo -c ~/work20/20-demo.conf
+</pre>
+</div>
+
+<p>生成的文件是普通的 INI 格式，一个开发用配置文件大致是这样（只列出关键项）：</p>
+
+<div class="code" data-lang="ini" data-file="~/work20/20-demo.conf">
+<pre>
+[options]
+; 插件路径：Odoo 去哪些目录找模块，逗号分隔
+addons_path = /home/you/work20/library,/home/you/work20/odoo/addons
+; 默认使用的数据库
+db_name = 20-demo
+; 只允许访问名字匹配这个正则的数据库
+dbfilter = ^20-demo$
+; HTTP 端口
+http_port = 8069
+; 数据库管理器的主密码
+admin_passwd = 一个很长的随机字符串
+</pre>
+</div>
+
+<div class="box tip">
+  <div class="t">&#128161; 选项可以缩写</div>
+  <p>只要不产生歧义，长选项可以缩写，比如 <code>--stop-after-init</code> 写成 <code>--stop</code>。</p>
+</div>
+
+<h3>换端口：同时跑多个 Odoo</h3>
+
+<p>默认端口是 8069。用 <code>-p</code>（即 <code>--http-port</code>）可以换一个，这样同一台机器能同时跑多个 Odoo 实例：</p>
+
+<div class="code" data-lang="bash">
+<pre>
+# 终端 1
+(env20) $ odoo -p 8070
+# 终端 2
+(env20) $ odoo -p 8071
+</pre>
+</div>
+
+<p>这两个实例可以用相同或不同的数据库，甚至可以是不同版本的 Odoo —— 只要<strong>不同版本用不同的数据库</strong>。</p>
+
+<h3>限定可访问的数据库</h3>
+
+<p>同一个 Odoo 服务器可以服务多个数据库。有两个选项控制这一点：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 260" role="img" aria-label="数据库选择选项 -d 与 --db-filter 的效果">
+  <rect class="bx-b" x="20" y="90" width="150" height="120" rx="10"/>
+  <text class="ttl on-b" x="95" y="114" text-anchor="middle">PostgreSQL</text>
+  <text class="sm mono" x="40" y="140">20-demo</text>
+  <text class="sm mono" x="40" y="160">20-library</text>
+  <text class="sm mono" x="40" y="180">20-test</text>
+  <text class="sm mono" x="40" y="200">19-old</text>
+
+  <rect class="bx" x="240" y="20" width="230" height="64" rx="10"/>
+  <text class="ttl" x="355" y="44" text-anchor="middle">什么都不设</text>
+  <text class="sm" x="355" y="66" text-anchor="middle">显示数据库选择页，全部可选</text>
+
+  <rect class="bx-a" x="240" y="100" width="230" height="64" rx="10"/>
+  <text class="ttl on-a" x="355" y="124" text-anchor="middle">--db-filter=^20-</text>
+  <text class="sm" x="355" y="146" text-anchor="middle">只列出名字匹配正则的库</text>
+
+  <rect class="bx-g" x="240" y="180" width="230" height="64" rx="10"/>
+  <text class="ttl on-g" x="355" y="204" text-anchor="middle">-d 20-demo</text>
+  <text class="sm" x="355" y="226" text-anchor="middle">只用这一个库，其他一律拒绝</text>
+
+  <path class="ln" d="M172 150 L236 52"/>
+  <path class="ln" d="M172 150 L236 132"/>
+  <path class="ln" d="M172 150 L236 212"/>
+
+  <rect class="bx-d" x="520" y="20" width="220" height="64" rx="8"/>
+  <text class="sm mono" x="536" y="46">20-demo 20-library</text>
+  <text class="sm mono" x="536" y="66">20-test 19-old</text>
+  <rect class="bx-d" x="520" y="100" width="220" height="64" rx="8"/>
+  <text class="sm mono" x="536" y="126">20-demo 20-library</text>
+  <text class="sm mono" x="536" y="146">20-test</text>
+  <rect class="bx-d" x="520" y="180" width="220" height="64" rx="8"/>
+  <text class="sm mono" x="536" y="216">20-demo</text>
+  <path class="ln" d="M472 52 H516" marker-end="url(#ar)"/>
+  <path class="ln-a" d="M472 132 H516" marker-end="url(#ar-a)"/>
+  <path class="ln-g" d="M472 212 H516" marker-end="url(#ar-g)"/>
+</svg>
+<figcaption>图 2-4　<code>-d</code> 锁定一个库；<code>--db-filter</code> 用正则筛选一批库</figcaption>
+</figure>
+
+<p><code>--db-filter</code> 的值是正则表达式，几个常用写法：</p>
+
+<div class="tw"><table>
+  <tr><th>表达式</th><th>含义</th><th>能匹配</th></tr>
+  <tr><td><code>^20</code></td><td>以 20 开头</td><td>20-demo、20-library</td></tr>
+  <tr><td><code>demo$</code></td><td>以 demo 结尾</td><td>20-demo、19-demo</td></tr>
+  <tr><td><code>^20-demo$</code></td><td>完全等于</td><td>只有 20-demo</td></tr>
+  <tr><td><code>^20-demo.$</code></td><td><code>.</code> 是任意一个字符</td><td>20-demo1、20-demo2</td></tr>
+  <tr><td><code>^20.*demo$</code></td><td><code>.*</code> 是任意多个字符</td><td>20-demo、20-my-demo</td></tr>
+</table></div>
+
+<div class="box note">
+  <div class="t">&#9432; 浏览器里还开着旧会话？</div>
+  <p>如果你用 <code>-d</code> 重启服务器换了一个库，浏览器里之前登录另一个库的页面会报错 —— 那个库现在被拒绝访问了。重新打开 <code>localhost:8069</code> 即可。</p>
+</div>
+
+<h3>读懂日志</h3>
+
+<p>Odoo 默认把日志打印到终端。每一行日志都有固定的结构：</p>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 170" role="img" aria-label="Odoo 日志行各列的含义">
+  <text class="mono" x="20" y="40" style="font-size:13px">2026-10-22 08:06:57,786 <tspan class="on-p">18592</tspan> <tspan class="on-g">INFO</tspan> <tspan class="on-a">20-demo</tspan> <tspan class="on-b">odoo.modules.loading</tspan>: Modules loaded.</text>
+  <path class="ln" d="M100 50 V84"/>
+  <path class="ln-p" d="M218 50 V84"/>
+  <path class="ln-g" d="M263 50 V114"/>
+  <path class="ln-a" d="M318 50 V84"/>
+  <path class="ln-b" d="M460 50 V114"/>
+  <path class="ln" d="M640 50 V84"/>
+  <text class="sm" x="40" y="100">时间（UTC，</text>
+  <text class="sm" x="40" y="116">不是本地时间）</text>
+  <text class="sm on-p" x="190" y="100">进程号</text>
+  <text class="sm on-g" x="232" y="132">级别</text>
+  <text class="sm on-a" x="290" y="100">数据库</text>
+  <text class="sm on-a" x="290" y="116">（无则为 ?）</text>
+  <text class="sm on-b" x="400" y="132">发出日志的 Python 模块</text>
+  <text class="sm" x="610" y="100">日志内容</text>
+</svg>
+<figcaption>图 2-5　一行日志的六个部分</figcaption>
+</figure>
+
+<p>HTTP 请求的日志更长一些，末尾带着性能数据：</p>
+
+<div class="code" data-lang="text">
+<pre>
+... INFO 20-demo odoo.http.server: 127.0.0.1 - - [22/Oct/2026 08:06:57]
+    "POST /web/dataset/call_kw/res.partner/web_read HTTP/1.1" 200 - 21 0.035 0.092 ro
+</pre>
+</div>
+
+<p>最后几个数字很有用：</p>
+<ul>
+  <li><code>21</code>：这个请求执行了多少条 SQL 查询</li>
+  <li><code>0.035</code>：SQL 查询总耗时（秒）</li>
+  <li><code>0.092</code>：除 SQL 外的耗时，基本就是 Python 代码的执行时间</li>
+</ul>
+<p>某个页面慢？先看这几个数字，就知道是数据库慢还是代码慢。</p>
+
+<div class="box ver">
+  <div class="t">&#8682; 新的 HTTP 服务器</div>
+  <p>
+    书里的请求日志来自 <code>werkzeug</code> 模块。Odoo 19.4 起换成了基于 <code>h11</code> 的新 HTTP 服务器，
+    请求日志改由 <code>odoo.http.server</code> 输出，格式基本相同，末尾多了一列表示数据库游标模式（<code>ro</code> 只读 / <code>rw</code> 读写）。
+  </p>
+</div>
+
+<p>控制日志的选项：</p>
+
+<div class="tw"><table>
+  <tr><th>选项</th><th>作用</th></tr>
+  <tr><td><code>--log-level=debug</code></td><td>整体日志级别。从安静到啰嗦：<code>critical</code>、<code>error</code>、<code>warn</code>、<code>info</code>（默认）、<code>debug</code>、<code>debug_rpc</code>、<code>debug_sql</code>、<code>debug_rpc_answer</code></td></tr>
+  <tr><td><code>--log-handler=模块:级别</code></td><td>只调整某个模块的级别，可以写多次。例如 <code>--log-handler=odoo.modules:DEBUG</code></td></tr>
+  <tr><td><code>--log-sql</code></td><td>打印执行的 SQL（等于 <code>odoo.sql_db:DEBUG</code>）</td></tr>
+  <tr><td><code>--log-web</code></td><td>调试 HTTP 请求处理（等于 <code>odoo.http:DEBUG</code>）</td></tr>
+  <tr><td><code>--logfile=路径</code></td><td>写到文件而不是终端。Linux 上惯例放在 <code>/var/log/odoo/</code></td></tr>
+</table></div>
+
+<p>试试 <code>odoo --log-level=debug_sql</code>，然后在网页上随便点几下，看看终端里刷出的 SQL —— 这能让你直观感受到 ORM 在背后做了什么。</p>
+
+<h2 id="addons">找到并安装更多模块</h2>
+
+<p>Odoo 生态里有海量现成模块，主要来源：</p>
+<ul>
+  <li><a href="https://apps.odoo.com">apps.odoo.com</a>：官方应用商店，有免费也有付费。</li>
+  <li><a href="https://github.com/OCA">github.com/OCA</a>：Odoo 社区协会维护的几百个仓库，质量有保障，全部开源。</li>
+</ul>
+
+<p>
+  装模块最「直觉」的做法是把它拷进 <code>~/work20/odoo/addons/</code>，和官方模块放一起。<strong>别这样做。</strong>
+  那个目录是一个 Git 仓库，我们希望它和上游保持同步；混进别人的模块会让更新变得一团糟。
+  正确做法是把模块放在<strong>独立的目录</strong>里，然后告诉 Odoo 也去那里找。
+</p>
+
+<h3>插件路径（addons_path）</h3>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 250" role="img" aria-label="Odoo 按 addons_path 列出的目录顺序查找模块">
+  <rect class="bx-a" x="20" y="90" width="170" height="70" rx="10"/>
+  <text class="ttl on-a" x="105" y="118" text-anchor="middle">Odoo 服务器</text>
+  <text class="sm" x="105" y="140" text-anchor="middle">需要模块 library_app</text>
+
+  <rect class="bx-g" x="270" y="20" width="300" height="56" rx="10"/>
+  <text class="ttl on-g" x="290" y="44">① ~/work20/library</text>
+  <text class="sm" x="290" y="64">你自己的 / 第三方模块　← 在这里找到！</text>
+
+  <rect class="bx" x="270" y="96" width="300" height="56" rx="10"/>
+  <text class="ttl" x="290" y="120">② ~/work20/odoo/addons</text>
+  <text class="sm" x="290" y="140">官方标准应用（sale、crm、website…）</text>
+
+  <rect class="bx" x="270" y="172" width="300" height="56" rx="10"/>
+  <text class="ttl" x="290" y="196">③ ~/work20/odoo/odoo/addons</text>
+  <text class="sm" x="290" y="216">核心模块 base（总是自动包含）</text>
+
+  <path class="ln-g" d="M192 112 L266 52" marker-end="url(#ar-g)"/>
+  <path class="ln-d" d="M192 125 L266 124"/>
+  <path class="ln-d" d="M192 138 L266 198"/>
+  <text class="lbl" x="600" y="110">按顺序查找，</text>
+  <text class="lbl" x="600" y="130">先找到的为准</text>
+</svg>
+<figcaption>图 2-6　<code>addons_path</code> 是一个目录列表，Odoo 会在这些目录里寻找模块</figcaption>
+</figure>
+
+<p>拿本书的示例代码试一下：</p>
+
+<div class="code" data-lang="bash">
+<pre>
+cd ~/work20
+git clone https://github.com/PacktPublishing/Odoo-15-Development-Essentials.git library
+
+source env20/bin/activate
+(env20) $ odoo -d 20-library --addons-path="./library,./odoo/addons"
+</pre>
+</div>
+
+<p>
+  启动日志的前几行会有一行 <code>INFO ? odoo: addons paths: [...]</code>，确认里面包含了 <code>library</code> 目录。
+  Odoo 自己的 <code>odoo/odoo/addons</code>（<code>base</code> 模块所在地）总是会被自动加入，不需要写。
+</p>
+
+<div class="box warn">
+  <div class="t">&#9888; 书中原版代码不能直接装进 Odoo 20</div>
+  <p>
+    这个仓库的代码是为 Odoo 15 写的，有 <code>&lt;tree&gt;</code>、<code>attrs</code>、<code>ir.model.access.csv</code> 等旧写法，在 Odoo 20 上安装会报错。
+    从第 3 章开始，我们会一边讲一边把每个模块改写成 Odoo 20 的版本。上面这一步只是演示 <code>addons_path</code> 怎么用。
+  </p>
+</div>
+
+<div class="box tip">
+  <div class="t">&#128161; 一个仓库还是一个模块？</div>
+  <p>
+    <code>addons_path</code> 里的每个目录，应该是「装着若干个模块的目录」，而不是模块本身。
+    比如 OCA 的仓库 <code>OCA/web</code> 克隆下来是一个目录，里面有几十个模块，把这个目录加进路径即可。
+  </p>
+</div>
+
+<h2 id="dev">开发选项 <code>--dev</code></h2>
+
+<p>Odoo 有一个服务器端的「开发模式」，用 <code>--dev=all</code> 打开（和第 1 章浏览器里的开发者模式是两回事）：</p>
+
+<div class="code" data-lang="bash">
+<pre>
+(env20) $ pip install watchdog       # 自动重载需要它来监视文件变化
+(env20) $ odoo -d 20-library --dev=all
+</pre>
+</div>
+
+<p><code>all</code> 等于同时打开下面四项，你也可以用逗号只开其中几项：</p>
+
+<div class="tw"><table>
+  <tr><th>功能</th><th>效果</th></tr>
+  <tr><td><code>reload</code></td><td>保存 Python 文件后，服务器自动重启。不用每次手动 Ctrl+C。</td></tr>
+  <tr><td><code>xml</code></td><td>视图直接从源码的 XML 文件读取，而不是从数据库读。改了视图刷新浏览器就生效，不用升级模块。</td></tr>
+  <tr><td><code>qweb</code></td><td>QWeb 模板出错时，在日志里打印编译后的模板，方便定位。</td></tr>
+  <tr><td><code>access</code></td><td>出现访问权限错误时，在日志里打印完整的调用栈。</td></tr>
+</table></div>
+
+<figure>
+<svg class="dgm" viewBox="0 0 760 230" role="img" aria-label="打开 --dev=all 前后修改代码的流程对比">
+  <text class="ttl" x="20" y="28">不开 --dev</text>
+  <rect class="bx" x="20" y="40" width="130" height="44" rx="8"/><text class="lbl" x="85" y="67" text-anchor="middle">改 Python</text>
+  <rect class="bx-r" x="180" y="40" width="150" height="44" rx="8"/><text class="lbl on-r" x="255" y="67" text-anchor="middle">Ctrl+C 重启</text>
+  <rect class="bx-r" x="360" y="40" width="190" height="44" rx="8"/><text class="lbl on-r" x="455" y="67" text-anchor="middle">-u 模块 升级（改了视图）</text>
+  <rect class="bx" x="580" y="40" width="160" height="44" rx="8"/><text class="lbl" x="660" y="67" text-anchor="middle">刷新浏览器</text>
+  <path class="ln" d="M152 62 H176" marker-end="url(#ar)"/>
+  <path class="ln" d="M332 62 H356" marker-end="url(#ar)"/>
+  <path class="ln" d="M552 62 H576" marker-end="url(#ar)"/>
+
+  <text class="ttl on-g" x="20" y="128">打开 --dev=all</text>
+  <rect class="bx" x="20" y="140" width="130" height="44" rx="8"/><text class="lbl" x="85" y="167" text-anchor="middle">改代码 / 视图</text>
+  <rect class="bx-g" x="180" y="140" width="370" height="44" rx="8"/><text class="lbl on-g" x="365" y="167" text-anchor="middle">自动重载 Python；视图直接读文件</text>
+  <rect class="bx" x="580" y="140" width="160" height="44" rx="8"/><text class="lbl" x="660" y="167" text-anchor="middle">刷新浏览器</text>
+  <path class="ln" d="M152 162 H176" marker-end="url(#ar)"/>
+  <path class="ln" d="M552 162 H576" marker-end="url(#ar)"/>
+  <text class="sm" x="20" y="214">注意：新增模型、新增字段、改数据文件（菜单、权限等）仍然需要升级模块，--dev 只省掉了最常见的两类重复劳动</text>
+</svg>
+<figcaption>图 2-7　<code>--dev=all</code> 让「改一行 → 看效果」的循环短很多</figcaption>
+</figure>
+
+<div class="box ver">
+  <div class="t">&#8682; 调试器选项的变化</div>
+  <p>
+    Odoo 15 的 <code>--dev=all</code> 还会在出异常时自动进入 <code>pdb</code> 调试器，并支持 <code>--dev=ipdb</code> 等写法。
+    Odoo 20 的 <code>--dev</code> 只保留了上表的功能（另有一个模拟只读副本的 <code>replica</code>）。需要断点调试时，直接在代码里写
+    <code>breakpoint()</code> 即可，第 8 章详细讲调试。
+  </p>
+</div>
+
+<h2 id="cheatsheet">命令速查</h2>
+
+<div class="tw"><table>
+  <tr><th>选项</th><th>作用</th></tr>
+  <tr><td><code>-c, --config=文件</code></td><td>使用指定的配置文件</td></tr>
+  <tr><td><code>--save</code></td><td>把当前选项保存进配置文件</td></tr>
+  <tr><td><code>--stop, --stop-after-init</code></td><td>完成初始化（安装 / 升级模块）后退出</td></tr>
+  <tr><td><code>-d, --database=库名</code></td><td>使用这个数据库</td></tr>
+  <tr><td><code>--db-filter=正则</code></td><td>只开放名字匹配的数据库</td></tr>
+  <tr><td><code>-p, --http-port=8069</code></td><td>HTTP 端口</td></tr>
+  <tr><td><code>-i, --init=模块,...</code></td><td>安装模块</td></tr>
+  <tr><td><code>-u, --update=模块,...</code></td><td>升级模块（改了代码之后最常用）</td></tr>
+  <tr><td><code>--with-demo</code></td><td>新建数据库时装入演示数据</td></tr>
+  <tr><td><code>--addons-path=目录,...</code></td><td>插件路径</td></tr>
+  <tr><td><code>--log-level=级别</code></td><td>日志级别</td></tr>
+  <tr><td><code>--log-handler=模块:级别</code></td><td>单独调整某个模块的日志级别</td></tr>
+  <tr><td><code>--logfile=路径</code></td><td>日志写入文件</td></tr>
+  <tr><td><code>--dev=all</code></td><td>开发选项：自动重载、视图读文件等</td></tr>
+  <tr><td><code>odoo db init|dump|load|duplicate|drop</code></td><td>数据库管理子命令（含 filestore）</td></tr>
+  <tr><td><code>odoo module install|upgrade|uninstall</code></td><td>模块管理子命令</td></tr>
+  <tr><td><code>odoo shell -d 库名</code></td><td>进入带 Odoo 环境的 Python 交互命令行（第 7 章）</td></tr>
+  <tr><td><code>odoo scaffold 名字 目录</code></td><td>生成一个模块骨架</td></tr>
+</table></div>
+
+<h2 id="summary">小结</h2>
+
+<ul>
+  <li>Odoo 20 需要 Python 3.12+ 和 PostgreSQL 16+，推荐 Ubuntu 24.04；Windows 上用 WSL。</li>
+  <li>从源码安装 = <code>git clone</code> 源码 + 虚拟环境 + <code>pip install -r requirements.txt</code> + <code>pip install -e</code>。</li>
+  <li>主密码管服务器上的数据库管理器，管理员密码管某个数据库的登录，两者无关。</li>
+  <li><code>-d 库名 --with-demo --stop</code> 建库；<code>odoo db ...</code> 子命令连 filestore 一起管理。</li>
+  <li>常用选项写进配置文件，用 <code>-c</code> 指定；<code>-p</code> 换端口；<code>--db-filter</code> 筛选数据库。</li>
+  <li>自己的模块和第三方模块放在独立目录，通过 <code>--addons-path</code> 告诉 Odoo。</li>
+  <li>开发时用 <code>--dev=all</code>，省掉大部分手动重启。</li>
+</ul>
+
+<div class="exercise">
+  <h3>动手练习</h3>
+  <ol>
+    <li>按本章步骤装好 Odoo 20，创建一个带演示数据的 <code>20-demo</code> 库，用 admin / admin 登录。</li>
+    <li>把常用选项（插件路径、数据库、db-filter）存进 <code>~/work20/20-demo.conf</code>，以后只用 <code>odoo -c</code> 启动。</li>
+    <li>在两个终端分别用 8070 和 8071 端口启动两个实例，分别连接两个不同的数据库。</li>
+    <li>用 <code>--log-level=debug_sql</code> 启动，打开联系人列表，数一数终端里出现了多少条 SQL。再对照请求日志末尾的查询数验证一下。</li>
+    <li>用 <code>odoo db duplicate</code> 复制一个库，再用 <code>psql -l</code> 确认它存在，最后用 <code>odoo db drop</code> 删除它。</li>
+  </ol>
+</div>
+<div id="pager"></div>
+</main>
+</div>
+<script src="assets/site.js"></script>
+</body>
+</html>
